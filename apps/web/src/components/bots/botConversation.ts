@@ -1,15 +1,32 @@
 import {
   ThreadId,
   type BotSummary,
+  type ChatAttachmentId,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 
 export type BotChatItem =
-  | { readonly kind: "you"; readonly id: string; readonly at: number; readonly text: string }
+  | {
+      readonly kind: "you";
+      readonly id: string;
+      readonly at: number;
+      readonly text: string;
+      readonly imageIds: ReadonlyArray<ChatAttachmentId>;
+    }
   | { readonly kind: "bot"; readonly id: string; readonly at: number; readonly text: string }
+  | {
+      readonly kind: "wake";
+      readonly id: string;
+      readonly at: number;
+      readonly senderThreadId: ThreadId | null;
+      readonly scheduled: boolean;
+      readonly text: string;
+      readonly reply: string | null;
+    }
   | {
       readonly kind: "worker";
       readonly id: string;
@@ -42,6 +59,7 @@ type ChatMessage = Pick<
   | "runId"
   | "streaming"
   | "text"
+  | "attachments"
   | "createdAt"
 >;
 
@@ -54,28 +72,35 @@ export function buildBotChat(input: {
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
 }): BotChatItem[] {
-  const ownerMessages = input.messages.filter(
+  const incoming = input.messages.filter((message) => message.role === "user");
+  const ownerMessages = incoming.filter(
     (message) =>
-      message.role === "user" &&
       message.createdBy === "user" &&
       message.senderThreadId === undefined &&
       message.scheduledTaskId === undefined,
   );
   const ownerRunIds = new Set(ownerMessages.flatMap((message) => message.runId ?? []));
-  const replies = input.messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      !message.streaming &&
-      message.runId !== null &&
-      ownerRunIds.has(message.runId),
+  const settledReplies = input.messages.filter(
+    (message) => message.role === "assistant" && !message.streaming && message.runId !== null,
   );
+  const replies = settledReplies.filter((message) => ownerRunIds.has(message.runId!));
+  const wakesByRun = new Map<string, ChatMessage[]>();
+  for (const message of incoming) {
+    if (message.runId === null || ownerRunIds.has(message.runId)) continue;
+    const wakes = wakesByRun.get(message.runId);
+    if (wakes) wakes.push(message);
+    else wakesByRun.set(message.runId, [message]);
+  }
 
   const items: BotChatItem[] = [
     ...ownerMessages.map((message) => ({
       kind: "you" as const,
       id: `message:${message.id}`,
       at: DateTime.toEpochMillis(message.createdAt),
-      text: message.text,
+      text: withoutInlineImages(message.text),
+      imageIds: message.attachments.flatMap((attachment) =>
+        attachment.type === "image" ? [attachment.id] : [],
+      ),
     })),
     ...replies.map((message) => ({
       kind: "bot" as const,
@@ -83,11 +108,24 @@ export function buildBotChat(input: {
       at: DateTime.toEpochMillis(message.createdAt),
       text: message.text,
     })),
+    ...Array.from(wakesByRun, ([runId, wakes]) => {
+      const first = wakes[0]!;
+      return {
+        kind: "wake" as const,
+        id: `wake:${runId}`,
+        at: DateTime.toEpochMillis(first.createdAt),
+        senderThreadId: first.senderThreadId ?? null,
+        scheduled: first.scheduledTaskId !== undefined,
+        text: wakes.map((wake) => wake.text).join("\n\n"),
+        reply: settledReplies.findLast((message) => message.runId === runId)?.text ?? null,
+      };
+    }),
     ...input.bot.slackDms.map((dm, index) => ({
       kind: "you" as const,
       id: `slack-dm:${index}:${dm.at}`,
       at: Date.parse(dm.at),
       text: dm.text,
+      imageIds: [],
     })),
     ...input.turnItems.flatMap((item) => {
       if (item.type !== "command_execution" || item.status !== "completed") return [];
@@ -113,6 +151,12 @@ export function buildBotChat(input: {
     })),
   ];
   return items.filter((item) => Number.isFinite(item.at)).toSorted((a, b) => a.at - b.at);
+}
+
+function withoutInlineImages(text: string): string {
+  return replaceComposerContextReferences(text, (reference) =>
+    reference.image ? "" : reference.label,
+  ).trim();
 }
 
 export function slackMarkupToMarkdown(text: string): string {

@@ -3,23 +3,34 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  BotSummary,
-  EnvironmentId,
-  ProviderInteractionMode,
-  RuntimeMode,
-  ThreadId,
+import {
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type BotSummary,
+  type EnvironmentId,
+  type ProviderInteractionMode,
+  type RuntimeMode,
+  type ThreadId,
+  type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import { ArrowUpIcon, BotIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useMemo, useState, type MouseEvent } from "react";
+import { ArrowUpIcon, BotIcon, XIcon } from "lucide-react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+  type ClipboardEvent,
+  type MouseEvent,
+} from "react";
 
-import { cn, newMessageId } from "../../lib/utils";
+import { useAssetUrls } from "../../assets/assetUrls";
+import { newMessageId, randomUUID } from "../../lib/utils";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
+import { readFileAsDataUrl } from "../ChatView.logic";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -126,24 +137,88 @@ function ChatRow(props: {
       />
     );
   }
-  const mine = item.kind === "you";
+  if (item.kind === "wake") {
+    return <WakeRow item={item} environmentId={props.environmentId} />;
+  }
+  if (item.kind === "you") {
+    return <YourMessage item={item} environmentId={props.environmentId} />;
+  }
   return (
-    <div
-      className={cn(
-        "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm",
-        mine ? "self-end bg-primary text-primary-foreground" : "self-start bg-muted",
-      )}
-    >
-      {mine ? (
-        <p className="whitespace-pre-wrap break-words">{item.text}</p>
-      ) : (
-        <ChatMarkdown
-          cwd={undefined}
-          environmentId={props.environmentId}
-          text={rewriteThreadLinks(item.text, window.location.origin)}
-        />
-      )}
+    <div className="max-w-[85%] self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
+      <BotMarkdown text={item.text} environmentId={props.environmentId} />
     </div>
+  );
+}
+
+function BotMarkdown(props: { readonly text: string; readonly environmentId: EnvironmentId }) {
+  return (
+    <ChatMarkdown
+      cwd={undefined}
+      environmentId={props.environmentId}
+      text={rewriteThreadLinks(props.text, window.location.origin)}
+    />
+  );
+}
+
+function YourMessage(props: {
+  readonly item: Extract<BotChatItem, { readonly kind: "you" }>;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { item } = props;
+  const resources = useMemo(
+    () => item.imageIds.map((attachmentId) => ({ _tag: "attachment" as const, attachmentId })),
+    [item.imageIds],
+  );
+  const imageUrls = useAssetUrls(props.environmentId, resources);
+  return (
+    <div className="flex max-w-[85%] flex-col items-end gap-1 self-end">
+      {imageUrls.map((url, index) =>
+        url ? (
+          <a key={item.imageIds[index]} href={url} target="_blank" rel="noreferrer">
+            <img alt="" className="max-h-64 rounded-2xl" src={url} />
+          </a>
+        ) : null,
+      )}
+      {item.text ? (
+        <p className="whitespace-pre-wrap break-words rounded-2xl bg-primary px-3.5 py-2 text-primary-foreground text-sm">
+          {item.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function WakeRow(props: {
+  readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { item } = props;
+  const sender = useThreadShell(
+    item.senderThreadId ? scopeThreadRef(props.environmentId, item.senderThreadId) : null,
+  );
+  const from = sender?.title ?? (item.scheduled ? "a scheduled task" : "another thread");
+  const replyPreview =
+    item.reply
+      ?.split("\n")
+      .find((line) => line.trim())
+      ?.replace(/[*`#>]/g, "") ?? "no reply yet";
+  return (
+    <details className="group max-w-[85%] self-start text-muted-foreground text-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full border border-border/70 px-3 py-1.5 hover:bg-accent/60 hover:text-foreground">
+        <span className="shrink-0">From {from}</span>
+        <span className="truncate opacity-70">· {replyPreview}</span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <div className="rounded-2xl border border-border/70 px-3.5 py-2">
+          <BotMarkdown text={item.text} environmentId={props.environmentId} />
+        </div>
+        {item.reply ? (
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-foreground text-sm">
+            <BotMarkdown text={item.reply} environmentId={props.environmentId} />
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -175,19 +250,64 @@ function BotComposer(props: {
   readonly interactionMode: ProviderInteractionMode | null;
 }) {
   const [text, setText] = useState("");
+  const [images, setImages] = useState<
+    ReadonlyArray<{ readonly key: string; readonly upload: UploadChatImageAttachment }>
+  >([]);
   const [sending, setSending] = useState(false);
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const ready = props.runtimeMode !== null && props.interactionMode !== null;
+  const canSend = ready && !sending && (text.trim() !== "" || images.length > 0);
+
+  const pasteImages = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (files.length === 0) return;
+    event.preventDefault();
+    const fitting = files.filter((file) => file.size <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+    if (fitting.length < files.length) {
+      toastManager.add({
+        type: "error",
+        title: "Image too large",
+        description: `Images can be up to ${PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / 1024 / 1024} MiB each.`,
+      });
+    }
+    void Promise.all(
+      fitting.map(async (file) => ({
+        key: randomUUID(),
+        upload: {
+          type: "image" as const,
+          name: file.name || "image.png",
+          mimeType: file.type,
+          sizeBytes: file.size,
+          dataUrl: await readFileAsDataUrl(file),
+        },
+      })),
+    ).then(
+      (pasted) => setImages((current) => [...current, ...pasted]),
+      (error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Could not read the pasted image",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+    );
+  };
 
   const send = async () => {
     const message = text.trim();
-    if (!message || sending || props.runtimeMode === null || props.interactionMode === null) return;
+    if (!canSend || props.runtimeMode === null || props.interactionMode === null) return;
     setSending(true);
     const result = await startTurn({
       environmentId: props.environmentId,
       input: {
         threadId: props.bot.homeThreadId,
-        message: { messageId: newMessageId(), role: "user", text: message, attachments: [] },
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text: message,
+          attachments: images.map((image) => image.upload),
+        },
         runtimeMode: props.runtimeMode,
         interactionMode: props.interactionMode,
         dispatchMode: "queue",
@@ -196,6 +316,7 @@ function BotComposer(props: {
     setSending(false);
     if (result._tag === "Success") {
       setText("");
+      setImages([]);
     } else if (!isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       toastManager.add(
@@ -216,27 +337,48 @@ function BotComposer(props: {
         void send();
       }}
     >
-      <Textarea
-        aria-label={`Message ${props.bot.name}`}
-        className="flex-1"
-        placeholder={`Message ${props.bot.name}`}
-        rows={1}
-        value={text}
-        disabled={!ready}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            void send();
-          }
-        }}
-      />
-      <Button
-        aria-label="Send"
-        disabled={!ready || sending || !text.trim()}
-        size="icon"
-        type="submit"
-      >
+      <div className="flex flex-1 flex-col gap-2">
+        {images.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {images.map(({ key, upload }) => (
+              <div key={key} className="relative">
+                <img
+                  alt={upload.name}
+                  className="size-16 rounded-lg object-cover"
+                  src={upload.dataUrl}
+                />
+                <Button
+                  aria-label={`Remove ${upload.name}`}
+                  className="absolute -top-2 -right-2"
+                  size="icon-xs"
+                  variant="secondary"
+                  onClick={() =>
+                    setImages((current) => current.filter((image) => image.key !== key))
+                  }
+                >
+                  <XIcon />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <Textarea
+          aria-label={`Message ${props.bot.name}`}
+          placeholder={`Message ${props.bot.name}`}
+          rows={1}
+          value={text}
+          disabled={!ready}
+          onChange={(event) => setText(event.target.value)}
+          onPaste={pasteImages}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+        />
+      </div>
+      <Button aria-label="Send" disabled={!canSend} size="icon" type="submit">
         <ArrowUpIcon />
       </Button>
     </form>

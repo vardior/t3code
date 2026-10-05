@@ -1,4 +1,5 @@
 import {
+  ChatAttachmentId,
   MessageId,
   RunId,
   ThreadId,
@@ -66,6 +67,7 @@ const message = (input: {
   createdBy?: "user" | "agent";
   senderThreadId?: string;
   streaming?: boolean;
+  imageId?: string;
 }) => ({
   id: MessageId.make(input.id),
   role: input.role,
@@ -74,6 +76,17 @@ const message = (input: {
   runId: RunId.make(input.runId),
   streaming: input.streaming ?? false,
   text: input.text,
+  attachments: input.imageId
+    ? [
+        {
+          type: "image" as const,
+          id: ChatAttachmentId.make(input.imageId),
+          name: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+        },
+      ]
+    : [],
   createdAt: at(input.createdAt),
 });
 
@@ -103,7 +116,7 @@ const commandItem = (input: {
 });
 
 describe("buildBotChat", () => {
-  it("keeps only what the owner and the bot said to each other, plus spawned workers", () => {
+  it("shows the owner's conversation as bubbles and each agent wake as one row with its last reply", () => {
     const bot: BotSummary = {
       id: "helper",
       name: "Helper",
@@ -129,7 +142,8 @@ describe("buildBotChat", () => {
           role: "user",
           runId: "run-owner",
           createdAt: "2026-10-01T00:01:00.000Z",
-          text: "How is it going?",
+          text: "How is it going? ![shot.png](t3-context://v1/image/ctx_1)",
+          imageId: "shot",
         }),
         message({
           id: "draft",
@@ -155,11 +169,18 @@ describe("buildBotChat", () => {
           senderThreadId: "triage",
         }),
         message({
+          id: "tick-progress",
+          role: "assistant",
+          runId: "run-tick",
+          createdAt: "2026-10-01T00:04:10.000Z",
+          text: "Loading memory",
+        }),
+        message({
           id: "tick-reply",
           role: "assistant",
           runId: "run-tick",
           createdAt: "2026-10-01T00:04:30.000Z",
-          text: "nothing new",
+          text: "Handled the triage note",
         }),
         message({
           id: "owner-pending",
@@ -192,14 +213,22 @@ describe("buildBotChat", () => {
       ],
     });
 
-    expect(items.map((item) => [item.kind, "text" in item ? item.text : item.title])).toEqual([
+    expect(
+      items.map((item) => [
+        item.kind,
+        item.kind === "wake" ? item.reply : "text" in item ? item.text : item.title,
+      ]),
+    ).toEqual([
       ["you", "How is it going?"],
       ["bot", "Looking"],
       ["bot", "All good"],
+      ["wake", "Handled the triage note"],
       ["worker", "Fix the build"],
       ["you", "From Slack"],
       ["bot", "See [this](https://example.com)"],
       ["you", "And now?"],
     ]);
+    expect(items[0]).toMatchObject({ imageIds: ["shot"] });
+    expect(items[3]).toMatchObject({ senderThreadId: "triage", text: "triage note" });
   });
 });
