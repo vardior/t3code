@@ -333,6 +333,7 @@ it.effect.each(
   ({ target, createdBy }) => {
     const harness = makeHarness();
     const layerScheduledTasks = ScheduledTasks.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           harness.layer,

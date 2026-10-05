@@ -44,11 +44,14 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as ProcessRunner from "../processRunner.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as Metrics from "../observability/Metrics.ts";
@@ -192,6 +195,11 @@ const decodeHeadersJson = Schema.decodeUnknownOption(HeadersJson);
 const decodeMissingFieldsJson = Schema.decodeUnknownOption(MissingFieldsJson);
 const encodeHeadersJson = Schema.encodeSync(HeadersJson);
 const encodeMissingFieldsJson = Schema.encodeSync(MissingFieldsJson);
+const decodeCheckCommandJson = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ checkCommand: ScheduledTask.fields.checkCommand })),
+);
+const CHECK_COMMAND_TIMEOUT = "2 minutes";
+const CHECK_OUTPUT_MAX_BYTES = 16 * 1024;
 
 /**
  * Clients that predate thread modes send none, and may send a thread loaded before the first run
@@ -308,6 +316,14 @@ function iso(value: DateTime.DateTime): string {
 
 const localNow = DateTime.withCurrentZoneLocal(DateTime.nowInCurrentZone);
 
+function keptCheckCommand(
+  requested: string | null | undefined,
+  existing: ScheduledTask | null,
+): { readonly checkCommand?: string } {
+  const checkCommand = requested === undefined ? existing?.checkCommand : requested;
+  return checkCommand === null || checkCommand === undefined ? {} : { checkCommand };
+}
+
 function nextRunAt(
   task: Pick<ScheduledTask, "enabled" | "schedule">,
   from: DateTime.DateTime,
@@ -380,12 +396,16 @@ const decodeRow = Effect.fnUntraced(
     const webhook = schedule.type === "webhook" ? webhookEndpoint(row, origin) : undefined;
     const workspaceStrategy = yield* decodeWorkspaceStrategyJson(row.workspace_strategy_json);
     const modelSelection = yield* decodeModelSelectionJson(row.model_selection_json);
+    const checkCommand = Option.getOrUndefined(
+      decodeCheckCommandJson(row.schedule_json),
+    )?.checkCommand;
     return yield* decodeTask({
       id: row.task_id,
       title: row.title,
       prompt: row.prompt,
       enabled: row.enabled === 1,
       schedule,
+      ...(checkCommand === undefined ? {} : { checkCommand }),
       projectId: row.project_id,
       threadId: row.thread_id,
       threadMode: row.thread_mode,
@@ -461,6 +481,7 @@ export const layer = Layer.effect(
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const secretRequests = yield* SecretRequests.SecretRequests;
+    const processRunner = yield* ProcessRunner.ProcessRunner;
     const scheduler = yield* Scheduler.Scheduler;
     const readWebhookOrigin = yield* ScheduledTaskWebhookOrigin;
     const managedPolicy = yield* ManagedPolicy.ManagedPolicy;
@@ -653,7 +674,7 @@ export const layer = Layer.effect(
           ${task.title},
           ${task.prompt},
           ${task.enabled ? 1 : 0},
-          ${JSON.stringify(task.schedule)},
+          ${JSON.stringify({ ...task.schedule, checkCommand: task.checkCommand })},
           ${task.projectId},
           ${task.threadId},
           ${scheduledTaskThreadMode(task)},
@@ -741,6 +762,39 @@ export const layer = Layer.effect(
             taskError("Could not delete schedule task.", { taskId: id, cause }),
           ),
         );
+
+    const runCheckCommand = Effect.fn("ScheduledTaskService.runCheckCommand")(function* (
+      task: ScheduledTask,
+      checkCommand: string,
+    ) {
+      const projects = yield* sql<{ workspace_root: string }>`
+        SELECT workspace_root FROM projection_projects WHERE project_id = ${task.projectId}
+      `;
+      const shell =
+        (yield* HostProcessPlatform) === "win32"
+          ? { command: "cmd.exe", args: ["/d", "/s", "/c", checkCommand] }
+          : { command: "/bin/sh", args: ["-c", checkCommand] };
+      const result = yield* processRunner.run({
+        ...shell,
+        cwd: projects[0]?.workspace_root,
+        timeout: CHECK_COMMAND_TIMEOUT,
+        maxOutputBytes: CHECK_OUTPUT_MAX_BYTES,
+        outputMode: "truncate",
+        timeoutBehavior: "timedOutResult",
+      });
+      if (result.timedOut) {
+        return yield* taskError(`Check command timed out after ${CHECK_COMMAND_TIMEOUT}.`, {
+          taskId: task.id,
+        });
+      }
+      if (result.code !== 0) {
+        return yield* taskError(
+          `Check command exited ${result.code}: ${result.stderr.trim().slice(-500)}`,
+          { taskId: task.id },
+        );
+      }
+      return result.stdout.trim();
+    });
 
     const markRunning = (id: ScheduledTaskId, startedAtIso: string, webhookDeliveryId?: string) =>
       sql<{ task_id: string }>`
@@ -907,6 +961,29 @@ export const layer = Layer.effect(
           if (reason !== null) return yield* new WebhookDeliverySkipped({ reason });
         }
 
+        const checked =
+          active.checkCommand === undefined
+            ? undefined
+            : yield* Effect.result(runCheckCommand(active, active.checkCommand));
+        const checkOutput =
+          checked !== undefined && Result.isSuccess(checked) ? checked.success : undefined;
+        if (trigger === "scheduled" && checkOutput === "") {
+          yield* sql`
+            UPDATE scheduled_tasks
+            SET next_run_at = ${nextRunAt(active, startedAt)}
+            WHERE task_id = ${active.id} AND last_run_status <> 'running'
+          `.pipe(
+            Effect.mapError((cause) =>
+              taskError("Could not reschedule a quiet schedule task check.", {
+                taskId: active.id,
+                cause,
+              }),
+            ),
+          );
+          yield* notifyChanged;
+          return active;
+        }
+
         if (webhook === undefined) yield* markRunning(active.id, startedAtIso);
         else
           yield* sql
@@ -931,7 +1008,10 @@ export const layer = Layer.effect(
             : `${active.id}:webhook:${webhook.deliveryId}`;
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
-        const prompt = webhook?.prompt ?? active.prompt;
+        const basePrompt = webhook?.prompt ?? active.prompt;
+        const prompt = checkOutput ? `${basePrompt}
+
+${checkOutput}` : basePrompt;
         const threadMode = scheduledTaskThreadMode(active);
 
         // A bound thread can move to another project (No project to a project) while
@@ -973,7 +1053,9 @@ export const layer = Layer.effect(
 
         // Capture defects and interrupts too so dispatch failures still reach markCompleted.
         const result =
-          active.threadId === null
+          checked !== undefined && Result.isFailure(checked)
+            ? Exit.fail(checked.failure)
+            : active.threadId === null
             ? yield* Effect.exit(
                 threadLaunch
                   .launch({
@@ -1415,6 +1497,7 @@ export const layer = Layer.effect(
         prompt: input.prompt,
         enabled: input.enabled,
         schedule,
+        ...keptCheckCommand(input.checkCommand, existingTask),
         projectId: input.projectId,
         threadId,
         threadMode,
@@ -2517,4 +2600,4 @@ export const layer = Layer.effect(
       triggerWebhook,
     });
   }),
-);
+).pipe(Layer.provide(ProcessRunner.layer));

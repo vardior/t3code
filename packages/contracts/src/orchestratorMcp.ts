@@ -22,6 +22,7 @@ import {
 } from "./baseSchemas.ts";
 import {
   ScheduledTaskRunStatus,
+  ScheduledTaskCheckCommand,
   ScheduledTaskSchedule,
   ScheduledTaskUpsertSchedule,
 } from "./scheduledTask.ts";
@@ -669,6 +670,7 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
   projectId: OrchestratorMcpProjectTarget,
   prompt: OrchestratorMcpPrompt,
   schedule: OrchestratorMcpSchedule,
+  checkCommand: Schema.optional(ScheduledTaskCheckCommand),
   title: Schema.optional(OrchestratorMcpTitle),
   enabled: Schema.optional(Schema.Boolean.annotate({ description: "Default true." })),
   bindToCurrentThread: Schema.optional(
@@ -705,6 +707,7 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   boundThreadId: Schema.NullOr(ThreadId),
   freshSession: Schema.Boolean,
   schedule: ScheduledTaskSchedule,
+  checkCommand: Schema.optional(ScheduledTaskCheckCommand),
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: ScheduledTaskRunStatus,
   webhookUrl: Schema.optional(Schema.String).annotate({
@@ -744,6 +747,11 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
   prompt: Schema.optional(OrchestratorMcpPrompt),
   title: Schema.optional(OrchestratorMcpTitle),
   schedule: Schema.optional(OrchestratorMcpSchedule),
+  checkCommand: Schema.optional(
+    Schema.NullOr(ScheduledTaskCheckCommand).annotate({
+      description: "New check command; null removes it so every run starts a turn.",
+    }),
+  ),
   enabled: Schema.optional(Schema.Boolean),
   bindToCurrentThread: Schema.optional(Schema.Boolean),
   freshSession: Schema.optional(Schema.Boolean),

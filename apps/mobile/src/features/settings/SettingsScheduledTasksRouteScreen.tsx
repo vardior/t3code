@@ -1507,6 +1507,11 @@ function EnvironmentTasks({
                   {task.blockedByPolicy}
                 </Text>
               ) : null}
+              {task.checkCommand ? (
+                <Text className="text-sm text-foreground-muted" numberOfLines={1}>
+                  Runs when {task.checkCommand} prints
+                </Text>
+              ) : null}
               {task.lastRunError ? (
                 <Text className="text-sm text-danger-foreground" numberOfLines={2}>
                   Last run failed: {task.lastRunError}

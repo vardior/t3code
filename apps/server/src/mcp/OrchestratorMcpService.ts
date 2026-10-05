@@ -270,6 +270,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
     boundThreadId: task.threadId,
     freshSession: scheduledTaskThreadMode(task) === "fresh_session",
     schedule: task.schedule,
+    ...(task.checkCommand === undefined ? {} : { checkCommand: task.checkCommand }),
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
     ...(task.webhook?.url == null || !mayRun || task.blockedByPolicy !== undefined
@@ -2040,6 +2041,7 @@ const make = Effect.gen(function* () {
         prompt: input.prompt,
         enabled: input.enabled ?? true,
         schedule: input.schedule,
+        ...(input.checkCommand === undefined ? {} : { checkCommand: input.checkCommand }),
         projectId,
         threadId: bindToCurrentThread && parent !== undefined ? parent.thread.id : null,
         threadMode: input.freshSession
@@ -2138,6 +2140,7 @@ const make = Effect.gen(function* () {
           prompt: input.prompt ?? existing.prompt,
           enabled: input.enabled ?? existing.enabled,
           schedule: input.schedule ?? existing.schedule,
+          ...(input.checkCommand === undefined ? {} : { checkCommand: input.checkCommand }),
           projectId: existing.projectId,
           threadId,
           threadMode:

@@ -810,6 +810,11 @@ function ScheduledTaskRow({
               "Not scheduled"
             )}
           </span>
+          {task.checkCommand ? (
+            <span>
+              Runs when <code className="font-mono">{task.checkCommand}</code> prints
+            </span>
+          ) : null}
           {task.lastRunStatus !== "never" ? (
             <Badge variant={statusVariant(task.lastRunStatus)}>{task.lastRunStatus}</Badge>
           ) : null}

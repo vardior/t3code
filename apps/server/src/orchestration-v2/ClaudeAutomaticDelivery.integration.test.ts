@@ -327,6 +327,7 @@ it.effect.each(deliveries)(
             }).pipe(
               Effect.provide(
                 ScheduledTaskService.layer.pipe(
+                  Layer.provide(NodeServices.layer),
                   Layer.provide(ThreadManagementService.layer),
                   Layer.provide(ServerSettings.layerTest()),
                   Layer.provide(

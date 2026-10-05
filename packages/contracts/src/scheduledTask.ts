@@ -214,6 +214,11 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
 ]);
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 
+export const ScheduledTaskCheckCommand = TrimmedNonEmptyString.annotate({
+  description:
+    "Shell command run in the project folder before each run. The run happens only when it exits 0 and prints something, and its output is appended to the prompt; quiet checks start no agent turn.",
+});
+
 export const ScheduledTaskRunStatus = Schema.Literals(["never", "running", "succeeded", "failed"]);
 export type ScheduledTaskRunStatus = typeof ScheduledTaskRunStatus.Type;
 
@@ -244,6 +249,7 @@ export const ScheduledTask = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   enabled: Schema.Boolean,
   schedule: ScheduledTaskSchedule,
+  checkCommand: Schema.optional(ScheduledTaskCheckCommand),
   projectId: ProjectId,
   threadId: Schema.NullOr(ThreadId),
   threadMode: Schema.optional(ScheduledTaskThreadMode),
@@ -284,6 +290,9 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   enabled: Schema.Boolean,
   schedule: ScheduledTaskUpsertSchedule,
+  checkCommand: Schema.optional(Schema.NullOr(ScheduledTaskCheckCommand)).annotate({
+    description: "Omit to keep the task's current check command; null removes it.",
+  }),
   projectId: ProjectId,
   threadId: Schema.optional(Schema.NullOr(ThreadId)),
   /** Omitted: keep the stored mode, or derive it from `threadId` for a new or rebound task. */
