@@ -54,9 +54,10 @@ export function BotChat(props: {
       buildBotChat({
         bot: props.bot,
         messages: projection?.messages ?? [],
+        runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [props.bot, projection?.messages, projection?.turnItems],
+    [props.bot, projection?.messages, projection?.runs, projection?.turnItems],
   );
   const working = isBotWorking(projection?.runs ?? []);
   const onRunSettled = useEffectEvent(props.onRunSettled);

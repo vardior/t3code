@@ -116,7 +116,7 @@ const commandItem = (input: {
 });
 
 describe("buildBotChat", () => {
-  it("shows the owner's conversation as bubbles and each agent wake as one row with its last reply", () => {
+  it("shows each turn's final reply only, and each agent wake as one row with its final reply", () => {
     const bot: BotSummary = {
       id: "helper",
       name: "Helper",
@@ -190,6 +190,13 @@ describe("buildBotChat", () => {
           text: "And now?",
         }),
         message({
+          id: "active-progress",
+          role: "assistant",
+          runId: "run-active",
+          createdAt: "2026-10-01T00:08:30.000Z",
+          text: "Checking the logs",
+        }),
+        message({
           id: "partial",
           role: "assistant",
           runId: "run-active",
@@ -197,6 +204,11 @@ describe("buildBotChat", () => {
           text: "Still thinking",
           streaming: true,
         }),
+      ],
+      runs: [
+        { id: RunId.make("run-owner"), status: "completed" },
+        { id: RunId.make("run-tick"), status: "completed" },
+        { id: RunId.make("run-active"), status: "running" },
       ],
       turnItems: [
         commandItem({
@@ -220,7 +232,6 @@ describe("buildBotChat", () => {
       ]),
     ).toEqual([
       ["you", "How is it going?"],
-      ["bot", "Looking"],
       ["bot", "All good"],
       ["wake", "Handled the triage note"],
       ["worker", "Fix the build"],
@@ -229,6 +240,6 @@ describe("buildBotChat", () => {
       ["you", "And now?"],
     ]);
     expect(items[0]).toMatchObject({ imageIds: ["shot"] });
-    expect(items[3]).toMatchObject({ senderThreadId: "triage", text: "triage note" });
+    expect(items[2]).toMatchObject({ senderThreadId: "triage", text: "triage note" });
   });
 });

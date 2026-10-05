@@ -70,6 +70,7 @@ export function isBotWorking(runs: ReadonlyArray<ChatRun>): boolean {
 export function buildBotChat(input: {
   readonly bot: BotSummary;
   readonly messages: ReadonlyArray<ChatMessage>;
+  readonly runs: ReadonlyArray<ChatRun>;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
 }): BotChatItem[] {
   const incoming = input.messages.filter((message) => message.role === "user");
@@ -80,10 +81,15 @@ export function buildBotChat(input: {
       message.scheduledTaskId === undefined,
   );
   const ownerRunIds = new Set(ownerMessages.flatMap((message) => message.runId ?? []));
-  const settledReplies = input.messages.filter(
-    (message) => message.role === "assistant" && !message.streaming && message.runId !== null,
+  const activeRunIds = new Set(
+    input.runs.filter((run) => isActiveRunStatus(run.status)).map((run) => run.id),
   );
-  const replies = settledReplies.filter((message) => ownerRunIds.has(message.runId!));
+  const finalReplyByRun = new Map<string, ChatMessage>();
+  for (const message of input.messages) {
+    if (message.role !== "assistant" || message.streaming || message.runId === null) continue;
+    if (!activeRunIds.has(message.runId)) finalReplyByRun.set(message.runId, message);
+  }
+  const replies = [...ownerRunIds].flatMap((runId) => finalReplyByRun.get(runId) ?? []);
   const wakesByRun = new Map<string, ChatMessage[]>();
   for (const message of incoming) {
     if (message.runId === null || ownerRunIds.has(message.runId)) continue;
@@ -117,7 +123,7 @@ export function buildBotChat(input: {
         senderThreadId: first.senderThreadId ?? null,
         scheduled: first.scheduledTaskId !== undefined,
         text: wakes.map((wake) => wake.text).join("\n\n"),
-        reply: settledReplies.findLast((message) => message.runId === runId)?.text ?? null,
+        reply: finalReplyByRun.get(runId)?.text ?? null,
       };
     }),
     ...input.bot.slackDms.map((dm, index) => ({
