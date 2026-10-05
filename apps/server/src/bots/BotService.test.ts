@@ -8,6 +8,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { ServerConfig } from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as BotService from "./BotService.ts";
 
@@ -15,11 +16,16 @@ const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const testLayer = Layer.mergeAll(SqlitePersistenceMemory, NodeServices.layer);
 
-const listBots = (env: NodeJS.ProcessEnv) =>
+const listBots = (input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv }) =>
   Effect.gen(function* () {
     const service = yield* BotService.BotService;
     return yield* service.list();
-  }).pipe(Effect.provide(BotService.layer), Effect.provideService(HostProcessEnvironment, env));
+  }).pipe(
+    Effect.provide(
+      BotService.layer.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir))),
+    ),
+    Effect.provideService(HostProcessEnvironment, input.env ?? {}),
+  );
 
 const insertThread = (
   sql: SqlClient.SqlClient,
@@ -66,10 +72,20 @@ const insertRun = (
   )
 `;
 
-it.effect("returns no bots when no bots directory is configured", () =>
-  Effect.gen(function* () {
-    expect(yield* listBots({})).toEqual({ bots: [] });
-  }).pipe(Effect.provide(testLayer)),
+it.effect(
+  "treats a missing default bots directory as empty but a missing configured one as an error",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-home-" });
+      expect(yield* listBots({ baseDir })).toEqual({ bots: [] });
+      const configured = yield* listBots({
+        baseDir,
+        env: { T3CODE_BOTS_DIR: path.join(baseDir, "elsewhere") },
+      }).pipe(Effect.flip);
+      expect(configured._tag).toBe("BotError");
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect("lists bots with their charter and the worker threads their home thread spawned", () =>
@@ -77,7 +93,9 @@ it.effect("lists bots with their charter and the worker threads their home threa
     const sql = yield* SqlClient.SqlClient;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-test-" });
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-home-" });
+    const root = path.join(baseDir, "bots");
+    yield* fs.makeDirectory(root);
 
     yield* fs.makeDirectory(path.join(root, "helper"));
     yield* fs.writeFileString(
@@ -144,7 +162,7 @@ it.effect("lists bots with their charter and the worker threads their home threa
       deletedAt: "2026-10-01T00:07:00.000Z",
     });
 
-    expect(yield* listBots({ T3CODE_BOTS_DIR: root })).toEqual({
+    expect(yield* listBots({ baseDir })).toEqual({
       bots: [
         {
           id: "helper",

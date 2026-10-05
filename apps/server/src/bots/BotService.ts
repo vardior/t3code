@@ -17,6 +17,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { ServerConfig } from "../config.ts";
+
 const MAX_WORKERS_PER_BOT = 50;
 const MAX_SLACK_DMS_PER_BOT = 200;
 
@@ -52,7 +54,8 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const botsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim() || null;
+    const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim() || null;
+    const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
 
     const listWorkers = (homeThreadId: ThreadId, ownThreadIds: ReadonlySet<string>) =>
       sql<WorkerRow>`
@@ -140,7 +143,12 @@ export const layer = Layer.effect(
 
     const list = () =>
       Effect.gen(function* () {
-        if (botsDir === null) return { bots: [] };
+        if (configuredBotsDir === null) {
+          const exists = yield* fileSystem
+            .exists(botsDir)
+            .pipe(Effect.catchCause(() => Effect.succeed(false)));
+          if (!exists) return { bots: [] };
+        }
         const entries = yield* fileSystem
           .readDirectory(botsDir)
           .pipe(
