@@ -221,6 +221,7 @@ describe("buildBotChat", () => {
           id: "send",
           command: `printf '%s' "See <https://example.com|this>" | bin/dm-send`,
           completedAt: "2026-10-01T00:07:00.000Z",
+          runId: "run-owner",
         }),
         commandItem({
           id: "refused",

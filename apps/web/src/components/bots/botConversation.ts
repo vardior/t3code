@@ -99,17 +99,13 @@ export function buildBotChat(input: {
     else wakesByRun.set(message.runId, [message]);
   }
 
-  const dmSendRunIds = new Set<string>(
-    input.turnItems.flatMap((item) =>
-      item.type === "command_execution" &&
-      item.status === "completed" &&
-      item.exitCode === 0 &&
-      item.runId !== null &&
-      slackTextFromCommand(item.input) !== null
-        ? [item.runId]
-        : [],
-    ),
-  );
+  const dmSends = input.turnItems.flatMap((item) => {
+    if (item.type !== "command_execution" || item.status !== "completed") return [];
+    if (item.exitCode !== undefined && item.exitCode !== 0) return [];
+    const text = slackTextFromCommand(item.input);
+    return text === null ? [] : [{ item, text }];
+  });
+  const dmSendRunIds = new Set<string>(dmSends.flatMap(({ item }) => item.runId ?? []));
 
   const items: BotChatItem[] = [
     ...ownerMessages.map((message) => ({
@@ -149,20 +145,12 @@ export function buildBotChat(input: {
       text: dm.text,
       imageIds: [],
     })),
-    ...input.turnItems.flatMap((item) => {
-      if (item.type !== "command_execution" || item.status !== "completed") return [];
-      if (item.exitCode !== undefined && item.exitCode !== 0) return [];
-      const text = slackTextFromCommand(item.input);
-      if (text === null) return [];
-      return [
-        {
-          kind: "bot" as const,
-          id: `slack-send:${item.id}`,
-          at: DateTime.toEpochMillis(item.completedAt ?? item.updatedAt),
-          text: slackMarkupToMarkdown(text),
-        },
-      ];
-    }),
+    ...dmSends.map(({ item, text }) => ({
+      kind: "bot" as const,
+      id: `slack-send:${item.id}`,
+      at: DateTime.toEpochMillis(item.completedAt ?? item.updatedAt),
+      text: slackMarkupToMarkdown(text),
+    })),
     ...input.bot.workers.map((worker) => ({
       kind: "worker" as const,
       id: `worker:${worker.threadId}`,

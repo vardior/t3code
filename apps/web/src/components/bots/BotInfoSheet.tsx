@@ -159,9 +159,8 @@ function ScheduleRow(props: {
       >
         <span className="truncate font-medium">{props.task.title}</span>
         <span className="truncate text-muted-foreground text-xs">
-          {props.task.checkCommand
-            ? `checks ${scheduleLabel(props.task.schedule).replace(/^Every /, "every ")} · ${props.task.lastRunAt ? `last woke ${relativeLabel(props.task.lastRunAt)}` : "never woke"}`
-            : `${scheduleLabel(props.task.schedule)} · ${props.task.modelSelection.model} · ${props.task.enabled ? `next ${relativeLabel(props.task.nextRunAt)}` : "paused"}`}
+          {scheduleLabel(props.task.schedule)} · {props.task.modelSelection.model} ·{" "}
+          {scheduleStatus(props.task)}
         </span>
       </button>
       <Switch
@@ -172,4 +171,11 @@ function ScheduleRow(props: {
       />
     </div>
   );
+}
+
+function scheduleStatus(task: ScheduledTask) {
+  if (!task.enabled) return "paused";
+  if (!task.checkCommand) return `next ${relativeLabel(task.nextRunAt)}`;
+  if (!task.lastRunAt) return "checks first, never woke";
+  return `checks first, last woke ${relativeLabel(task.lastRunAt)}`;
 }

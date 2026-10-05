@@ -216,17 +216,13 @@ function WakeRow(props: {
   const sender = useThreadShell(
     item.senderThreadId ? scopeThreadRef(props.environmentId, item.senderThreadId) : null,
   );
-  const schedule = props.schedules.find((task) => task.id === item.scheduledTaskId);
-  const prefix = `bot ${props.botName} `;
+  const scheduleTitle = props.schedules.find((task) => task.id === item.scheduledTaskId)?.title;
+  const botPrefix = `bot ${props.botName} `;
+  const scheduleName = scheduleTitle?.startsWith(botPrefix)
+    ? scheduleTitle.slice(botPrefix.length)
+    : scheduleTitle;
   const from =
-    sender?.title ??
-    (schedule
-      ? schedule.title.toLowerCase().startsWith(prefix.toLowerCase())
-        ? schedule.title.slice(prefix.length)
-        : schedule.title
-      : item.scheduledTaskId
-        ? "a scheduled task"
-        : "another thread");
+    sender?.title ?? scheduleName ?? (item.scheduledTaskId ? "a scheduled task" : "another thread");
   const replyPreview =
     item.reply
       ?.split("\n")
