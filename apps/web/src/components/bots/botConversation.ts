@@ -5,6 +5,7 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
+  type ScheduledTaskId,
 } from "@t3tools/contracts";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
@@ -23,7 +24,7 @@ export type BotChatItem =
       readonly id: string;
       readonly at: number;
       readonly senderThreadId: ThreadId | null;
-      readonly scheduled: boolean;
+      readonly scheduledTaskId: ScheduledTaskId | null;
       readonly text: string;
       readonly reply: string | null;
     }
@@ -98,6 +99,18 @@ export function buildBotChat(input: {
     else wakesByRun.set(message.runId, [message]);
   }
 
+  const dmSendRunIds = new Set<string>(
+    input.turnItems.flatMap((item) =>
+      item.type === "command_execution" &&
+      item.status === "completed" &&
+      item.exitCode === 0 &&
+      item.runId !== null &&
+      slackTextFromCommand(item.input) !== null
+        ? [item.runId]
+        : [],
+    ),
+  );
+
   const items: BotChatItem[] = [
     ...ownerMessages.map((message) => ({
       kind: "you" as const,
@@ -114,17 +127,20 @@ export function buildBotChat(input: {
       at: DateTime.toEpochMillis(message.createdAt),
       text: message.text,
     })),
-    ...Array.from(wakesByRun, ([runId, wakes]) => {
+    ...Array.from(wakesByRun).flatMap(([runId, wakes]) => {
+      if (dmSendRunIds.has(runId)) return [];
       const first = wakes[0]!;
-      return {
-        kind: "wake" as const,
-        id: `wake:${runId}`,
-        at: DateTime.toEpochMillis(first.createdAt),
-        senderThreadId: first.senderThreadId ?? null,
-        scheduled: first.scheduledTaskId !== undefined,
-        text: wakes.map((wake) => wake.text).join("\n\n"),
-        reply: finalReplyByRun.get(runId)?.text ?? null,
-      };
+      return [
+        {
+          kind: "wake" as const,
+          id: `wake:${runId}`,
+          at: DateTime.toEpochMillis(first.createdAt),
+          senderThreadId: first.senderThreadId ?? null,
+          scheduledTaskId: first.scheduledTaskId ?? null,
+          text: wakes.map((wake) => wake.text).join("\n\n"),
+          reply: finalReplyByRun.get(runId)?.text ?? null,
+        },
+      ];
     }),
     ...input.bot.slackDms.map((dm, index) => ({
       kind: "you" as const,

@@ -159,8 +159,9 @@ function ScheduleRow(props: {
       >
         <span className="truncate font-medium">{props.task.title}</span>
         <span className="truncate text-muted-foreground text-xs">
-          {scheduleLabel(props.task.schedule)} · {props.task.modelSelection.model} ·{" "}
-          {props.task.enabled ? `next ${relativeLabel(props.task.nextRunAt)}` : "paused"}
+          {props.task.checkCommand
+            ? `checks ${scheduleLabel(props.task.schedule).replace(/^Every /, "every ")} · ${props.task.lastRunAt ? `last woke ${relativeLabel(props.task.lastRunAt)}` : "never woke"}`
+            : `${scheduleLabel(props.task.schedule)} · ${props.task.modelSelection.model} · ${props.task.enabled ? `next ${relativeLabel(props.task.nextRunAt)}` : "paused"}`}
         </span>
       </button>
       <Switch

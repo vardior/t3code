@@ -2,6 +2,7 @@ import {
   ChatAttachmentId,
   MessageId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   type BotSummary,
@@ -66,6 +67,7 @@ const message = (input: {
   text: string;
   createdBy?: "user" | "agent";
   senderThreadId?: string;
+  scheduledTaskId?: string;
   streaming?: boolean;
   imageId?: string;
 }) => ({
@@ -73,6 +75,9 @@ const message = (input: {
   role: input.role,
   createdBy: input.createdBy ?? (input.role === "user" ? "user" : "agent"),
   ...(input.senderThreadId ? { senderThreadId: ThreadId.make(input.senderThreadId) } : {}),
+  ...(input.scheduledTaskId
+    ? { scheduledTaskId: ScheduledTaskId.make(input.scheduledTaskId) }
+    : {}),
   runId: RunId.make(input.runId),
   streaming: input.streaming ?? false,
   text: input.text,
@@ -95,10 +100,11 @@ const commandItem = (input: {
   command: string;
   completedAt: string;
   exitCode?: number;
+  runId?: string;
 }): OrchestrationV2TurnItem => ({
   id: TurnItemId.make(input.id),
   threadId: ThreadId.make("home"),
-  runId: RunId.make("run-tick"),
+  runId: RunId.make(input.runId ?? "run-tick"),
   nodeId: null,
   providerThreadId: null,
   providerTurnId: null,
@@ -241,5 +247,85 @@ describe("buildBotChat", () => {
     ]);
     expect(items[0]).toMatchObject({ imageIds: ["shot"] });
     expect(items[2]).toMatchObject({ senderThreadId: "triage", text: "triage note" });
+  });
+});
+
+const botWithoutHistory: BotSummary = {
+  id: "helper",
+  name: "Helper",
+  homeThreadId: ThreadId.make("home"),
+  scheduledTaskIds: [],
+  charter: null,
+  workers: [],
+  slackDms: [],
+};
+
+describe("buildBotChat wake rows", () => {
+  const wake = message({
+    id: "wake",
+    role: "user",
+    runId: "run-wake",
+    createdAt: "2026-10-01T00:01:00.000Z",
+    text: "Wake prompt",
+    createdBy: "agent",
+    scheduledTaskId: "schedule-triage",
+  });
+  const dmSend = commandItem({
+    id: "dm-send",
+    runId: "run-wake",
+    command: `printf '%s' 'Done' | bin/dm-send`,
+    completedAt: "2026-10-01T00:02:00.000Z",
+    exitCode: 0,
+  });
+
+  it("drops a wake when the same run sent a Slack DM", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [wake],
+      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
+      turnItems: [dmSend],
+    });
+    expect(items.map((item) => item.kind)).toEqual(["bot"]);
+  });
+
+  it("keeps a wake when its run did not send a Slack DM", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [wake],
+      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
+      turnItems: [
+        commandItem({
+          id: "other-command",
+          runId: "run-wake",
+          command: "echo done",
+          completedAt: "2026-10-01T00:02:00.000Z",
+          exitCode: 0,
+        }),
+      ],
+    });
+    expect(items.filter((item) => item.kind === "wake")).toHaveLength(1);
+  });
+
+  it("keeps a wake when another run sent the Slack DM", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [wake],
+      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
+      turnItems: [{ ...dmSend, runId: RunId.make("other-run") }],
+    });
+    expect(items.filter((item) => item.kind === "wake")).toHaveLength(1);
+  });
+
+  it("carries the scheduled task ID on a wake", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [wake],
+      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
+      turnItems: [],
+    });
+    expect(items[0]).toMatchObject({
+      kind: "wake",
+      scheduledTaskId: ScheduledTaskId.make("schedule-triage"),
+    });
   });
 });

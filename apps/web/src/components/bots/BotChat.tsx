@@ -9,6 +9,7 @@ import {
   type EnvironmentId,
   type ProviderInteractionMode,
   type RuntimeMode,
+  type ScheduledTask,
   type ThreadId,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
@@ -27,6 +28,8 @@ import {
 import { useAssetUrls } from "../../assets/assetUrls";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { useThreadShell } from "../../state/entities";
+import { useEnvironmentQuery } from "../../state/query";
+import { serverEnvironment } from "../../state/server";
 import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
@@ -49,6 +52,9 @@ export function BotChat(props: {
 }) {
   const thread = useEnvironmentThread(props.environmentId, props.bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
+  const tasksQuery = useEnvironmentQuery(
+    serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
+  );
   const items = useMemo(
     () =>
       buildBotChat({
@@ -103,6 +109,8 @@ export function BotChat(props: {
               item={item}
               environmentId={props.environmentId}
               onOpenThread={openThread}
+              schedules={tasksQuery.data?.tasks ?? []}
+              botName={props.bot.name}
             />
           ))}
           {working ? (
@@ -127,6 +135,8 @@ function ChatRow(props: {
   readonly item: BotChatItem;
   readonly environmentId: EnvironmentId;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly schedules: ReadonlyArray<ScheduledTask>;
+  readonly botName: string;
 }) {
   const { item } = props;
   if (item.kind === "worker") {
@@ -139,7 +149,14 @@ function ChatRow(props: {
     );
   }
   if (item.kind === "wake") {
-    return <WakeRow item={item} environmentId={props.environmentId} />;
+    return (
+      <WakeRow
+        item={item}
+        environmentId={props.environmentId}
+        schedules={props.schedules}
+        botName={props.botName}
+      />
+    );
   }
   if (item.kind === "you") {
     return <YourMessage item={item} environmentId={props.environmentId} />;
@@ -192,12 +209,24 @@ function YourMessage(props: {
 function WakeRow(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
   readonly environmentId: EnvironmentId;
+  readonly schedules: ReadonlyArray<ScheduledTask>;
+  readonly botName: string;
 }) {
   const { item } = props;
   const sender = useThreadShell(
     item.senderThreadId ? scopeThreadRef(props.environmentId, item.senderThreadId) : null,
   );
-  const from = sender?.title ?? (item.scheduled ? "a scheduled task" : "another thread");
+  const schedule = props.schedules.find((task) => task.id === item.scheduledTaskId);
+  const prefix = `bot ${props.botName} `;
+  const from =
+    sender?.title ??
+    (schedule
+      ? schedule.title.toLowerCase().startsWith(prefix.toLowerCase())
+        ? schedule.title.slice(prefix.length)
+        : schedule.title
+      : item.scheduledTaskId
+        ? "a scheduled task"
+        : "another thread");
   const replyPreview =
     item.reply
       ?.split("\n")
