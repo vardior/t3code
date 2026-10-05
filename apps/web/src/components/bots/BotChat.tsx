@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -12,9 +13,10 @@ import type {
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { ArrowUpIcon, BotIcon } from "lucide-react";
-import { useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useEffectEvent, useMemo, useState, type MouseEvent } from "react";
 
 import { cn, newMessageId } from "../../lib/utils";
+import { useThreadShell } from "../../state/entities";
 import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
@@ -32,6 +34,7 @@ import {
 export function BotChat(props: {
   readonly bot: BotSummary;
   readonly environmentId: EnvironmentId;
+  readonly onRunSettled: () => void;
 }) {
   const thread = useEnvironmentThread(props.environmentId, props.bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
@@ -45,6 +48,10 @@ export function BotChat(props: {
     [props.bot, projection?.messages, projection?.turnItems],
   );
   const working = isBotWorking(projection?.runs ?? []);
+  const onRunSettled = useEffectEvent(props.onRunSettled);
+  useEffect(() => {
+    if (!working) onRunSettled();
+  }, [working]);
   const navigate = useNavigate();
   const openThread = (threadId: ThreadId) =>
     void navigate({
@@ -112,15 +119,11 @@ function ChatRow(props: {
   const { item } = props;
   if (item.kind === "worker") {
     return (
-      <button
-        type="button"
-        className="my-1 flex max-w-[85%] items-center gap-2 self-start rounded-full border border-border/70 px-3 py-1.5 text-left text-muted-foreground text-xs hover:bg-accent/60 hover:text-foreground"
-        onClick={() => props.onOpenThread(item.threadId)}
-      >
-        <BotIcon className="size-3.5 shrink-0" />
-        <span className="truncate">Started {item.title}</span>
-        {item.status ? <span className="shrink-0 opacity-70">· {item.status}</span> : null}
-      </button>
+      <WorkerChip
+        item={item}
+        environmentId={props.environmentId}
+        onOpenThread={props.onOpenThread}
+      />
     );
   }
   const mine = item.kind === "you";
@@ -141,6 +144,27 @@ function ChatRow(props: {
         />
       )}
     </div>
+  );
+}
+
+function WorkerChip(props: {
+  readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
+  readonly environmentId: EnvironmentId;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+}) {
+  const { item } = props;
+  const shell = useThreadShell(scopeThreadRef(props.environmentId, item.threadId));
+  const status = shell?.latestRun?.status ?? item.status;
+  return (
+    <button
+      type="button"
+      className="my-1 flex max-w-[85%] items-center gap-2 self-start rounded-full border border-border/70 px-3 py-1.5 text-left text-muted-foreground text-xs hover:bg-accent/60 hover:text-foreground"
+      onClick={() => props.onOpenThread(item.threadId)}
+    >
+      <BotIcon className="size-3.5 shrink-0" />
+      <span className="truncate">Started {shell?.title ?? item.title}</span>
+      {status ? <span className="shrink-0 opacity-70">· {status}</span> : null}
+    </button>
   );
 }
 

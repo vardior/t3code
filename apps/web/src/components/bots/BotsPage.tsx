@@ -109,7 +109,12 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
           </nav>
 
           {selected && environmentId ? (
-            <BotChat key={selected.id} bot={selected} environmentId={environmentId} />
+            <BotChat
+              key={selected.id}
+              bot={selected}
+              environmentId={environmentId}
+              onRunSettled={botsQuery.refresh}
+            />
           ) : (
             <div className="hidden flex-1 items-center justify-center text-sm text-muted-foreground md:flex">
               {bots.length > 0 ? "Pick a bot to see your conversation." : null}
