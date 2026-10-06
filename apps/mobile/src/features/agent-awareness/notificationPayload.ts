@@ -1,3 +1,8 @@
+import type { BotSummary } from "@t3tools/contracts";
+
+type NotificationBot = Pick<BotSummary, "id" | "homeThreadId">;
+type BotsForEnvironment = (environmentId: string) => ReadonlyArray<NotificationBot> | null;
+
 function dataFromNotificationResponse(response: unknown): Record<string, unknown> | null {
   if (typeof response !== "object" || response === null) {
     return null;
@@ -73,12 +78,61 @@ function normalizeThreadDeepLink(value: string): string | null {
   }
 }
 
-export function threadDeepLinkOnScreen(pathname: string): string | null {
+export function botRouteOnScreen(pathname: string) {
+  const match = /^\/bots\/([^/]+)\/([^/]+)(?:\/|$)/.exec(pathname);
+  if (!match?.[1] || !match[2]) return null;
+  try {
+    return {
+      environmentId: decodeURIComponent(match[1]),
+      botId: decodeURIComponent(match[2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function threadDeepLinkOnScreen(
+  pathname: string,
+  bots?: ReadonlyArray<NotificationBot> | null,
+): string | null {
+  const botRoute = botRouteOnScreen(pathname);
+  if (botRoute) {
+    const bot = bots?.find((entry) => entry.id === botRoute.botId);
+    return bot
+      ? encodeThreadDeepLink({ environmentId: botRoute.environmentId, threadId: bot.homeThreadId })
+      : null;
+  }
   const match = /^\/threads\/([^/]+)\/([^/]+)(?:\/|$)/.exec(pathname);
   if (!match?.[1] || !match[2]) {
     return null;
   }
   return `/threads/${match[1]}/${match[2]}`;
+}
+
+export function agentNotificationRouteForBots(
+  deepLink: string,
+  botsForEnvironment: BotsForEnvironment,
+): string {
+  const normalized = normalizeThreadDeepLink(deepLink);
+  if (normalized === null) return deepLink;
+  const parts = normalized.split("/");
+  const environmentId = decodeURIComponent(parts[2] ?? "");
+  const threadId = decodeURIComponent(parts[3] ?? "");
+  const bot = botsForEnvironment(environmentId)?.find((entry) => entry.homeThreadId === threadId);
+  return bot
+    ? `/bots/${encodeURIComponent(environmentId)}/${encodeURIComponent(bot.id)}`
+    : deepLink;
+}
+
+export function agentNotificationUrlForBots(
+  url: string,
+  botsForEnvironment: BotsForEnvironment,
+): string {
+  const match = /^(t3code(?:-dev|-preview)?:\/{1,2})(threads\/.*)$/.exec(url);
+  if (!match?.[1] || !match[2]) return url;
+  const deepLink = `/${match[2]}`;
+  const route = agentNotificationRouteForBots(deepLink, botsForEnvironment);
+  return route === deepLink ? url : `${match[1]}${route.slice(1)}`;
 }
 
 export function extractAgentNotificationDeepLink(response: unknown): string | null {
@@ -103,6 +157,7 @@ export function routeAgentNotificationResponseOnce(input: {
   readonly handledResponseIds: Set<string>;
   readonly response: unknown;
   readonly navigate: (deepLink: string) => void;
+  readonly botsForEnvironment?: BotsForEnvironment;
 }): void {
   const responseId = identifierFromNotificationResponse(input.response);
   if (responseId && input.handledResponseIds.has(responseId)) {
@@ -110,7 +165,11 @@ export function routeAgentNotificationResponseOnce(input: {
   }
   const deepLink = extractAgentNotificationDeepLink(input.response);
   if (deepLink) {
-    input.navigate(deepLink);
+    input.navigate(
+      input.botsForEnvironment
+        ? agentNotificationRouteForBots(deepLink, input.botsForEnvironment)
+        : deepLink,
+    );
   }
   if (responseId) {
     input.handledResponseIds.add(responseId);

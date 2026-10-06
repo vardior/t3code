@@ -35,6 +35,8 @@ import {
 } from "./features/sharing/IncomingShareProvider";
 import {
   installAgentNotificationNavigation,
+  resolveAgentNotificationUrl,
+  resolveInitialAgentNotificationUrl,
   setAgentNotificationPathname,
 } from "./features/agent-awareness/notificationNavigation";
 import {
@@ -133,7 +135,16 @@ const appLinking = {
   ],
   config: { initialRouteName: "Home" },
   filter: (url: string) => shouldHandleAppLink(url, hasCloudPublicConfig()),
-  getInitialURL: async () => (await Linking.getInitialURL()) ?? (await launchWorkspaceURL()),
+  async getInitialURL() {
+    const url = await Linking.getInitialURL();
+    return url === null ? await launchWorkspaceURL() : resolveInitialAgentNotificationUrl(url);
+  },
+  subscribe(listener: (url: string) => void) {
+    const subscription = Linking.addEventListener("url", ({ url }) =>
+      listener(resolveAgentNotificationUrl(url)),
+    );
+    return () => subscription.remove();
+  },
   getActionFromState: (
     state: Parameters<typeof getActionFromState>[0],
     options: Parameters<typeof getActionFromState>[1],

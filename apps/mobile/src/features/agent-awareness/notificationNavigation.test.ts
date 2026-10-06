@@ -1,12 +1,18 @@
 import type { NotificationResponse } from "expo-notifications";
+import { ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
 
 import {
+  agentNotificationRouteForBots,
+  agentNotificationUrlForBots,
   extractAgentNotificationDeepLink,
   routeAgentNotificationResponseOnce,
 } from "./notificationPayload";
+
+const botsForEnvironment = (environmentId: string) =>
+  environmentId === "env 1" ? [{ id: "bot/1", homeThreadId: ThreadId.make("home/1") }] : null;
 
 function responseWithData(data: Record<string, unknown>, identifier = "notification-1") {
   return {
@@ -155,6 +161,47 @@ describe("routeAgentNotificationResponseOnce", () => {
     expect(handledResponseIds.has("notification-1")).toBe(true);
   });
 
+  it("routes warm and cold bot home-thread responses to the bot chat once", async () => {
+    const handledResponseIds = new Set<string>();
+    const navigate = vi.fn();
+    const response = responseWithData({ deepLink: "/threads/env%201/home%2F1" });
+    const handleResponse = (response: unknown) =>
+      routeAgentNotificationResponseOnce({
+        handledResponseIds,
+        response,
+        navigate,
+        botsForEnvironment,
+      });
+
+    handleResponse(response);
+    await consumeLastAgentNotificationResponse({
+      getLastResponse: () => Promise.resolve(response as NotificationResponse),
+      clearLastResponse: () => Promise.resolve(),
+      handleResponse,
+    });
+
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/bots/env%201/bot%2F1");
+  });
+
+  it("routes a cold-start bot notification through the last-response consumer", async () => {
+    const navigate = vi.fn();
+    await consumeLastAgentNotificationResponse({
+      getLastResponse: () =>
+        Promise.resolve(
+          responseWithData({ environmentId: "env 1", threadId: "home/1" }) as NotificationResponse,
+        ),
+      clearLastResponse: () => Promise.resolve(),
+      handleResponse: (response) =>
+        routeAgentNotificationResponseOnce({
+          handledResponseIds: new Set(),
+          response,
+          navigate,
+          botsForEnvironment,
+        }),
+    });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/bots/env%201/bot%2F1");
+  });
+
   it("does not navigate twice when the initial and listener responses refer to one notification", () => {
     const handledResponseIds = new Set<string>();
     const navigations: Array<string> = [];
@@ -175,5 +222,50 @@ describe("routeAgentNotificationResponseOnce", () => {
     });
 
     expect(navigations).toEqual(["/threads/env/thread"]);
+  });
+});
+
+describe("agentNotificationRouteForBots", () => {
+  it("maps a home thread using bots from the notification's environment", () => {
+    expect(agentNotificationRouteForBots("/threads/env%201/home%2F1", botsForEnvironment)).toBe(
+      "/bots/env%201/bot%2F1",
+    );
+    expect(agentNotificationRouteForBots("/threads/other/home%2F1", botsForEnvironment)).toBe(
+      "/threads/other/home%2F1",
+    );
+  });
+
+  it("keeps the thread route for unknown threads and unavailable bots lists", () => {
+    expect(agentNotificationRouteForBots("/threads/env%201/ordinary", botsForEnvironment)).toBe(
+      "/threads/env%201/ordinary",
+    );
+    expect(agentNotificationRouteForBots("/threads/env%201/home%2F1", () => null)).toBe(
+      "/threads/env%201/home%2F1",
+    );
+    expect(agentNotificationRouteForBots("/threads/env%201/home%2F1", () => [])).toBe(
+      "/threads/env%201/home%2F1",
+    );
+  });
+});
+
+describe("agentNotificationUrlForBots", () => {
+  it.each(["t3code", "t3code-dev", "t3code-preview"])(
+    "maps native notification links for %s",
+    (scheme) => {
+      expect(
+        agentNotificationUrlForBots(`${scheme}://threads/env%201/home%2F1`, botsForEnvironment),
+      ).toBe(`${scheme}://bots/env%201/bot%2F1`);
+    },
+  );
+
+  it.each([
+    "https://example.com/threads/env%201/home%2F1",
+    "t3code-dev://threads/env%201/home%2F1?x=1",
+    "t3code-dev://threads/env%201/%invalid",
+    "t3code-dev://threads/other/home%2F1",
+    "t3code-dev://bots/env%201/bot%2F1",
+    "t3code-dev://connections/new?autoConnect=1",
+  ])("preserves other links: %s", (url) => {
+    expect(agentNotificationUrlForBots(url, botsForEnvironment)).toBe(url);
   });
 });
