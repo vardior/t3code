@@ -229,14 +229,20 @@ function BotInfo(props: {
               <ThemedSwitch
                 accessibilityLabel={`${task.enabled ? "Pause" : "Resume"} schedule ${task.title}`}
                 value={task.enabled}
-                disabled={busy}
-                onValueChange={(enabled) =>
-                  void act(() => setEnabled({ environmentId, input: { id: task.id, enabled } }))
-                }
+                disabled={busy || bot.paused}
+                onValueChange={(enabled) => {
+                  if (bot.paused) return;
+                  void act(() => setEnabled({ environmentId, input: { id: task.id, enabled } }));
+                }}
               />
             </View>
           ))
         )}
+        {bot.paused ? (
+          <Text className="px-4 pb-3 text-sm text-foreground-muted">
+            Resume the bot to change its schedules.
+          </Text>
+        ) : null}
       </SettingsSection>
       <Pressable
         accessibilityRole="button"

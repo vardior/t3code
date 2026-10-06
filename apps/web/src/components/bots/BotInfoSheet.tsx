@@ -62,9 +62,17 @@ export function BotInfoSheet(props: {
               <p className="text-muted-foreground">No schedule.</p>
             ) : (
               schedules.map((task) => (
-                <ScheduleRow key={task.id} task={task} environmentId={props.environmentId} />
+                <ScheduleRow
+                  key={task.id}
+                  task={task}
+                  environmentId={props.environmentId}
+                  botPaused={props.bot.paused}
+                />
               ))
             )}
+            {props.bot.paused ? (
+              <p className="text-muted-foreground">Resume the bot to change its schedules.</p>
+            ) : null}
             <PauseBotButton
               bot={props.bot}
               environmentId={props.environmentId}
@@ -164,6 +172,7 @@ function PauseBotButton(props: {
 function ScheduleRow(props: {
   readonly task: ScheduledTask;
   readonly environmentId: EnvironmentId;
+  readonly botPaused: boolean;
 }) {
   const navigate = useNavigate();
   const setEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
@@ -172,7 +181,7 @@ function ScheduleRow(props: {
   const [busy, setBusy] = useState(false);
 
   const toggle = async (enabled: boolean) => {
-    if (busy) return;
+    if (busy || props.botPaused) return;
     setBusy(true);
     const result = await setEnabled({
       environmentId: props.environmentId,
@@ -212,7 +221,7 @@ function ScheduleRow(props: {
       <Switch
         aria-label={props.task.enabled ? "Pause schedule" : "Resume schedule"}
         checked={props.task.enabled}
-        disabled={busy}
+        disabled={busy || props.botPaused}
         onCheckedChange={(checked) => void toggle(checked)}
       />
     </div>
