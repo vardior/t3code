@@ -16,7 +16,7 @@ import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
 } from "../../native/SelectableMarkdownText";
-import { useEnvironments } from "../../state/environments";
+import { useWorkspaceEnvironmentIds } from "../../state/workspace";
 import { botMarkdownThreadLinks, botThreadLinkTarget } from "./botChat.logic";
 import { useThreadShell } from "../../state/entities";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
@@ -167,8 +167,7 @@ export function BotMarkdown(props: {
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const styles = useMarkdownPreviewStyles();
-  const { environments } = useEnvironments();
-  const knownEnvironmentIds = environments.map((entry) => entry.environmentId);
+  const knownEnvironmentIds = useWorkspaceEnvironmentIds();
   const markdown = botMarkdownThreadLinks(
     rewriteThreadLinks(props.text, "https://t3.invalid"),
     knownEnvironmentIds,

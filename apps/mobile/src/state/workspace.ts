@@ -23,6 +23,10 @@ const hasSyncingConnectedEnvironmentAtom = Atom.make((get) =>
   ),
 ).pipe(Atom.withLabel("mobile:has-syncing-connected-environment"));
 
+export function useWorkspaceEnvironmentIds() {
+  return useAtomValue(workspaceConnections.environmentIdsAtom);
+}
+
 export function useWorkspaceEnvironments() {
   return useAtomValue(workspaceConnections.environmentsAtom);
 }
