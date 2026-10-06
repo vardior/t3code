@@ -2017,6 +2017,12 @@ const make = Effect.gen(function* () {
   return OrchestratorMcpService.of({
     scheduleTask: Effect.fn("OrchestratorMcpService.scheduleTask")(function* (scope, input) {
       const { parent, limits } = yield* loadCaller(scope);
+      if (input.checkCommand !== undefined && limits.runtimeMode !== "full-access") {
+        return yield* failure(
+          "runtime_mode_escalation_denied",
+          "Setting or changing checkCommand requires a full-access caller.",
+        );
+      }
       const projectId = yield* resolveProjectTarget(parent, input.projectId);
       yield* assertLiveCallerForOtherProject(scope, parent, projectId);
       const project = yield* requireProject(projectId);
@@ -2098,6 +2104,12 @@ const make = Effect.gen(function* () {
     updateScheduledTask: Effect.fn("OrchestratorMcpService.updateScheduledTask")(
       function* (scope, input) {
         const { parent, limits } = yield* loadCaller(scope);
+        if (input.checkCommand !== undefined && limits.runtimeMode !== "full-access") {
+          return yield* failure(
+            "runtime_mode_escalation_denied",
+            "Setting or changing checkCommand requires a full-access caller.",
+          );
+        }
         const existing = yield* loadScheduledTask(input.scheduledTaskId, limits);
         yield* assertLiveCallerForOtherProject(scope, parent, existing.projectId);
         if (

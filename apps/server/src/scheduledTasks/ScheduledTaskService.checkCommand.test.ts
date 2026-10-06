@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import { ScheduledTaskId, ScheduledTaskUpsertInput } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import { ChildProcessSpawner } from "effect/process";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -209,4 +210,47 @@ it.effect("Run now starts the turn even when the check is quiet", () =>
     );
     assert.deepEqual(yield* Ref.get(launchedPrompts), ["Act on the poll output."]);
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("an approval-required task fails without executing its check", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* insertCheckedTask(sql, {
+      id: "restricted",
+      next: "2026-09-09T12:00:00.000Z",
+      checkCommand: "echo news",
+    });
+    yield* sql`UPDATE scheduled_tasks SET runtime_mode = 'approval-required' WHERE task_id = 'restricted'`;
+    const result = yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      return yield* service.runNow({ id: ScheduledTaskId.make("restricted") });
+    }).pipe(
+      Effect.provide(
+        ScheduledTaskService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Scheduler.layer,
+              Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                launch: () => Effect.die("Unexpected dispatch"),
+              }),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.succeed(
+                ChildProcessSpawner.ChildProcessSpawner,
+                ChildProcessSpawner.make(() => Effect.die("Unexpected check execution")),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    assert.equal(result.task.lastRunStatus, "failed");
+    assert.include(
+      result.task.lastRunError ?? "",
+      "Check commands require full-access runtime mode.",
+    );
+    assert.equal(result.task.runCount, 1);
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
 );

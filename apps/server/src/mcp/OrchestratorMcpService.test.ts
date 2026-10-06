@@ -14,13 +14,13 @@ import {
   type OrchestrationV2ThreadShell,
   type ScheduledTask,
   type ScheduledTaskUpsertInput,
-  ScheduledTaskId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
@@ -3768,3 +3768,97 @@ describe("OrchestratorMcpService thread stop", () => {
     ),
   );
 });
+
+it.effect("approval-required callers cannot create or change scheduled check commands", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:checked-task");
+    const projectId = ProjectId.make("project:checked-task");
+    const taskId = ScheduledTaskId.make("checked-task");
+    const scope: McpInvocationScope = {
+      environmentId: EnvironmentId.make("environment:checked-task"),
+      requestNamespace: "checked-task",
+      thread: {
+        threadId,
+        providerSessionId: "checked-task",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      },
+      client: undefined,
+      capabilities: new Set(["orchestration"]),
+      issuedAt: 1,
+    };
+    let runtimeMode: "approval-required" | "full-access" = "approval-required";
+    const saved = yield* Ref.make<ReadonlyArray<string | null | undefined>>([]);
+    const dependencies = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.mock(ThreadManagementService.ThreadManagementService)({
+        getThreadShell: () => Effect.succeed(liveThreadShell(threadId, { runtimeMode })),
+        getThreadRecords: () =>
+          Effect.succeed({
+            ...idleThreadProjection({ ...liveThreadShell(threadId, { runtimeMode }), projectId }),
+            runs: [
+              {
+                id: RunId.make("run:checked-task"),
+                ordinal: 1,
+                status: "running",
+                providerInstanceId: ProviderInstanceId.make("codex"),
+              },
+            ],
+          } as unknown as OrchestrationV2ThreadProjection),
+      }),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+        list: () => Effect.succeed([]),
+      }),
+      Layer.mock(ProjectService.ProjectService)({
+        getById: () => Effect.succeed({ id: projectId } as never),
+      }),
+      ServerSettings.layerTest(),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+      Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+        list: () =>
+          Effect.succeed({
+            tasks: [
+              {
+                id: taskId,
+                projectId,
+                threadId: null,
+                runtimeMode: "approval-required",
+                interactionMode: "default",
+              } as never,
+            ],
+          }),
+        upsert: (input) =>
+          Ref.update(saved, (values) => [...values, input.checkCommand]).pipe(
+            Effect.as({
+              task: { ...input, id: taskId, nextRunAt: null, lastRunAt: null },
+            } as never),
+          ),
+      }),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      const create = {
+        prompt: "Check",
+        schedule: { type: "interval" as const, everyMs: 60_000 },
+        checkCommand: "echo news",
+      };
+      const deniedCreate = yield* service.scheduleTask(scope, create).pipe(Effect.flip);
+      assert.equal(deniedCreate.code, "runtime_mode_escalation_denied");
+      for (const checkCommand of ["echo news", null]) {
+        const deniedUpdate = yield* service
+          .updateScheduledTask(scope, { scheduledTaskId: taskId, checkCommand })
+          .pipe(Effect.flip);
+        assert.equal(deniedUpdate.code, "runtime_mode_escalation_denied");
+      }
+      assert.deepEqual(yield* Ref.get(saved), []);
+      yield* service.updateScheduledTask(scope, { scheduledTaskId: taskId, title: "Renamed" });
+      runtimeMode = "full-access";
+      yield* service.scheduleTask(scope, create);
+      yield* service.updateScheduledTask(scope, {
+        scheduledTaskId: taskId,
+        checkCommand: "echo updated",
+      });
+      assert.deepEqual(yield* Ref.get(saved), [undefined, "echo news", "echo updated"]);
+    }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
+  }),
+);

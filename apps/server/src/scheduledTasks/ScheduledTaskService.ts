@@ -767,6 +767,11 @@ export const layer = Layer.effect(
       task: ScheduledTask,
       checkCommand: string,
     ) {
+      if (task.runtimeMode !== "full-access") {
+        return yield* taskError("Check commands require full-access runtime mode.", {
+          taskId: task.id,
+        });
+      }
       const projects = yield* sql<{ workspace_root: string }>`
         SELECT workspace_root FROM projection_projects WHERE project_id = ${task.projectId}
       `;
