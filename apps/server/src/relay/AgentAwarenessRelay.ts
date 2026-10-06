@@ -40,6 +40,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as BotService from "../bots/BotService.ts";
 import {
   isAgentActivityPublishingEnabledValue,
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -52,6 +53,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 export class AgentAwarenessRelay extends Context.Service<
   AgentAwarenessRelay,
@@ -403,6 +405,8 @@ export const make = Effect.gen(function* () {
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
+  const bots = yield* BotService.BotService;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const random = yield* SecureRandom.SecureRandom;
   const signingKey = yield* EnvironmentSigningKey;
   const scope = yield* Effect.scope;
@@ -564,8 +568,15 @@ export const make = Effect.gen(function* () {
       // Subagents and side chats have no relay rows to clear; per-event tombstones would needlessly redeliver user aggregates.
       return;
     }
+    const notificationsSuppressed =
+      threadShell !== null &&
+      !(yield* settings.getSettings).notifyAgentThreads &&
+      !(yield* bots.isHomeThread(threadId));
+    if (notificationsSuppressed && !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)) {
+      return;
+    }
     const thread =
-      threadShell === null || threadShell.archivedAt !== null
+      threadShell === null || threadShell.archivedAt !== null || notificationsSuppressed
         ? Option.none<AgentAwarenessThread>()
         : Option.some(threadShell);
     const project = Option.isSome(thread)
@@ -604,7 +615,9 @@ export const make = Effect.gen(function* () {
     // Confirm tombstones over live state to avoid removing active cards.
     // Confirm completion: a run can end moments before its continuation starts, and the relay
     // alerts on every move into completed.
-    const requiresConfirmation = snapshot.state === null || snapshot.state?.phase === "completed";
+    const requiresConfirmation =
+      !notificationsSuppressed &&
+      (snapshot.state === null || snapshot.state?.phase === "completed");
     if (requiresConfirmation) {
       if (snapshot.state?.phase === "completed") heldCompletions.add(threadId);
       const nowMs = (yield* DateTime.now).epochMilliseconds;
@@ -917,6 +930,30 @@ export const make = Effect.gen(function* () {
 
   const start: AgentAwarenessRelay["Service"]["start"] = Effect.fn("AgentAwarenessRelay.start")(
     function* () {
+      const settingsChanges = yield* settings.subscribeChanges;
+      const initialSettings = yield* settings.getSettings.pipe(Effect.orDie);
+      yield* forkParked(
+        Stream.concat(Stream.succeed(initialSettings), settingsChanges).pipe(
+          Stream.map((current) => current.notifyAgentThreads),
+          Stream.changes,
+          Stream.drop(1),
+          Stream.runForEach(() =>
+            Effect.gen(function* () {
+              const snapshot = yield* threads.getShellSnapshot();
+              const published = yield* Ref.get(publishedStateByThreadRef);
+              const threadIds = new Set([
+                ...snapshot.threads.map((thread) => thread.id),
+                ...published.keys(),
+              ]);
+              yield* Effect.forEach(threadIds, enqueueThreadPublish, { discard: true });
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("agent notification settings reconciliation failed", { cause }),
+              ),
+            ),
+          ),
+        ),
+      );
       const [relayConfig, publishEnabled] = yield* Effect.all([
         readRelayConfig.pipe(Effect.orElseSucceed(() => null)),
         readPublishAgentActivityEnabled.pipe(Effect.orElseSucceed(() => false)),

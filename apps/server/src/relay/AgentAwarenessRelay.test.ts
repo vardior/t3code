@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   EventId,
   MessageId,
@@ -12,10 +13,12 @@ import {
   ProviderInstanceId,
   RunId,
   RuntimeRequestId,
+  type ServerSettings,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
 import { RelayAgentActivityState } from "@t3tools/contracts/relay";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -31,6 +34,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import * as EnvironmentKeys from "../cloud/environmentKeys.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as BotService from "../bots/BotService.ts";
 import {
   PUBLISH_AGENT_ACTIVITY_SECRET,
   RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
@@ -42,6 +46,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ServerSettingsService from "../serverSettings.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
@@ -171,6 +176,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly linked?: boolean;
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
+    readonly notifyAgentThreads?: boolean;
+    readonly homeThread?: boolean;
     readonly catchUpThreads?: ReadonlyArray<OrchestrationV2ThreadShell>;
   } = {},
 ) {
@@ -205,6 +212,28 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getOrCreateRandom: unused,
   });
   const currentShell = yield* Ref.make<OrchestrationV2ThreadShell | null>(shell());
+  const currentSettings = yield* Ref.make({
+    ...DEFAULT_SERVER_SETTINGS,
+    notifyAgentThreads: options.notifyAgentThreads ?? true,
+  });
+  const settingsChanges = yield* Queue.unbounded<ServerSettings>();
+  const publicationEvents = yield* Queue.unbounded<RelayAgentActivityState | null>();
+  const settings = ServerSettingsService.ServerSettingsService.of({
+    start: Effect.void,
+    ready: Effect.void,
+    getSettings: Ref.get(currentSettings),
+    updateSettings: (patch) =>
+      Effect.gen(function* () {
+        const next = applyServerSettingsPatch(yield* Ref.get(currentSettings), patch);
+        yield* Ref.set(currentSettings, next);
+        yield* Queue.offer(settingsChanges, next);
+        return next;
+      }),
+    updateProviderInstance: unused,
+    withSettingsSnapshot: (use) => Ref.get(currentSettings).pipe(Effect.flatMap(use)),
+    streamChanges: Stream.fromQueue(settingsChanges),
+    subscribeChanges: Effect.succeed(Stream.fromQueue(settingsChanges)),
+  });
   const shellReads: ThreadId[] = [];
   const catchUp = { activitySnapshotReads: 0 };
   const threads = ThreadManagementService.ThreadManagementService.of({
@@ -288,6 +317,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
         authorization: new Headers(init?.headers).get("authorization"),
         state: payload.state,
       });
+      Queue.offerUnsafe(publicationEvents, payload.state);
       return Promise.resolve(
         options.respond?.(publications.length) ?? Response.json({ ok: true, deliveries: [] }),
       );
@@ -307,6 +337,12 @@ const makeTestRelay = Effect.fnUntraced(function* (
   const relay = yield* AgentAwarenessRelay.make.pipe(
     Effect.provide(EnvironmentKeys.layer),
     Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
+    Effect.provideService(ServerSettingsService.ServerSettingsService, settings),
+    Effect.provideService(BotService.BotService, {
+      list: unused,
+      setPaused: unused,
+      isHomeThread: () => Effect.succeed(options.homeThread ?? false),
+    }),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
     Effect.provideService(ServerEnvironment.ServerEnvironment, {
       getEnvironmentId: Effect.succeed(EnvironmentId.make("relay-environment")),
@@ -327,10 +363,92 @@ const makeTestRelay = Effect.fnUntraced(function* (
     Effect.provideService(FetchHttpClient.Fetch, fetch),
     Effect.provide(NodeCrypto.layer),
   );
-  return { relay, secrets, secretReads, currentShell, shellReads, publications, catchUp };
+  return {
+    relay,
+    secrets,
+    secretReads,
+    currentShell,
+    shellReads,
+    publications,
+    catchUp,
+    settings,
+    publicationEvents,
+  };
 });
 
 describe("AgentAwarenessRelay", () => {
+  it.effect("publishes ordinary threads with agent notifications enabled by default", () =>
+    Effect.gen(function* () {
+      const { relay, publications } = yield* makeTestRelay();
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications[0]?.state?.phase, "running");
+    }),
+  );
+
+  it.effect("keeps ordinary threads absent while agent notifications are disabled", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        notifyAgentThreads: false,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, shell({ title: "Updated ordinary thread" }));
+      yield* relay.publishThread(THREAD_ID);
+      assert.deepStrictEqual(publications, []);
+    }),
+  );
+
+  it.effect(
+    "clears published activity on disable and republishes on enable without thread events",
+    () =>
+      Effect.gen(function* () {
+        const { relay, settings, publicationEvents, publications } = yield* makeTestRelay({
+          catchUpThreads: [shell()],
+        });
+        yield* relay.start();
+        yield* relay.publishThread(THREAD_ID);
+        assert.equal((yield* Queue.take(publicationEvents))?.phase, "running");
+        yield* settings.updateSettings({ notifyAgentThreads: false });
+        assert.isNull(yield* Queue.take(publicationEvents));
+        yield* relay.drain;
+        yield* relay.publishThread(THREAD_ID);
+        assert.equal(publications.length, 2);
+        yield* settings.updateSettings({ notifyAgentThreads: true });
+        assert.equal((yield* Queue.take(publicationEvents))?.phase, "running");
+        yield* relay.drain;
+        assert.deepStrictEqual(
+          publications.map((publication) => publication.state?.phase ?? null),
+          ["running", null, "running"],
+        );
+      }),
+  );
+
+  it.effect("publishes bot home threads while agent notifications are disabled", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        notifyAgentThreads: false,
+        homeThread: true,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({
+          title: "Bot needs input",
+          status: "waiting",
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("bot-input"),
+            kind: "user_input",
+            createdAt: DateTime.makeUnsafe(NOW),
+          },
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.deepStrictEqual(
+        publications.map((publication) => publication.state?.phase),
+        ["running", "waiting_for_input"],
+      );
+    }),
+  );
+
   it.effect("publishes the parent as needing approval while its subagent waits", () =>
     Effect.gen(function* () {
       const shells = yield* Ref.make(

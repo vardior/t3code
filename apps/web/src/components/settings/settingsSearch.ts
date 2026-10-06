@@ -665,6 +665,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification sound alert completion input approval desktop"],
   },
   {
+    id: "agent-thread-notifications",
+    title: "Agent threads",
+    to: "/settings/general",
+    searchTerms: ["notification bot home phone live updates"],
+    scope: "environment-defaults",
+  },
+  {
     id: "in-app-notifications",
     title: "In-app notifications",
     to: "/settings/general",

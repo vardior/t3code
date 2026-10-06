@@ -43,6 +43,9 @@ import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/pu
 import { makePermissionStatusAtom } from "../../lib/permissionStatusAtom";
 import { runtime } from "../../lib/runtime";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { useEnvironments } from "../../state/environments";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -119,12 +122,48 @@ export function SettingsNotificationsRouteScreen() {
           <Text className="text-base text-foreground-muted">
             Notifications require T3 Connect in this app build.
           </Text>
+          <AgentThreadNotificationSettings />
         </ScrollView>
       </SettingsScreen>
     );
   }
 
   return <ConfiguredSettingsNotificationsRouteScreen />;
+}
+
+function AgentThreadNotificationSettings() {
+  const { environments } = useEnvironments();
+  const [pending, setPending] = useState(false);
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "agent notification settings update",
+    reportFailure: true,
+  });
+  const targets = environments.filter(
+    (environment) => environment.connection.phase === "connected" && environment.serverConfig,
+  );
+  if (targets.length === 0) return null;
+
+  return (
+    <SettingsSection title="Threads">
+      {targets.map((environment) => (
+        <SettingsSwitchRow
+          key={environment.environmentId}
+          icon="bell.badge"
+          label="Agent threads"
+          subtitle={`${environment.label} · Bots always notify`}
+          disabled={pending}
+          value={environment.serverConfig?.settings.notifyAgentThreads ?? true}
+          onValueChange={(notifyAgentThreads) => {
+            setPending(true);
+            void updateSettings({
+              environmentId: environment.environmentId,
+              input: { patch: { notifyAgentThreads } },
+            }).finally(() => setPending(false));
+          }}
+        />
+      ))}
+    </SettingsSection>
+  );
 }
 
 function ConfiguredSettingsNotificationsRouteScreen() {
@@ -422,6 +461,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           paddingBottom: Math.max(insets.bottom, 18) + 18,
         }}
       >
+        <AgentThreadNotificationSettings />
         <SettingsSection title="Agent activity">
           <SettingsSwitchRow
             icon="bell.badge"

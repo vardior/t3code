@@ -9,10 +9,36 @@ import {
 } from "../../threadNotifications";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingsRow } from "./settingsLayout";
+import { ScopedSwitch } from "./ScopedSwitch";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 export function NotificationSettings() {
+  const notifyAgentThreads = useScopedSettings((settings) => settings.notifyAgentThreads);
+  const updateSettings = useUpdateScopedSettings();
+
+  return (
+    <>
+      <SettingsRow
+        {...searchableSetting("agent-thread-notifications")}
+        serverScoped
+        settingKeys={["notifyAgentThreads"]}
+        description="Bots always notify. Applies to this server, including phone notifications and live updates."
+        control={
+          <ScopedSwitch
+            settingKeys={["notifyAgentThreads"]}
+            checked={notifyAgentThreads}
+            aria-label="Agent threads"
+            onCheckedChange={(checked) => updateSettings({ notifyAgentThreads: checked })}
+          />
+        }
+      />
+      <DeviceNotificationSettings />
+    </>
+  );
+}
+
+function DeviceNotificationSettings() {
   const mode = useScopedSettings((settings) => settings.notificationMode);
   const updateSettings = useUpdateScopedSettings();
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);

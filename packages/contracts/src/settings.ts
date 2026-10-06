@@ -1336,6 +1336,7 @@ export const ServerSettings = Schema.Struct({
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  notifyAgentThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
@@ -1767,6 +1768,7 @@ export const ServerSettingsPatch = Schema.Struct({
       providerModelPreferences: Schema.optionalKey(ProviderModelPreferences),
     }),
   ),
+  notifyAgentThreads: Schema.optionalKey(Schema.Boolean),
   worktreeCleanup: Schema.optionalKey(
     Schema.NullOr(
       Schema.Union([
