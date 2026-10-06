@@ -579,7 +579,7 @@ export const make = Effect.gen(function* () {
         messageRunIds: [threadShell.latestRunId],
       });
       const run = records.runs.find((candidate) => candidate.id === threadShell.latestRunId);
-      const message = records.messages.find((message) => message.id === run?.userMessageId);
+      const message = records.messages.find((candidate) => candidate.id === run?.userMessageId);
       autoCompaction =
         message !== undefined &&
         message.id.startsWith("bot-auto-compact:") &&
@@ -594,20 +594,16 @@ export const make = Effect.gen(function* () {
         message.senderThreadId === undefined;
       ownerNotification = yield* bots.getOwnerNotification(threadId, threadShell.latestRunId);
     }
-    const activityState =
-      !botHome || threadShell === null
-        ? null
-        : projectThreadAwarenessV2({
-            environmentId,
-            project: { title: threadShell.title },
-            thread: threadShell,
-          });
+    const activityState = !botHome
+      ? null
+      : projectThreadAwarenessV2({
+          environmentId,
+          project: { title: threadShell.title },
+          thread: threadShell,
+        });
     const notificationsSuppressed =
       autoCompaction ||
-      (botHome &&
-        activityState?.phase === "completed" &&
-        !ownerStarted &&
-        ownerNotification === undefined) ||
+      (activityState?.phase === "completed" && !ownerStarted && ownerNotification === undefined) ||
       (threadShell !== null && !(yield* settings.getSettings).notifyAgentThreads && !botHome);
     if (notificationsSuppressed && !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)) {
       return;

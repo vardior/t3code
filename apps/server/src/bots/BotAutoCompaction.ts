@@ -3,6 +3,7 @@ import {
   CommandId,
   MessageId,
   latestProviderTurnForAttempt,
+  type OrchestrationV2ProviderFailure,
   type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -24,6 +25,9 @@ const CONTEXT_OVERFLOW_CODES = new Set([
 ]);
 const CONTEXT_OVERFLOW_MESSAGE =
   /\b(?:context[ -](?:length|window).{0,80}(?:exceeded|exceeds|too (?:long|large)|is full)|(?:exceeds?|exceeded|too (?:long|large)).{0,80}context[ -](?:length|window)|prompt is too long)\b/i;
+const isContextOverflow = (failure: OrchestrationV2ProviderFailure) =>
+  CONTEXT_OVERFLOW_CODES.has((failure.code ?? "").replace(/[^a-z]/gi, "").toLowerCase()) ||
+  CONTEXT_OVERFLOW_MESSAGE.test(failure.message);
 const COMPACTING_DRIVERS = new Set([
   "antigravity",
   "claudeAgent",
@@ -98,10 +102,7 @@ export const layer = Layer.effect(
           (item) =>
             item.type === "error" &&
             (item.providerTurnId === null || item.providerTurnId === providerTurn?.id) &&
-            (CONTEXT_OVERFLOW_CODES.has(
-              (item.failure.code ?? "").replace(/[^a-z]/gi, "").toLowerCase(),
-            ) ||
-              CONTEXT_OVERFLOW_MESSAGE.test(item.failure.message)),
+            isContextOverflow(item.failure),
         );
       if (!contextOverflow && (providerTurn?.tokenUsage?.usedTokens ?? 0) <= threshold) return;
 
