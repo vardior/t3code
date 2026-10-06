@@ -1,6 +1,7 @@
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
+import { threadsWithoutBotHomes } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   pickableProjectGroups,
   resolveScratchProjectScopeKey,
@@ -16,6 +17,7 @@ import type {
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_SIDEBAR_ROW_LAYOUT } from "./threadListAnimations";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useMemo, useRef, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
@@ -43,6 +45,8 @@ import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
 import { buildHomeListFilterMenuItems } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
+import { HomeBotsSection } from "../home/HomeBotsSection";
+import { useHomeBots } from "../home/useHomeBots";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -95,6 +99,7 @@ interface ThreadNavigationSidebarProps {
     thread: EnvironmentThreadShell,
     pr: ThreadPrPresentation,
   ) => void;
+  readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
   readonly onRequestVisibility: () => void;
   readonly searchQuery: string;
 }
@@ -117,7 +122,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const insets = useSafeAreaInsets();
   const { fabClearance, fabSize } = useAndroidControlSizing();
   const projects = useProjects();
-  const threads = useNavigationThreadShells();
+  const allThreads = useNavigationThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
@@ -166,6 +171,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           )
         ? [options.selectedEnvironmentId]
         : [];
+  const homeBots = useHomeBots(searchEnvironmentIds);
+  const bots = homeBots.bots;
+  const threads = threadsWithoutBotHomes(allThreads, bots);
+  const botEnvironmentLabels = new Map(
+    environments.map((environment) => [environment.environmentId, environment.label]),
+  );
   // A legacy per-environment scratch key resolves here on every render; the stored
   // value is only rewritten when the user picks a filter.
   const resolvedProjectKey = resolveScratchProjectScopeKey(options.selectedProjectKey, projects, {
@@ -574,6 +585,16 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     </Text>
   );
 
+  const botsHeader = (
+    <HomeBotsSection
+      bots={homeBots}
+      threads={allThreads}
+      environmentLabels={botEnvironmentLabels}
+      now={Date.parse(`${nowMinute}:00.000Z`)}
+      onSelectBot={props.onSelectBot}
+    />
+  );
+
   if (Platform.OS === "ios") {
     return (
       <>
@@ -608,6 +629,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListEmptyComponent={listEmpty}
+                ListHeaderComponent={botsHeader}
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>
@@ -631,7 +653,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           overflow: "hidden",
         }}
       >
-        {listItems.length === 0 ? (
+        {listItems.length === 0 && bots.length === 0 && homeBots.errors.length === 0 ? (
           <View className="flex-1 items-center justify-center">{listEmpty}</View>
         ) : (
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
@@ -661,6 +683,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListEmptyComponent={listEmpty}
+                ListHeaderComponent={botsHeader}
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>

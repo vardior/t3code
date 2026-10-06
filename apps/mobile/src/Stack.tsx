@@ -4,7 +4,6 @@ import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullR
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
 import { PullRequestDiscussionScreen } from "./features/pull-requests/PullRequestDiscussionScreen";
 import { BotChatRouteScreen } from "./features/bots/BotChatRouteScreen";
-import { SettingsBotsRouteScreen } from "./features/settings/SettingsBotsRouteScreen";
 import { createWorkspaceStackNavigator } from "./features/layout/createWorkspaceStackNavigator";
 import {
   createPathConfigForStaticNavigation,
@@ -282,11 +281,6 @@ const SETTINGS_SCREENS = {
     screen: SettingsFollowUpRouteScreen,
     linking: "settings/follow-ups",
     options: settingsPage("Chat"),
-  }),
-  SettingsBots: createNativeStackScreen({
-    screen: SettingsBotsRouteScreen,
-    linking: "settings/bots",
-    options: { ...SETTINGS_PAGE_OPTIONS, title: "Bots" },
   }),
   SettingsScheduledTasks: createNativeStackScreen({
     screen: SettingsScheduledTasksRouteScreen,

@@ -44,6 +44,64 @@ function makeThread(
   });
 }
 
+describe("home bot threads", () => {
+  const environmentId = EnvironmentId.make("environment-local");
+  const otherEnvironmentId = EnvironmentId.make("environment-remote");
+  const homeThreadId = ThreadId.make("bot-home");
+  const bot = {
+    id: "chief-of-staff",
+    name: "Chief of staff",
+    homeThreadId,
+    scheduledTaskIds: [],
+    paused: false,
+    charter: null,
+    workers: [],
+    slackDms: [],
+  };
+  const home = makeThread({
+    environmentId,
+    id: homeThreadId,
+    projectId: ProjectId.make("project"),
+    title: bot.name,
+  });
+
+  it("moves only the bot home out of the ordinary list, preserving workers and order", () => {
+    const worker = makeThread({
+      environmentId,
+      id: ThreadId.make("worker"),
+      projectId: home.projectId,
+      title: "Worker",
+    });
+    const ordinary = makeThread({
+      environmentId,
+      id: ThreadId.make("ordinary"),
+      projectId: home.projectId,
+      title: "Task",
+    });
+    expect(homeThreadsWithoutBotHomes([worker, home, ordinary], [{ environmentId, bot }])).toEqual([
+      worker,
+      ordinary,
+    ]);
+  });
+
+  it("keeps a matching thread ID from another environment", () => {
+    const otherHome = makeThread({
+      environmentId: otherEnvironmentId,
+      id: homeThreadId,
+      projectId: home.projectId,
+      title: "Another task",
+    });
+    expect(homeThreadsWithoutBotHomes([home, otherHome], [{ environmentId, bot }])).toEqual([
+      otherHome,
+    ]);
+  });
+
+  it("keeps the ordinary list when no bot summaries are available", () => {
+    const threads = [home];
+    expect(homeThreadsWithoutBotHomes(threads, [])).toBe(threads);
+  });
+});
+
 describe("home project scopes", () => {
   it("filters threads across both scratch hosts while retaining the selected environment boundary", () => {
     const localEnvironmentId = EnvironmentId.make("local");

@@ -81,6 +81,9 @@ export function WorkspaceThreadSidebar() {
         })
       }
       onOpenPendingTask={openPendingTask}
+      onSelectBot={(environmentId, botId) =>
+        navigation.navigate("BotChat", { environmentId, botId })
+      }
       onSelectThread={(thread) =>
         selectThreadRoute({
           environmentId: String(thread.environmentId),

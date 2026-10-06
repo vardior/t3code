@@ -4,6 +4,7 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
+import { threadsWithoutBotHomes } from "@t3tools/client-runtime/state/bot-conversation";
 import type { ThreadMoveDestination } from "../threads/threadOrder";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -16,6 +17,7 @@ import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-gro
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { useNavigation } from "@react-navigation/native";
 import { use, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Platform,
@@ -90,6 +92,9 @@ import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-sw
 import { useFabScroll } from "./FabScrollContext";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
+import { HomeBotsSection } from "./HomeBotsSection";
+import { HomeMorningCards } from "./HomeMorningCard";
+import { useHomeBots } from "./useHomeBots";
 
 interface HomeScreenProps {
   readonly projects: ReadonlyArray<EnvironmentProject>;
@@ -259,6 +264,9 @@ export function HomeScreen(props: HomeScreenProps) {
   const activeNewTask = useActiveNewTask();
   const selectedThreadKey = activeNewTask ? null : (primaryColumn?.selectedThreadKey ?? null);
   const fullSwipeWidth = primaryColumn && columnMetrics ? columnMetrics.width - 20 : undefined;
+  const navigation = useNavigation();
+  const handleSelectBot = (environmentId: EnvironmentId, botId: string) =>
+    navigation.navigate("BotChat", { environmentId, botId });
   const queuedThreadKeys = useQueuedThreadKeys();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const homeScrollGesture = useNativeGesture();
@@ -297,6 +305,12 @@ export function HomeScreen(props: HomeScreenProps) {
           )
         ? [props.selectedEnvironmentId]
         : [];
+  const homeBots = useHomeBots(searchEnvironmentIds);
+  const bots = homeBots.bots;
+  const threads = threadsWithoutBotHomes(props.threads, bots);
+  const botEnvironmentLabels = new Map(
+    props.environments.map((environment) => [environment.environmentId, environment.label]),
+  );
   const handleSwipeableWillOpen = (methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {
       openSwipeableRef.current?.close();
@@ -401,7 +415,7 @@ export function HomeScreen(props: HomeScreenProps) {
       ? {}
       : { projectIds: v2ScopedProjectGroup.projectRefs.map((ref) => ref.projectId) },
   );
-  const threadSearchMatchByKey = useThreadListSearchMatches(props.threads, threadSearch);
+  const threadSearchMatchByKey = useThreadListSearchMatches(threads, threadSearch);
   const v2ProjectTitleByProjectKey = new Map(
     projectScopes.flatMap((scope) =>
       scope.projectRefs.map(
@@ -464,7 +478,7 @@ export function HomeScreen(props: HomeScreenProps) {
     contentOnlyThreadKeys,
     olderSettledShelf,
   } = useThreadListV2({
-    threads: props.threads,
+    threads,
     pendingTasks: props.pendingTasks,
     environmentId: props.selectedEnvironmentId,
     projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
@@ -660,7 +674,7 @@ export function HomeScreen(props: HomeScreenProps) {
   };
 
   const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) ||
+    threads.some((thread) => thread.archivedAt === null) ||
     props.pendingTasks.length > 0 ||
     threadListV2Layout.settledCount > 0;
   const selectedEnvironmentLabel =
@@ -673,7 +687,7 @@ export function HomeScreen(props: HomeScreenProps) {
     projectCount: props.projects.length,
   });
 
-  if (!hasAnyThreads) {
+  if (!hasAnyThreads && bots.length === 0 && homeBots.errors.length === 0) {
     return (
       <View className={containerClassName}>
         <ScreenContent surface={sidebarSurface ? "drawer" : "screen"}>
@@ -744,6 +758,18 @@ export function HomeScreen(props: HomeScreenProps) {
           onProjectChange={props.onProjectChange}
         />
       ) : null}
+      <HomeMorningCards
+        environmentIds={searchEnvironmentIds}
+        environmentLabels={botEnvironmentLabels}
+        onSelectBot={handleSelectBot}
+      />
+      <HomeBotsSection
+        bots={homeBots}
+        threads={props.threads}
+        environmentLabels={botEnvironmentLabels}
+        now={Date.parse(`${nowMinute}:00.000Z`)}
+        onSelectBot={handleSelectBot}
+      />
     </>
   );
 
@@ -774,7 +800,12 @@ export function HomeScreen(props: HomeScreenProps) {
       />
     );
 
-  if (Platform.OS === "android" && threadListV2Items.length === 0) {
+  if (
+    Platform.OS === "android" &&
+    threadListV2Items.length === 0 &&
+    bots.length === 0 &&
+    homeBots.errors.length === 0
+  ) {
     return (
       <ScreenContent surface="screen">
         <View

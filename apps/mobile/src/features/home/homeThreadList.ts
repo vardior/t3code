@@ -8,6 +8,7 @@ import {
   toSortableTimestamp,
 } from "@t3tools/client-runtime/state/thread-sort";
 import type {
+  BotSummary,
   EnvironmentId,
   ScopedProjectRef,
   SidebarProjectGroupingMode,
@@ -16,10 +17,21 @@ import type {
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 
-import { scopedProjectKey } from "../../lib/scopedEntities";
+import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, "manual">;
+
+export function homeThreadsWithoutBotHomes(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  bots: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly bot: BotSummary }>,
+) {
+  if (bots.length === 0) return threads;
+  const homes = new Set(
+    bots.map(({ environmentId, bot }) => scopedThreadKey(environmentId, bot.homeThreadId)),
+  );
+  return threads.filter((thread) => !homes.has(scopedThreadKey(thread.environmentId, thread.id)));
+}
 
 export interface HomeProjectScope {
   readonly key: string;
