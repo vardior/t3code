@@ -1,3 +1,5 @@
+import { BotsDataProvider } from "./bots/BotsDataProvider";
+import { BotsSidebar } from "./bots/BotsSidebar";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -302,6 +304,9 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
     registerNavigationHistoryCommands(router),
     registerWorkspaceFocusCommands(router),
     registerPullRequestsEscapeCommand(router),
+    registerMenuAction("bots.open", () => {
+      void router.navigate({ to: "/bots", search: {} });
+    }),
     registerMenuAction("open-settings", () => {
       if (!/^\/settings(\/|$)/.test(router.state.location.pathname))
         void router.navigate({ to: "/settings" });
@@ -412,6 +417,20 @@ export function AppSidebarLayout({
   children: ReactNode;
   showSidebar?: boolean;
 }) {
+  return (
+    <BotsDataProvider>
+      <AppSidebarLayoutContent showSidebar={showSidebar}>{children}</AppSidebarLayoutContent>
+    </BotsDataProvider>
+  );
+}
+
+function AppSidebarLayoutContent({
+  children,
+  showSidebar,
+}: {
+  children: ReactNode;
+  showSidebar: boolean;
+}) {
   const sidebarArea = workspaceAreaProps("sidebar", 0, "Threads");
   const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
     observedKey: null,
@@ -422,6 +441,7 @@ export function AppSidebarLayout({
   const pathname = useLocation({ select: (location) => location.pathname });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
+  const isOnBots = pathname === "/bots";
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // A clamped drag may not change width, so viewport changes need a separate subscription.
@@ -469,7 +489,7 @@ export function AppSidebarLayout({
               data-app-sidebar=""
               {...sidebarArea}
               role="navigation"
-              aria-label="Threads"
+              aria-label={isOnBots ? "Bots" : "Threads"}
               resizable={{
                 maxWidth: sidebarMaximumWidth,
                 minWidth: sidebarMinimumWidth,
@@ -481,7 +501,11 @@ export function AppSidebarLayout({
               }}
               style={windowControlsInsetStyle}
             >
-              <ThreadSidebar routeReveal={sidebarRouteReveal} />
+              {isOnBots ? (
+                <BotsSidebar />
+              ) : (
+                <ThreadSidebar routeReveal={sidebarRouteReveal} />
+              )}
               <SidebarRail onDoubleClick={resetSidebarWidth} />
             </Sidebar>
           </>

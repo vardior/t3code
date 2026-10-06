@@ -248,6 +248,11 @@ export const make = Effect.gen(function* () {
       {
         label: "View",
         submenu: [
+          {
+            label: "Open Bots",
+            click: () => runMenuEffect("bots.open", dispatchMenuAction("bots.open")),
+          },
+          { type: "separator" },
           /* Native reload/DevTools/zoom roles target focused guests; these commands must target the app. */
           { label: "Reload", accelerator: "CmdOrCtrl+R", click: mainContentsClick("reload") },
           {

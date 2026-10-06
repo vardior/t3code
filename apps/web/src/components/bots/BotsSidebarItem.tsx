@@ -1,7 +1,7 @@
-import { useNavigate } from "@tanstack/react-router";
 import { BotIcon } from "lucide-react";
 import { useCallback } from "react";
 
+import { useOpenBots } from "./useOpenBots";
 import { SidebarUtilityItem } from "../sidebar/SidebarChrome";
 
 export function BotsSidebarItem({
@@ -9,11 +9,11 @@ export function BotsSidebarItem({
 }: {
   readonly closeMobileSidebar: () => void;
 }) {
-  const navigate = useNavigate();
+  const openBots = useOpenBots();
   const handleClick = useCallback(() => {
     closeMobileSidebar();
-    void navigate({ to: "/bots" });
-  }, [closeMobileSidebar, navigate]);
+    void openBots();
+  }, [closeMobileSidebar, openBots]);
 
   return <SidebarUtilityItem icon={<BotIcon />} label="Bots" onClick={handleClick} />;
 }
