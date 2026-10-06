@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { botComposerReducer, botStatusLabel, initialBotComposer } from "./botChat.logic";
+import {
+  botChatScrollReducer,
+  botComposerReducer,
+  botStatusLabel,
+  initialBotComposer,
+} from "./botChat.logic";
 
 const now = Date.parse("2026-10-06T12:00:00Z");
 
@@ -93,5 +98,24 @@ describe("bot text submission", () => {
     expect(botComposerReducer(pending, { type: "edit", text: "another draft" })).toBe(pending);
     const empty = initialBotComposer(draft.scope);
     expect(botComposerReducer(empty, { type: "send", requestId: "empty" })).toBe(empty);
+  });
+});
+
+describe("bot chat end following after disclosure", () => {
+  it("retains live-end following across expansion and collapse until the user drags", () => {
+    const expandedAtEnd = botChatScrollReducer(false, { type: "disclosure", atEnd: true });
+    expect(expandedAtEnd).toBe(true);
+    const collapsedAwayFromEnd = botChatScrollReducer(expandedAtEnd, {
+      type: "disclosure",
+      atEnd: false,
+    });
+    expect(collapsedAwayFromEnd).toBe(true);
+    const dragged = botChatScrollReducer(collapsedAwayFromEnd, { type: "drag" });
+    expect(dragged).toBe(false);
+    expect(botChatScrollReducer(dragged, { type: "disclosure", atEnd: false })).toBe(false);
+  });
+
+  it("does not follow new messages when a disclosure was opened away from the end", () => {
+    expect(botChatScrollReducer(false, { type: "disclosure", atEnd: false })).toBe(false);
   });
 });

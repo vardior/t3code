@@ -27,6 +27,7 @@ export function BotChatRow(props: {
   readonly schedules: ReadonlyArray<ScheduledTask>;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
+  readonly onDisclosureToggle: () => void;
 }) {
   const { item } = props;
   if (item.kind === "worker")
@@ -94,6 +95,7 @@ function WorkerRow(props: {
 }
 
 function WakeRow(props: {
+  readonly onDisclosureToggle: () => void;
   readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
   readonly botName: string;
   readonly environmentId: EnvironmentId;
@@ -123,7 +125,10 @@ function WakeRow(props: {
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
-        onPress={() => setExpanded(!expanded)}
+        onPress={() => {
+          props.onDisclosureToggle();
+          setExpanded(!expanded);
+        }}
         className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70"
       >
         <Text numberOfLines={2} className="text-xs text-foreground-muted">

@@ -59,3 +59,10 @@ export function botComposerReducer(
     error: action.error,
   };
 }
+
+export function botChatScrollReducer(
+  followingEnd: boolean,
+  action: { readonly type: "disclosure"; readonly atEnd: boolean } | { readonly type: "drag" },
+) {
+  return action.type === "drag" ? false : followingEnd || action.atEnd;
+}

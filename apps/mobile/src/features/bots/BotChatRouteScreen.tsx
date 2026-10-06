@@ -23,7 +23,7 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
-import { botComposerReducer, initialBotComposer } from "./botChat.logic";
+import { botChatScrollReducer, botComposerReducer, initialBotComposer } from "./botChat.logic";
 import { useBots, useBotRunSettlement } from "./useBots";
 
 type BotChatRouteProps = StaticScreenProps<{
@@ -104,6 +104,11 @@ function BotConversation(props: {
   const nativeInsetOvercount = Platform.OS === "ios" ? insets.bottom : 0;
   const listRef = useRef<LegendListRef>(null);
   const composerOverlayRef = useRef<ViewInstance>(null);
+  const followEndAfterDisclosure = useRef(false);
+  useLayoutEffect(() => {
+    if (items.length === 0) return;
+    if (followEndAfterDisclosure.current) void listRef.current?.scrollToEnd({ animated: false });
+  }, [items]);
   const initialComposerHeight = 88 + Math.max(insets.bottom, 12) - nativeInsetOvercount;
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
@@ -205,6 +210,16 @@ function BotConversation(props: {
               schedules={schedules.data?.tasks ?? []}
               onOpenThread={openThread}
               onPreview={setPreview}
+              onDisclosureToggle={() => {
+                followEndAfterDisclosure.current = botChatScrollReducer(
+                  followEndAfterDisclosure.current,
+                  {
+                    type: "disclosure",
+                    atEnd:
+                      listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
+                  },
+                );
+              }}
             />
           )}
           style={{ flex: 1 }}
@@ -218,11 +233,17 @@ function BotConversation(props: {
           contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 18, gap: 12 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          onScrollBeginDrag={() => {
+            followEndAfterDisclosure.current = botChatScrollReducer(
+              followEndAfterDisclosure.current,
+              { type: "drag" },
+            );
+          }}
           initialScrollAtEnd
           alignItemsAtEnd
           maintainScrollAtEnd={{
             animated: false,
-            on: { dataChange: true, itemLayout: true, layout: true },
+            on: { dataChange: true, itemLayout: false, layout: true },
           }}
           maintainVisibleContentPosition
           getItemType={(item) => item.kind}
