@@ -56,7 +56,7 @@ export function BotChatRow(props: {
               key={attachmentId}
               environmentId={props.environmentId}
               resource={{ _tag: "attachment", attachmentId }}
-              alt="Image"
+              alt={null}
               onPressPreview={props.onPreview}
             />
           ))
