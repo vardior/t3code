@@ -165,9 +165,9 @@ it.effect("an edit that omits the check command keeps it, and null removes it", 
             Layer.mock(SecretRequests.SecretRequests)({}),
           ),
         ),
+        Layer.provide(SqlitePersistence.layerMemory),
       ),
     ),
-    Effect.provide(SqlitePersistence.layerMemory),
   ),
 );
 
