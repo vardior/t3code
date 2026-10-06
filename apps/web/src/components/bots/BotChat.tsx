@@ -5,18 +5,20 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type BotSummary,
   type EnvironmentId,
   type ProviderInteractionMode,
   type RuntimeMode,
   type ScheduledTask,
   type ThreadId,
-  type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { ArrowUpIcon, BotIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
+  memo,
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -27,26 +29,42 @@ import {
 } from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
-import { useComposerDraftStore } from "../../composerDraftStore";
+import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
 import { newMessageId, randomUUID } from "../../lib/utils";
-import { useThreadShell } from "../../state/entities";
+import { useServerConfigs, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
-import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
+import {
+  useEnvironmentThread,
+  refreshEnvironmentThread,
+  threadEnvironment,
+} from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import {
+  awaitAttachmentUploads,
+  getUploadedAttachments,
+  releaseAttachmentUpload,
+  retryAttachmentUpload,
+  startAttachmentUpload,
+  useAttachmentUploadStore,
+} from "../../lib/attachmentUploadQueue";
+import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
+import { createBotChatProjector } from "./botChatRows";
 import ChatMarkdown from "../ChatMarkdown";
 import { readFileAsDataUrl } from "../ChatView.logic";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
-  buildBotChat,
   botConversationStatus,
   botWakeSenderLabel,
   rewriteThreadLinks,
   threadIdFromHref,
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
+
+const EMPTY_SCHEDULES: ReadonlyArray<ScheduledTask> = [];
+const EMPTY_IMAGES: ReadonlyArray<ComposerImageAttachment> = [];
 
 export function BotChat(props: {
   readonly bot: BotSummary;
@@ -80,16 +98,33 @@ export function BotChat(props: {
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
   );
+  const projectChat = useMemo(() => createBotChatProjector(), []);
+  const threadError = Option.getOrNull(thread.error);
+  const disabledReason =
+    thread.status === "deleted"
+      ? "This bot's home thread is missing"
+      : threadError !== null
+        ? "Could not load this bot’s home thread"
+        : projection === null
+          ? "Loading this bot’s home thread…"
+          : null;
   const items = useMemo(
     () =>
-      buildBotChat({
+      projectChat({
         bot: props.bot,
         detail: detail.data,
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [props.bot, detail.data, projection?.messages, projection?.runs, projection?.turnItems],
+    [
+      projectChat,
+      props.bot,
+      detail.data,
+      projection?.messages,
+      projection?.runs,
+      projection?.turnItems,
+    ],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
@@ -153,11 +188,14 @@ export function BotChat(props: {
     if (!working) onRunSettled();
   }, [working]);
   const navigate = useNavigate();
-  const openThread = (threadId: ThreadId) =>
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: props.environmentId, threadId },
-    });
+  const openThread = useCallback(
+    (threadId: ThreadId) =>
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: props.environmentId, threadId },
+      }),
+    [navigate, props.environmentId],
+  );
 
   const interceptThreadLinks = (event: MouseEvent<HTMLDivElement>) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -208,7 +246,28 @@ export function BotChat(props: {
               ) : null}
             </div>
           ) : null}
-          {projection === null ? (
+          {disabledReason !== null ? (
+            <div
+              role="status"
+              className="flex flex-col items-center gap-2 text-sm text-muted-foreground"
+            >
+              <p>{disabledReason}</p>
+              {threadError !== null && thread.status !== "deleted" ? (
+                <>
+                  <p>{threadError}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      refreshEnvironmentThread(props.environmentId, props.bot.homeThreadId)
+                    }
+                  >
+                    Retry
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          ) : projection === null ? (
             <p className="text-center text-muted-foreground text-sm">Loading…</p>
           ) : items.length === 0 ? (
             <p className="text-center text-muted-foreground text-sm">
@@ -221,7 +280,9 @@ export function BotChat(props: {
               item={item}
               environmentId={props.environmentId}
               onOpenThread={openThread}
-              schedules={tasksQuery.data?.tasks ?? []}
+              schedules={
+                item.kind === "wake" ? (tasksQuery.data?.tasks ?? EMPTY_SCHEDULES) : EMPTY_SCHEDULES
+              }
               botName={props.bot.name}
             />
           ))}
@@ -270,6 +331,7 @@ export function BotChat(props: {
       <BotComposer
         bot={props.bot}
         environmentId={props.environmentId}
+        disabledReason={disabledReason}
         runtimeMode={projection?.thread.runtimeMode ?? null}
         interactionMode={projection?.thread.interactionMode ?? null}
       />
@@ -277,7 +339,7 @@ export function BotChat(props: {
   );
 }
 
-function ChatRow(props: {
+const ChatRow = memo(function ChatRow(props: {
   readonly item: BotChatItem;
   readonly environmentId: EnvironmentId;
   readonly onOpenThread: (threadId: ThreadId) => void;
@@ -321,7 +383,7 @@ function ChatRow(props: {
       <BotMarkdown text={item.text} environmentId={props.environmentId} />
     </div>
   );
-}
+});
 
 function BotMarkdown(props: { readonly text: string; readonly environmentId: EnvironmentId }) {
   return (
@@ -436,6 +498,7 @@ function WorkerChip(props: {
 function BotComposer(props: {
   readonly bot: BotSummary;
   readonly environmentId: EnvironmentId;
+  readonly disabledReason: string | null;
   readonly runtimeMode: RuntimeMode | null;
   readonly interactionMode: ProviderInteractionMode | null;
 }) {
@@ -446,13 +509,37 @@ function BotComposer(props: {
   const text = useComposerDraftStore((store) => store.getComposerDraft(draftTarget)?.prompt ?? "");
   const setPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setText = (value: string) => setPrompt(draftTarget, value);
-  const [images, setImages] = useState<
-    ReadonlyArray<{ readonly key: string; readonly upload: UploadChatImageAttachment }>
-  >([]);
+  const images = useComposerDraftStore(
+    (store) => store.getComposerDraft(draftTarget)?.images ?? EMPTY_IMAGES,
+  );
+  const serverConfig = useServerConfigs().get(props.environmentId);
+  const supportsUploads = serverConfig?.environment.capabilities.attachmentUploads === true;
+  const uploadsByImageId = useAttachmentUploadStore((store) => store.uploadsByImageId);
+  const uploadReason = supportsUploads
+    ? attachmentUploadBlockReason({
+        imageIds: images.map((image) => image.id),
+        uploadsByImageId,
+        environmentId: props.environmentId,
+      })
+    : null;
+  useEffect(() => {
+    if (!supportsUploads) return;
+    for (const image of images)
+      startAttachmentUpload({ environmentId: props.environmentId, image, draftTarget });
+  }, [draftTarget, images, props.environmentId, supportsUploads]);
+  const removeImage = (image: ComposerImageAttachment) => {
+    releaseAttachmentUpload(image.id);
+    useComposerDraftStore.getState().removeImage(draftTarget, image.id);
+  };
   const [sending, setSending] = useState(false);
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
-  const ready = props.runtimeMode !== null && props.interactionMode !== null;
-  const canSend = ready && !sending && (text.trim() !== "" || images.length > 0);
+  const ready =
+    props.disabledReason === null &&
+    serverConfig !== undefined &&
+    props.runtimeMode !== null &&
+    props.interactionMode !== null;
+  const canSend =
+    ready && !sending && uploadReason === null && (text.trim() !== "" || images.length > 0);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const imageFiles = (files: Iterable<File>) =>
@@ -466,70 +553,131 @@ function BotComposer(props: {
         description: `Images can be up to ${PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / 1024 / 1024} MiB each.`,
       });
     }
+    const store = useComposerDraftStore.getState();
+    const current = store.getComposerDraft(draftTarget);
+    const available = Math.max(
+      0,
+      PROVIDER_SEND_TURN_MAX_ATTACHMENTS -
+        (current?.images.length ?? 0) -
+        (current?.files.length ?? 0),
+    );
+    if (fitting.length > available)
+      toastManager.add({
+        type: "error",
+        title: "Too many images",
+        description: `Attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`,
+      });
+    const accepted = fitting.slice(0, available).map((file) => ({
+      type: "image" as const,
+      id: randomUUID(),
+      name: file.name || "image.png",
+      mimeType: file.type,
+      sizeBytes: file.size,
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+    store.addImages(draftTarget, accepted, { allowDuplicates: true });
     void Promise.all(
-      fitting.map(async (file) => ({
-        key: randomUUID(),
-        upload: {
-          type: "image" as const,
-          name: file.name || "image.png",
-          mimeType: file.type,
-          sizeBytes: file.size,
-          dataUrl: await readFileAsDataUrl(file),
-        },
+      accepted.map(async (image) => ({
+        id: image.id,
+        name: image.name,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        dataUrl: await readFileAsDataUrl(image.file),
       })),
-    ).then(
-      (pasted) => setImages((current) => [...current, ...pasted]),
-      (error: unknown) =>
+    )
+      .then((serialized) => {
+        const latest = useComposerDraftStore.getState();
+        const draft = latest.getComposerDraft(draftTarget);
+        const ids = new Set(draft?.images.map((image) => image.id));
+        return latest.syncPersistedAttachments(draftTarget, [
+          ...(draft?.persistedAttachments ?? []),
+          ...serialized.filter((image) => ids.has(image.id)),
+        ]);
+      })
+      .catch((error: unknown) =>
         toastManager.add({
           type: "error",
-          title: "Could not read the image",
-          description: error instanceof Error ? error.message : String(error),
+          title: "Could not save images",
+          description: String(error),
         }),
-    );
+      );
   };
 
   const send = async () => {
     const message = text.trim();
     if (!canSend || props.runtimeMode === null || props.interactionMode === null) return;
     const sentText = text;
-    const sentImageKeys = new Set(images.map((image) => image.key));
     setSending(true);
-    const result = await startTurn({
-      environmentId: props.environmentId,
-      input: {
-        threadId: props.bot.homeThreadId,
-        message: {
-          messageId: newMessageId(),
-          role: "user",
-          text: message,
-          attachments: images.map((image) => image.upload),
-        },
-        runtimeMode: props.runtimeMode,
-        interactionMode: props.interactionMode,
-        dispatchMode: "queue",
-      },
-    });
-    setSending(false);
-    if (result._tag === "Success") {
-      if (useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt === sentText) {
-        setPrompt(draftTarget, "");
+    try {
+      let attachments;
+      if (supportsUploads) {
+        for (const image of images)
+          startAttachmentUpload({ environmentId: props.environmentId, image, draftTarget });
+        await awaitAttachmentUploads(images.map((image) => image.id));
+        attachments = getUploadedAttachments({ environmentId: props.environmentId, images });
+        if (attachments === null) throw new Error("Retry or remove failed uploads before sending.");
+      } else {
+        attachments = await Promise.all(
+          images.map(async (image) => ({
+            type: "image" as const,
+            name: image.name,
+            mimeType: image.mimeType,
+            sizeBytes: image.sizeBytes,
+            dataUrl: await readFileAsDataUrl(image.file),
+          })),
+        );
       }
-      setImages((current) => current.filter((image) => !sentImageKeys.has(image.key)));
-    } else if (!isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: `Could not send to ${props.bot.name}`,
-          description: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      const result = await startTurn({
+        environmentId: props.environmentId,
+        input: {
+          threadId: props.bot.homeThreadId,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: message,
+            attachments,
+          },
+          runtimeMode: props.runtimeMode,
+          interactionMode: props.interactionMode,
+          dispatchMode: "queue",
+        },
+      });
+      if (result._tag === "Success") {
+        if (useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt === sentText) {
+          setPrompt(draftTarget, "");
+        }
+        for (const image of images) removeImage(image);
+      } else if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Could not send to ${props.bot.name}`,
+            description: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: `Could not send to ${props.bot.name}`,
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSending(false);
     }
   };
 
   return (
     <form
       className="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 pb-4"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         void send();
@@ -567,23 +715,43 @@ function BotComposer(props: {
         <PaperclipIcon />
       </Button>
       <div className="flex flex-1 flex-col gap-2">
+        {props.disabledReason || uploadReason ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {props.disabledReason ?? uploadReason}
+          </p>
+        ) : null}
         {images.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {images.map(({ key, upload }) => (
-              <div key={key} className="relative">
+            {images.map((image) => (
+              <div key={image.id} className="relative">
                 <img
-                  alt={upload.name}
+                  alt={image.name}
                   className="size-16 rounded-lg object-cover"
-                  src={upload.dataUrl}
+                  src={image.previewUrl}
                 />
+                {supportsUploads && uploadsByImageId[image.id]?.status === "failed" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      retryAttachmentUpload({
+                        environmentId: props.environmentId,
+                        image,
+                        draftTarget,
+                      })
+                    }
+                  >
+                    Retry upload
+                  </Button>
+                ) : null}
                 <Button
-                  aria-label={`Remove ${upload.name}`}
+                  type="button"
+                  aria-label={`Remove ${image.name}`}
                   className="absolute -top-2 -right-2"
                   size="icon-xs"
                   variant="secondary"
-                  onClick={() =>
-                    setImages((current) => current.filter((image) => image.key !== key))
-                  }
+                  onClick={() => removeImage(image)}
                 >
                   <XIcon />
                 </Button>

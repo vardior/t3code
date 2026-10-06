@@ -31,7 +31,7 @@ When a bot is waiting on an approval or an answer, its chat says so and links to
 
 ## Notifications
 
-Bots always notify when they reply. Tapping a bot's notification opens its chat. Threads that agents start on their own notify only when **Agent threads** is on in **Settings → General** (web and desktop) or **Settings → Notifications** (mobile).
+Bots always notify when they reply. Tapping a bot's notification opens its chat. With **Agent threads** off, only bots notify; all other threads stay quiet. Turn on **Agent threads** in **Settings → General** (web and desktop) or **Settings → Notifications** (mobile).
 
 ## Long-running context
 
