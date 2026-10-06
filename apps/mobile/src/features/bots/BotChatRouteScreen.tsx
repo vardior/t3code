@@ -1,4 +1,5 @@
-import { LegendList } from "@legendapp/list/react-native";
+import type { LegendListRef } from "@legendapp/list/react-native";
+import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
 import { buildBotChat, isBotWorking } from "@t3tools/client-runtime/state/bot-conversation";
 import {
@@ -7,9 +8,9 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { useMemo, useReducer, useRef, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
+import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -94,6 +95,27 @@ function BotConversation(props: {
   useBotRunSettlement(working, props.refresh);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const composerBottomInset = (Platform.OS === "android" ? isKeyboardVisible : composerFocused)
+    ? 0
+    : Math.max(insets.bottom, 12);
+  const nativeInsetOvercount = Platform.OS === "ios" ? insets.bottom : 0;
+  const listRef = useRef<LegendListRef>(null);
+  const composerOverlayRef = useRef<ViewInstance>(null);
+  const initialComposerHeight = 88 + Math.max(insets.bottom, 12) - nativeInsetOvercount;
+  const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
+    listRef,
+    composerOverlayRef,
+    initialComposerHeight,
+    -nativeInsetOvercount,
+    Platform.OS === "ios" ? 220 : 0,
+  );
+  const listMountKey = projection === null ? "loading" : "loaded";
+  useLayoutEffect(() => {
+    if (listMountKey === "loading") return;
+    listRef.current?.reportContentInset({ bottom: contentInsetEndAdjustment.value });
+  }, [contentInsetEndAdjustment, listMountKey]);
   const [composer, dispatch] = useReducer(
     botComposerReducer,
     JSON.stringify([environmentId, bot.id]),
@@ -193,8 +215,10 @@ function BotConversation(props: {
           },
         ]}
       />
-      <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1">
-        <LegendList
+      <View className="flex-1">
+        <KeyboardAwareLegendList
+          key={listMountKey}
+          ref={listRef}
           data={items}
           extraData={schedules.data}
           keyExtractor={(item) => item.id}
@@ -208,14 +232,23 @@ function BotConversation(props: {
               onPreview={setPreview}
             />
           )}
-          className="flex-1"
-          contentInsetAdjustmentBehavior="automatic"
+          style={{ flex: 1 }}
+          contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+          contentInsetEndAdjustment={contentInsetEndAdjustment}
+          contentInsetEndStaticAdjustment={nativeInsetOvercount}
+          adjustedInsetCompensation={nativeInsetOvercount}
+          {...(Platform.OS === "android"
+            ? { contentInset: { bottom: initialComposerHeight } }
+            : {})}
           contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 18, gap: 12 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           initialScrollAtEnd
           alignItemsAtEnd
-          maintainScrollAtEnd
+          maintainScrollAtEnd={{
+            animated: false,
+            on: { dataChange: true, itemLayout: true, layout: true },
+          }}
           maintainVisibleContentPosition
           getItemType={(item) => item.kind}
           ListHeaderComponent={
@@ -252,9 +285,18 @@ function BotConversation(props: {
             ) : undefined
           }
         />
+      </View>
+      <KeyboardStickyView
+        enabled={Platform.OS === "ios" || isKeyboardVisible}
+        pointerEvents="box-none"
+        style={{ position: "absolute", bottom: 0, left: 0, right: 0, top: 0 }}
+        offset={{ closed: 0, opened: 0 }}
+      >
         <View
-          className="gap-2 border-t border-border-subtle px-4 pt-3"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) }}
+          ref={composerOverlayRef}
+          onLayout={onComposerLayout}
+          className="absolute bottom-0 left-0 right-0 gap-2 border-t border-border-subtle bg-screen px-4 pt-3"
+          style={{ paddingBottom: composerBottomInset }}
         >
           {error ? (
             <Text accessibilityRole="alert" className="text-sm text-destructive">
@@ -266,6 +308,8 @@ function BotConversation(props: {
               <ComposerEditor
                 value={composer.text}
                 onChangeText={(text) => dispatch({ type: "edit", text })}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
                 environmentId={environmentId}
                 placeholder={`Message ${bot.name}`}
                 readOnly={!ready || busy}
@@ -290,7 +334,7 @@ function BotConversation(props: {
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardStickyView>
       <FilePreviewModal source={preview} onRequestClose={() => setPreview(null)} />
     </View>
   );
