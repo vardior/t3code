@@ -16,7 +16,7 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as BotService from "./BotService.ts";
 
-const COMPACTION_THRESHOLD = 150_000;
+const COMPACTION_THRESHOLD = 250_000;
 const COMPACTING_DRIVERS = new Set([
   "antigravity",
   "claudeAgent",

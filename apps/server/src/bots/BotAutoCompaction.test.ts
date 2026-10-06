@@ -73,7 +73,7 @@ function projection(
         runAttemptId: attemptId,
         ordinal: 1,
         status: "completed",
-        tokenUsage: { usedTokens: input.usedTokens ?? 150_001 },
+        tokenUsage: { usedTokens: input.usedTokens ?? 250_001 },
       },
     ],
   } as unknown as OrchestrationV2ThreadProjection;
@@ -149,7 +149,7 @@ describe("BotAutoCompaction", () => {
   it.effect("skips a bot home below the threshold", () =>
     Effect.gen(function* () {
       const { layer, deliveries } = yield* harness({
-        projection: projection({ usedTokens: 150_000 }),
+        projection: projection({ usedTokens: 250_000 }),
       });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
       yield* service.afterCompletedRun(homeThreadId, runId);
