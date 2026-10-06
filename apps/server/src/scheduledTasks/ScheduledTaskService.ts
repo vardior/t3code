@@ -1737,6 +1737,7 @@ ${checkOutput}` : basePrompt;
         Effect.andThen(forgetWebhookTask(input.id)),
         Effect.andThen(notifyChanged),
         Effect.as({ id: input.id }),
+        withBotPauseLock,
       );
 
     const deleteForThread = Effect.fn("ScheduledTaskService.deleteForThread")(function* (

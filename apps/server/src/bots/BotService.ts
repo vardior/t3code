@@ -14,6 +14,7 @@ import {
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -410,6 +411,7 @@ export const layer = Layer.effect(
           );
 
         if (input.paused) {
+          const pausedAt = config.pausedAt ?? DateTime.formatIso(yield* DateTime.now);
           const botScheduleIds = new Set(yield* scheduleIdsFor(config));
           const { tasks } = yield* scheduledTasks.list();
           const enabledIds = tasks
@@ -423,6 +425,7 @@ export const layer = Layer.effect(
             }
             yield* writePauseFields({
               paused: true,
+              pausedAt,
               pausedReason: "Paused from the Bots view",
               pausedScheduleIds: [
                 ...new Set([...(config.pausedScheduleIds ?? []), ...disabledIds]),
@@ -440,13 +443,25 @@ export const layer = Layer.effect(
 
         if (
           !isPaused(config, yield* Clock.currentTimeMillis) &&
+          config.pausedAt === undefined &&
           config.pausedUntil === undefined &&
           config.pausedScheduleIds === undefined
         )
           return {};
         const { tasks } = yield* scheduledTasks.list();
-        const disabledIds = new Set(tasks.filter((task) => !task.enabled).map((task) => task.id));
-        const resumeIds = (config.pausedScheduleIds ?? []).filter((id) => disabledIds.has(id));
+        const rememberedIds = new Set(config.pausedScheduleIds ?? []);
+        const botThreadIds = new Set(ownThreadIds(config));
+        const pausedAt = config.pausedAt === undefined ? NaN : Date.parse(config.pausedAt);
+        const resumeIds = tasks
+          .filter(
+            (task) =>
+              !task.enabled &&
+              (rememberedIds.has(task.id) ||
+                (task.threadId !== null &&
+                  botThreadIds.has(task.threadId) &&
+                  Date.parse(task.createdAt) > pausedAt)),
+          )
+          .map((task) => task.id);
         const enabledIds: ScheduledTaskId[] = [];
         yield* Effect.gen(function* () {
           for (const id of resumeIds) {
@@ -492,7 +507,18 @@ export const layer = Layer.effect(
               return;
             const config = yield* fileSystem
               .readFileString(configPath)
-              .pipe(Effect.flatMap(decodeBotConfig));
+              .pipe(
+                Effect.flatMap((raw) =>
+                  decodeBotConfig(raw).pipe(
+                    Effect.catch((cause) =>
+                      Effect.logDebug("Skipping malformed bot pause state", { botId, cause }).pipe(
+                        Effect.as(null),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            if (config === null) return;
             if (isPauseExpired(config, yield* Clock.currentTimeMillis)) {
               yield* setPaused({ botId, paused: false }, true);
             }

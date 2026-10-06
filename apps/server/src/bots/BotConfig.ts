@@ -15,6 +15,7 @@ const BotConfigFile = Schema.Struct({
   scheduledTaskId: Schema.optional(ScheduledTaskId),
   dmRelayScheduledTaskId: Schema.optional(ScheduledTaskId),
   paused: Schema.optional(Schema.Boolean),
+  pausedAt: Schema.optional(Schema.String),
   pausedUntil: Schema.optional(Schema.String),
   pausedScheduleIds: Schema.optional(Schema.Array(ScheduledTaskId)),
 });
@@ -45,7 +46,13 @@ const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unk
 });
 const decodeJsonObject = Schema.decodeUnknownEffect(JsonObject);
 const encodeJsonObject = Schema.encodeEffect(JsonObject);
-const PAUSE_KEYS = new Set(["paused", "pausedUntil", "pausedReason", "pausedScheduleIds"]);
+const PAUSE_KEYS = new Set([
+  "paused",
+  "pausedAt",
+  "pausedUntil",
+  "pausedReason",
+  "pausedScheduleIds",
+]);
 
 export const writeBotPauseFields = Effect.fn("writeBotPauseFields")(function* (
   configPath: string,
