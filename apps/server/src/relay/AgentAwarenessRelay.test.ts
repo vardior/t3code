@@ -178,6 +178,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
     readonly notifyAgentThreads?: boolean;
     readonly homeThread?: boolean;
+    readonly autoCompaction?: boolean;
+    readonly sourceText?: string;
     readonly catchUpThreads?: ReadonlyArray<OrchestrationV2ThreadShell>;
   } = {},
 ) {
@@ -268,7 +270,26 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getTimelinePage: () => Effect.die("Unused timeline read"),
     getMessageCount: () => Effect.die("unused message count"),
     getTurnItem: () => Effect.die("unused turn item read"),
-    getThreadRecords: () => Effect.die("unused record read"),
+    getThreadRecords: () =>
+      Effect.succeed({
+        runs: [
+          {
+            id: "latest-run",
+            userMessageId: options.autoCompaction
+              ? "bot-auto-compact:previous-run"
+              : "ordinary-message",
+          },
+        ],
+        messages: [
+          {
+            id: options.autoCompaction ? "bot-auto-compact:previous-run" : "ordinary-message",
+            createdBy: options.autoCompaction ? "agent" : "user",
+            creationSource: options.autoCompaction ? "server" : "user",
+            text: options.sourceText ?? "/compact",
+            attachments: [],
+          },
+        ],
+      } as never),
     getThreadProjection: unused,
     getCheckpointContext: unused,
     getThreadSnapshot: unused,
@@ -342,6 +363,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       list: unused,
       get: unused,
       setPaused: unused,
+      streamChanges: Stream.empty,
       isHomeThread: () => Effect.succeed(options.homeThread ?? false),
     }),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
@@ -421,6 +443,20 @@ describe("AgentAwarenessRelay", () => {
           ["running", null, "running"],
         );
       }),
+  );
+
+  it.effect.each([
+    { homeThread: true, autoCompaction: true, sourceText: "/compact", expected: 0 },
+    { homeThread: true, autoCompaction: false, sourceText: "/compact", expected: 1 },
+    { homeThread: true, autoCompaction: true, sourceText: "Wake up", expected: 1 },
+    { homeThread: false, autoCompaction: true, sourceText: "/compact", expected: 1 },
+  ])("suppresses only automatic bot compaction: %j", (input) =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay(input);
+      yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, input.expected);
+    }),
   );
 
   it.effect("publishes bot home threads while agent notifications are disabled", () =>

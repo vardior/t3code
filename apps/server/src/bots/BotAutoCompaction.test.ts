@@ -6,11 +6,16 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as BotAutoCompaction from "./BotAutoCompaction.ts";
@@ -27,6 +32,9 @@ function projection(
     maxTokens?: number;
     sourceText?: string;
     queuedCompact?: boolean;
+    failed?: boolean;
+    failureCode?: string;
+    failureMessage?: string;
   } = {},
 ) {
   return {
@@ -41,7 +49,7 @@ function projection(
         id: runId,
         ordinal: 1,
         userMessageId: sourceMessageId,
-        status: "completed",
+        status: input.failed ? "failed" : "completed",
         activeAttemptId: attemptId,
       },
       ...(input.queuedCompact
@@ -69,11 +77,24 @@ function projection(
           ]
         : []),
     ],
+    turnItems: input.failed
+      ? [
+          {
+            type: "error",
+            runId,
+            providerTurnId: null,
+            failure: {
+              code: input.failureCode ?? null,
+              message: input.failureMessage ?? "Network disconnected",
+            },
+          },
+        ]
+      : [],
     providerTurns: [
       {
         runAttemptId: attemptId,
         ordinal: 1,
-        status: "completed",
+        status: input.failed ? "failed" : "completed",
         tokenUsage: { usedTokens: input.usedTokens ?? 250_001, maxTokens: input.maxTokens },
       },
     ],
@@ -86,6 +107,7 @@ function harness(input: {
   driver?: string;
 }) {
   return Effect.gen(function* () {
+    const sent = yield* Deferred.make<void>();
     const state = yield* Ref.make(input.projection ?? projection());
     const deliveries = yield* Ref.make<
       ReadonlyArray<ThreadManagementService.ThreadManagementSendInput>
@@ -114,6 +136,7 @@ function harness(input: {
                     }),
                   ),
                 ),
+                Effect.andThen(Deferred.succeed(sent, undefined)),
                 Effect.as({} as never),
               ),
           }),
@@ -123,7 +146,7 @@ function harness(input: {
         ),
       ),
     );
-    return { layer, deliveries };
+    return { layer, deliveries, sent };
   });
 }
 
@@ -133,8 +156,8 @@ describe("BotAutoCompaction", () => {
       const { layer, deliveries } = yield* harness({});
       yield* Effect.gen(function* () {
         const service = yield* BotAutoCompaction.BotAutoCompaction;
-        yield* service.afterCompletedRun(homeThreadId, runId);
-        yield* service.afterCompletedRun(homeThreadId, runId);
+        yield* service.afterSettledRun(homeThreadId, runId);
+        yield* service.afterSettledRun(homeThreadId, runId);
       }).pipe(Effect.provide(layer));
       const sent = yield* Ref.get(deliveries);
       assert.lengthOf(sent, 1);
@@ -147,13 +170,43 @@ describe("BotAutoCompaction", () => {
     }),
   );
 
+  it.effect("the event worker recovers a failed overflow run", () =>
+    Effect.gen(function* () {
+      const { layer, deliveries, sent } = yield* harness({
+        projection: projection({
+          failed: true,
+          usedTokens: 0,
+          failureCode: "contextWindowExceeded",
+        }),
+      });
+      const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+      yield* Layer.build(
+        BotAutoCompaction.workerLive.pipe(
+          Layer.provide(layer),
+          Layer.provide(
+            Layer.mock(Orchestrator.OrchestratorV2)({
+              streamDomainEvents: Stream.fromQueue(events),
+            }),
+          ),
+        ),
+      );
+      yield* Queue.offer(events, {
+        type: "run.updated",
+        threadId: homeThreadId,
+        payload: { id: runId, status: "failed" },
+      } as OrchestrationV2DomainEvent);
+      yield* Deferred.await(sent);
+      assert.equal((yield* Ref.get(deliveries))[0]?.text, "/compact");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("skips a bot home below the threshold", () =>
     Effect.gen(function* () {
       const { layer, deliveries } = yield* harness({
         projection: projection({ usedTokens: 250_000 }),
       });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
-      yield* service.afterCompletedRun(homeThreadId, runId);
+      yield* service.afterSettledRun(homeThreadId, runId);
       assert.isEmpty(yield* Ref.get(deliveries));
     }),
   );
@@ -169,8 +222,37 @@ describe("BotAutoCompaction", () => {
         projection: projection({ usedTokens, maxTokens }),
       });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
-      yield* service.afterCompletedRun(homeThreadId, runId);
+      yield* service.afterSettledRun(homeThreadId, runId);
       assert.lengthOf(yield* Ref.get(deliveries), expected);
+    }),
+  );
+
+  it.effect.each([
+    { failureCode: "contextWindowExceeded", usedTokens: 0, expected: 1 },
+    { failureCode: "context_length_exceeded", usedTokens: 0, expected: 1 },
+    {
+      failureMessage: "Claude stopped: the prompt exceeds the model's context window.",
+      usedTokens: 0,
+      expected: 1,
+    },
+    {
+      failureMessage: "Your input exceeds the context window of this model",
+      usedTokens: 0,
+      expected: 1,
+    },
+    { failureMessage: "Prompt is too long", usedTokens: 0, expected: 1 },
+    { failureMessage: "Network disconnected", usedTokens: 250_001, expected: 1 },
+    { failureMessage: "Token budget exhausted", usedTokens: 0, expected: 0 },
+    { failureMessage: "Context window unavailable", usedTokens: 0, expected: 0 },
+    { failureCode: "contextWindowExceeded", sourceText: "/compact", expected: 0 },
+  ])("recovers failed runs conservatively: %j", (input) =>
+    Effect.gen(function* () {
+      const { layer, deliveries } = yield* harness({
+        projection: projection({ ...input, failed: true }),
+      });
+      const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
+      yield* service.afterSettledRun(homeThreadId, runId);
+      assert.lengthOf(yield* Ref.get(deliveries), input.expected);
     }),
   );
 
@@ -178,7 +260,7 @@ describe("BotAutoCompaction", () => {
     Effect.gen(function* () {
       const { layer, deliveries } = yield* harness({ homeThreadId: ThreadId.make("other") });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
-      yield* service.afterCompletedRun(homeThreadId, runId);
+      yield* service.afterSettledRun(homeThreadId, runId);
       assert.isEmpty(yield* Ref.get(deliveries));
     }),
   );
@@ -189,7 +271,7 @@ describe("BotAutoCompaction", () => {
         projection: projection({ sourceText: "/compact" }),
       });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
-      yield* service.afterCompletedRun(homeThreadId, runId);
+      yield* service.afterSettledRun(homeThreadId, runId);
       assert.isEmpty(yield* Ref.get(deliveries));
     }),
   );
@@ -200,7 +282,7 @@ describe("BotAutoCompaction", () => {
         projection: projection({ queuedCompact: true }),
       });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
-      yield* service.afterCompletedRun(homeThreadId, runId);
+      yield* service.afterSettledRun(homeThreadId, runId);
       assert.isEmpty(yield* Ref.get(deliveries));
     }),
   );
@@ -209,7 +291,7 @@ describe("BotAutoCompaction", () => {
     Effect.gen(function* () {
       const { layer, deliveries } = yield* harness({ driver: "unknown-provider" });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
-      yield* service.afterCompletedRun(homeThreadId, runId);
+      yield* service.afterSettledRun(homeThreadId, runId);
       assert.isEmpty(yield* Ref.get(deliveries));
     }),
   );

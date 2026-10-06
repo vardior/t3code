@@ -1,10 +1,16 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { BotSummary, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
+import {
+  BotSummary,
+  ScheduledTaskId,
+  ThreadId,
+  type OrchestrationV2DomainEvent,
+} from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
 import * as Fiber from "effect/Fiber";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -13,10 +19,12 @@ import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ServerConfig } from "../config.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -46,13 +54,22 @@ const scheduledTasksLayer = ScheduledTaskService.layer.pipe(
 );
 
 const withBots = <A, E, R>(
-  input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv },
+  input: {
+    readonly baseDir: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
+  },
   effect: Effect.Effect<A, E, R>,
 ) =>
   effect.pipe(
     Effect.provide(
       BotService.layer.pipe(
         Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir)),
+        Layer.provide(
+          Layer.mock(Orchestrator.OrchestratorV2)({
+            streamDomainEvents: input.domainEvents ?? Stream.empty,
+          }),
+        ),
         Layer.provideMerge(
           scheduledTasksLayer.pipe(
             Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir)),
@@ -514,6 +531,7 @@ it.effect(
             }),
           );
           expect((yield* helper)?.paused).toBe(true);
+          expect((yield* helper)?.pausedUntil).toBe("2999-01-01T00:00:00Z");
           yield* bots.setPaused({ botId: "helper", paused: false });
           expect((yield* enabledById).listed).toBe(false);
           expect(yield* readConfig).toEqual({
@@ -1784,6 +1802,225 @@ it.effect(
                 );
               }),
             ),
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("pushes pause, resume, home archive and unarchive invalidations", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-push-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(botDir, "bot.json"),
+      toJson({ name: "Helper", homeThreadId: "home" }),
+    );
+    yield* insertSchedule(sql, {
+      id: "wake",
+      threadId: "home",
+      enabled: false,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    });
+    const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+    yield* withBots(
+      { baseDir, domainEvents: Stream.fromQueue(events) },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const invalidations = yield* Queue.unbounded<{}>();
+        yield* bots.streamChanges.pipe(
+          Stream.runForEach((event) => Queue.offer(invalidations, event)),
+          Effect.forkScoped({ startImmediately: true }),
+        );
+        yield* Queue.take(invalidations);
+        for (const paused of [true, false]) {
+          yield* bots.setPaused({ botId: "helper", paused });
+          expect(yield* Queue.take(invalidations)).toEqual({});
+          expect((yield* bots.list()).bots[0]?.paused).toBe(paused);
+        }
+        for (const type of ["thread.archived", "thread.unarchived"] as const) {
+          yield* Queue.offer(events, {
+            type,
+            threadId: ThreadId.make("home"),
+          } as OrchestrationV2DomainEvent);
+          expect(yield* Queue.take(invalidations)).toEqual({});
+        }
+        const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+        const existing = (yield* schedules.list()).tasks[0]!;
+        yield* schedules.upsert({ ...existing, id: ScheduledTaskId.make("new-wake") });
+        yield* Queue.take(invalidations);
+        expect((yield* bots.list()).bots[0]?.scheduledTaskIds?.toSorted()).toEqual([
+          "new-wake",
+          "wake",
+        ]);
+        yield* schedules.delete({ id: ScheduledTaskId.make("new-wake") });
+        yield* Queue.take(invalidations);
+        expect((yield* bots.list()).bots[0]?.scheduledTaskIds).toEqual(["wake"]);
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect(
+  "reuses worker membership while reading current titles and status, and invalidates new or deleted workers",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-workers-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(botDir, "bot.json"),
+        toJson({ name: "Helper", homeThreadId: "home" }),
+      );
+      const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+      yield* insertThread(sql, {
+        id: "first",
+        createdAt: "2026-10-01T00:00:00.000Z",
+        parentThreadId: "home",
+      });
+      yield* withBots(
+        { baseDir, domainEvents: Stream.fromQueue(events) },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const invalidations = yield* Queue.unbounded<{}>();
+          yield* bots.streamChanges.pipe(
+            Stream.runForEach((event) => Queue.offer(invalidations, event)),
+            Effect.forkScoped({ startImmediately: true }),
+          );
+          yield* Queue.take(invalidations);
+          expect(
+            (yield* bots.get({ botId: "helper" })).workers.map((worker) => worker.threadId),
+          ).toEqual(["first"]);
+          yield* sql`UPDATE orchestration_v2_projection_threads SET title = 'New title' WHERE thread_id = 'first'`;
+          yield* insertRun(sql, {
+            id: "first-run",
+            threadId: "first",
+            ordinal: 1,
+            status: "failed",
+          });
+          expect((yield* bots.get({ botId: "helper" })).workers[0]).toMatchObject({
+            title: "New title",
+            status: "failed",
+          });
+          yield* insertThread(sql, {
+            id: "second",
+            createdAt: "2026-10-01T00:01:00.000Z",
+            parentThreadId: "home",
+          });
+          expect(
+            (yield* bots.get({ botId: "helper" })).workers.map((worker) => worker.threadId),
+          ).toEqual(["first"]);
+          for (const type of ["thread.created", "thread.deleted"] as const) {
+            if (type === "thread.deleted")
+              yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = 'first'`;
+            yield* Queue.offer(events, {
+              type,
+              threadId: ThreadId.make("second"),
+            } as OrchestrationV2DomainEvent);
+            yield* Queue.offer(events, {
+              type: "thread.archived",
+              threadId: ThreadId.make("home"),
+            } as OrchestrationV2DomainEvent);
+            yield* Queue.take(invalidations);
+            expect(
+              (yield* bots.get({ botId: "helper" })).workers.map((worker) => worker.threadId),
+            ).toEqual(type === "thread.created" ? ["first", "second"] : ["second"]);
+          }
+          yield* insertThread(sql, { id: "launched", createdAt: "2026-10-01T00:02:00.000Z" });
+          yield* Queue.offer(events, {
+            type: "thread.created",
+            threadId: ThreadId.make("launched"),
+          } as OrchestrationV2DomainEvent);
+          yield* Queue.offer(events, {
+            type: "thread.archived",
+            threadId: ThreadId.make("home"),
+          } as OrchestrationV2DomainEvent);
+          yield* Queue.take(invalidations);
+          expect(
+            (yield* bots.get({ botId: "helper" })).workers.map((worker) => worker.threadId),
+          ).toEqual(["second"]);
+          yield* insertMessage(sql, {
+            id: "launch-message",
+            threadId: "launched",
+            createdAt: "2026-10-01T00:02:00.000Z",
+            senderThreadId: "home",
+          });
+          yield* Queue.offer(events, {
+            type: "message.updated",
+            threadId: ThreadId.make("launched"),
+            payload: { role: "user", senderThreadId: ThreadId.make("home") },
+          } as OrchestrationV2DomainEvent);
+          yield* Queue.offer(events, {
+            type: "thread.archived",
+            threadId: ThreadId.make("home"),
+          } as OrchestrationV2DomainEvent);
+          yield* Queue.take(invalidations);
+          expect(
+            (yield* bots.get({ botId: "helper" })).workers.map((worker) => worker.threadId),
+          ).toEqual(["second", "launched"]);
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect(
+  "pushes bot file creation, timed pause, schedule ids and deletion as tiny invalidations",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-files-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      const watchEvents = yield* Queue.unbounded<FileSystem.WatchEvent>();
+      yield* withBots(
+        { baseDir },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const invalidations = yield* Queue.unbounded<{}>();
+          yield* bots.streamChanges.pipe(
+            Stream.runForEach((event) => Queue.offer(invalidations, event)),
+            Effect.forkScoped({ startImmediately: true }),
+          );
+          yield* Queue.take(invalidations);
+          yield* fs.makeDirectory(botDir, { recursive: true });
+          yield* fs.writeFileString(
+            path.join(botDir, "bot.json"),
+            toJson({
+              name: "Helper",
+              homeThreadId: "home",
+              pausedUntil: "2999-01-01T00:00:00Z",
+              scheduledTaskId: "wake",
+            }),
+          );
+          yield* Queue.offer(watchEvents, {
+            _tag: "Create",
+            path: path.join("bots", "helper", "bot.json"),
+          });
+          yield* TestClock.adjust("100 millis");
+          expect(yield* Queue.take(invalidations)).toEqual({});
+          expect((yield* bots.list()).bots[0]).toMatchObject({
+            paused: true,
+            pausedUntil: "2999-01-01T00:00:00Z",
+            scheduledTaskIds: ["wake"],
+          });
+          expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(true);
+          yield* fs.remove(botDir, { recursive: true });
+          yield* Queue.offer(watchEvents, { _tag: "Remove", path: botDir });
+          yield* TestClock.adjust("100 millis");
+          expect(yield* Queue.take(invalidations)).toEqual({});
+          expect(yield* bots.list()).toEqual({ bots: [] });
+          expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(false);
+        }),
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          watch: () => Stream.fromQueue(watchEvents),
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),

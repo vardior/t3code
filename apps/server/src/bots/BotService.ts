@@ -9,22 +9,25 @@ import {
   type BotSetPausedInput,
   type BotSetPausedResult,
   type BotSummary,
-  type BotWorker,
 } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { ServerConfig } from "../config.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 
@@ -79,6 +82,7 @@ interface WorkerRow {
 export class BotService extends Context.Service<
   BotService,
   {
+    readonly streamChanges: Stream.Stream<{}>;
     readonly get: (input: BotGetInput) => Effect.Effect<BotDetail, BotError>;
     readonly list: () => Effect.Effect<BotListResult, BotError>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
@@ -90,6 +94,15 @@ export const layer = Layer.effect(
   BotService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const changes = yield* PubSub.sliding<{}>(1);
+    const workerLookupLock = yield* Semaphore.make(1);
+    const workerIds = new Map<ThreadId, ReadonlyArray<string>>();
+    let workerGeneration = 0;
+    const invalidateWorkers = () => {
+      workerGeneration++;
+      workerIds.clear();
+    };
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const scheduledTasks = yield* ScheduledTaskService;
@@ -153,18 +166,13 @@ export const layer = Layer.effect(
         ),
       );
 
-    const listWorkers = (homeThreadId: ThreadId, ownThreadIds: ReadonlySet<string>) =>
-      sql<WorkerRow>`
-        SELECT thread_id, title, created_at, status FROM (
-          SELECT
-            t.thread_id,
-            t.title,
-            t.created_at,
-            (
-              SELECT r.status FROM orchestration_v2_projection_runs r
-              WHERE r.thread_id = t.thread_id
-              ORDER BY r.ordinal DESC LIMIT 1
-            ) AS status
+    const listWorkerIds = (homeThreadId: ThreadId) =>
+      Effect.gen(function* () {
+        const cached = workerIds.get(homeThreadId);
+        if (cached !== undefined) return cached;
+        const generation = workerGeneration;
+        const rows = yield* sql<{ readonly thread_id: string }>`
+          SELECT t.thread_id
           FROM orchestration_v2_projection_threads t
           WHERE t.deleted_at IS NULL
             AND t.thread_id <> ${homeThreadId}
@@ -178,20 +186,38 @@ export const layer = Layer.effect(
               ) = ${homeThreadId}
             )
           ORDER BY t.created_at DESC
-          LIMIT ${MAX_WORKERS_PER_BOT + ownThreadIds.size}
-        ) ORDER BY created_at
-      `.pipe(
-        Effect.map((rows): BotWorker[] =>
-          rows
-            .filter((row) => !ownThreadIds.has(row.thread_id))
-            .map((row) => ({
-              threadId: ThreadId.make(row.thread_id),
-              title: row.title,
-              createdAt: row.created_at,
-              status: row.status,
-            })),
-        ),
-      );
+          LIMIT ${MAX_WORKERS_PER_BOT + 2}
+        `;
+        const ids = rows.map((row) => row.thread_id);
+        if (generation === workerGeneration) workerIds.set(homeThreadId, ids);
+        return ids;
+      }).pipe(workerLookupLock.withPermit);
+
+    const listWorkers = (homeThreadId: ThreadId, ownThreadIds: ReadonlySet<string>) =>
+      Effect.gen(function* () {
+        const ids = (yield* listWorkerIds(homeThreadId)).filter((id) => !ownThreadIds.has(id));
+        if (ids.length === 0) return [];
+        const rows = yield* sql<WorkerRow>`
+          SELECT thread_id, title, created_at, status FROM (
+            SELECT t.thread_id, t.title, t.created_at,
+              (
+                SELECT r.status FROM orchestration_v2_projection_runs r
+                WHERE r.thread_id = t.thread_id
+                ORDER BY r.ordinal DESC LIMIT 1
+              ) AS status
+            FROM orchestration_v2_projection_threads t
+            WHERE t.thread_id IN ${sql.in(ids)} AND t.deleted_at IS NULL
+            ORDER BY t.created_at DESC
+            LIMIT ${MAX_WORKERS_PER_BOT}
+          ) ORDER BY created_at
+        `;
+        return rows.map((row) => ({
+          threadId: ThreadId.make(row.thread_id),
+          title: row.title,
+          createdAt: row.created_at,
+          status: row.status,
+        }));
+      });
 
     const readLastReply = (homeThreadId: ThreadId) =>
       sql<{ readonly text: string; readonly at: string }>`
@@ -341,6 +367,7 @@ export const layer = Layer.effect(
           homeThreadId: config.homeThreadId,
           scheduledTaskIds: yield* scheduleIdsFor(config),
           paused: isPaused(config, yield* Clock.currentTimeMillis),
+          ...(config.pausedUntil === undefined ? {} : { pausedUntil: config.pausedUntil }),
           ...(yield* readHomeThreadState(config.homeThreadId)),
           ...((yield* isThreadQueueHeld(config.homeThreadId)) ? { homeThreadQueueHeld: true } : {}),
           lastReply: yield* readLastReply(config.homeThreadId),
@@ -490,6 +517,7 @@ export const layer = Layer.effect(
         Effect.provideService(BotSchedulePauseTransition, true),
         scheduledTasks.withBotPauseLock,
         Effect.tap(() => refreshHomeThreadIds()),
+        Effect.tap(() => PubSub.publish(changes, {})),
         Effect.mapError((cause) =>
           isBotError(cause)
             ? cause
@@ -538,6 +566,71 @@ export const layer = Layer.effect(
       ),
     );
 
+    yield* orchestrator.streamDomainEvents.pipe(
+      Stream.runForEach((event) =>
+        Effect.gen(function* () {
+          if (
+            event.type === "thread.created" ||
+            event.type === "thread.deleted" ||
+            (event.type === "message.updated" &&
+              event.payload.role === "user" &&
+              event.payload.senderThreadId !== undefined)
+          ) {
+            invalidateWorkers();
+          }
+          if (
+            (event.type === "thread.archived" ||
+              event.type === "thread.unarchived" ||
+              event.type === "thread.deleted") &&
+            (yield* isHomeThread(event.threadId))
+          ) {
+            yield* PubSub.publish(changes, {});
+          }
+        }),
+      ),
+      Effect.catchCause((cause) => Effect.logWarning("Cannot watch bot thread changes", { cause })),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+
+    yield* scheduledTasks.subscribeList().pipe(
+      Stream.map(({ tasks }) =>
+        tasks
+          .map((task) => JSON.stringify([task.id, task.threadId]))
+          .toSorted()
+          .join("\n"),
+      ),
+      Stream.changes,
+      Stream.drop(1),
+      Stream.runForEach(() => PubSub.publish(changes, {})),
+      Effect.catchCause((cause) => Effect.logWarning("Cannot watch bot schedules", { cause })),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+
+    const watchDir = (yield* fileSystem.exists(botsDir)) ? botsDir : path.dirname(botsDir);
+    yield* fileSystem.watch(watchDir, { recursive: true }).pipe(
+      Stream.filter((event) => {
+        const relative = path.relative(botsDir, path.resolve(watchDir, event.path));
+        if (relative === "") return true;
+        const parts = relative.split(path.sep);
+        return (
+          BOT_ID.test(parts[0] ?? "") &&
+          (parts.length === 1 || (parts.length === 2 && parts[1] === "bot.json"))
+        );
+      }),
+      Stream.debounce(Duration.millis(100)),
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          homeThreadIdsExpireAt = 0;
+          invalidateWorkers();
+          yield* PubSub.publish(changes, {});
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Cannot watch bot configuration changes", { botsDir, cause }),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+
     yield* restoreExpiredPauses;
     yield* restoreExpiredPauses.pipe(
       Effect.repeat(Schedule.spaced("1 minute")),
@@ -545,6 +638,17 @@ export const layer = Layer.effect(
       Effect.forkScoped,
     );
 
-    return BotService.of({ get, list, isHomeThread, setPaused });
+    return BotService.of({
+      get,
+      list,
+      isHomeThread,
+      setPaused,
+      streamChanges: Stream.unwrap(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(changes);
+          return Stream.concat(Stream.succeed({}), Stream.fromSubscription(subscription));
+        }),
+      ),
+    });
   }),
 );

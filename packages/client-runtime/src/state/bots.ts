@@ -12,6 +12,7 @@ import {
   type AtomCommandScheduler,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
 
 export function createBotsEnvironmentAtoms<R, E>(
@@ -20,10 +21,17 @@ export function createBotsEnvironmentAtoms<R, E>(
   configConcurrency: AtomCommandConcurrency<{ readonly environmentId: EnvironmentId }>,
   configValueAtom: (environmentId: EnvironmentId) => Atom.Atom<ServerConfig | null>,
 ) {
+  const changes = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:server:bots:changes",
+    tag: WS_METHODS.botsSubscribeChanges,
+  });
+  const refreshTrigger = ({ environmentId }: { readonly environmentId: EnvironmentId }) =>
+    changes({ environmentId, input: {} });
   const rpcList = createEnvironmentRpcQueryAtomFamily(runtime, {
     label: "environment-data:server:bots",
     tag: WS_METHODS.botsList,
     staleTimeMs: 10_000,
+    refreshTrigger,
   });
   const noBots = AsyncResult.success<BotListResult>({ bots: [] });
   const listAtom = Atom.family((environmentId: EnvironmentId) =>
@@ -38,6 +46,7 @@ export function createBotsEnvironmentAtoms<R, E>(
       label: "environment-data:server:bot",
       tag: WS_METHODS.botsGet,
       staleTimeMs: 10_000,
+      refreshTrigger,
     }),
     list: (target: { readonly environmentId: EnvironmentId; readonly input: {} }) =>
       listAtom(target.environmentId),

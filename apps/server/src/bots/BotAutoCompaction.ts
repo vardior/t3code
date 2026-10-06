@@ -17,6 +17,13 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as BotService from "./BotService.ts";
 
 const COMPACTION_THRESHOLD = 250_000;
+const CONTEXT_OVERFLOW_CODES = new Set([
+  "contextlengthexceeded",
+  "contextwindowexceeded",
+  "prompttoolong",
+]);
+const CONTEXT_OVERFLOW_MESSAGE =
+  /\b(?:context[ -](?:length|window).{0,80}(?:exceeded|exceeds|too (?:long|large)|is full)|(?:exceeds?|exceeded|too (?:long|large)).{0,80}context[ -](?:length|window)|prompt is too long)\b/i;
 const COMPACTING_DRIVERS = new Set([
   "antigravity",
   "claudeAgent",
@@ -30,7 +37,7 @@ const COMPACTING_DRIVERS = new Set([
 export class BotAutoCompaction extends Context.Service<
   BotAutoCompaction,
   {
-    readonly afterCompletedRun: (
+    readonly afterSettledRun: (
       threadId: ThreadId,
       runId: RunId,
     ) => Effect.Effect<
@@ -50,7 +57,7 @@ export const layer = Layer.effect(
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const providers = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
 
-    const afterCompletedRun = Effect.fn("BotAutoCompaction.afterCompletedRun")(function* (
+    const afterSettledRun = Effect.fn("BotAutoCompaction.afterSettledRun")(function* (
       threadId: ThreadId,
       runId: RunId,
     ) {
@@ -63,7 +70,7 @@ export const layer = Layer.effect(
       ]);
       if (projection.thread.deletedAt !== null || projection.thread.archivedAt !== null) return;
       const run = projection.runs.find((candidate) => candidate.id === runId);
-      if (run?.status !== "completed") return;
+      if (run?.status !== "completed" && run?.status !== "failed") return;
       if (projection.runs.some((candidate) => candidate.ordinal > run.ordinal)) return;
 
       const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
@@ -76,16 +83,27 @@ export const layer = Layer.effect(
         projection.providerTurns,
         run.activeAttemptId,
       );
+      if (run.status === "completed" && providerTurn?.status !== "completed") return;
       const maxTokens = providerTurn?.tokenUsage?.maxTokens;
       const threshold =
         maxTokens != null && maxTokens > 0
           ? Math.min(COMPACTION_THRESHOLD, maxTokens * 0.8)
           : COMPACTION_THRESHOLD;
-      if (
-        providerTurn?.status !== "completed" ||
-        (providerTurn.tokenUsage?.usedTokens ?? 0) <= threshold
-      )
-        return;
+      const contextOverflow =
+        run.status === "failed" &&
+        (yield* threads.getThreadRecords(threadId, ["turnItems"], {
+          turnItemRunIds: [runId],
+          turnItemTypes: ["error"],
+        })).turnItems.some(
+          (item) =>
+            item.type === "error" &&
+            (item.providerTurnId === null || item.providerTurnId === providerTurn?.id) &&
+            (CONTEXT_OVERFLOW_CODES.has(
+              (item.failure.code ?? "").replace(/[^a-z]/gi, "").toLowerCase(),
+            ) ||
+              CONTEXT_OVERFLOW_MESSAGE.test(item.failure.message)),
+        );
+      if (!contextOverflow && (providerTurn?.tokenUsage?.usedTokens ?? 0) <= threshold) return;
 
       const provider = yield* providers.get(projection.thread.providerInstanceId);
       if (!COMPACTING_DRIVERS.has(provider.driver)) return;
@@ -104,7 +122,7 @@ export const layer = Layer.effect(
       });
     });
 
-    return BotAutoCompaction.of({ afterCompletedRun });
+    return BotAutoCompaction.of({ afterSettledRun });
   }),
 );
 
@@ -114,8 +132,9 @@ export const workerLive = Layer.effectDiscard(
     const compaction = yield* BotAutoCompaction;
     yield* orchestrator.streamDomainEvents.pipe(
       Stream.runForEach((event) =>
-        event.type === "run.updated" && event.payload.status === "completed"
-          ? compaction.afterCompletedRun(event.threadId, event.payload.id).pipe(
+        event.type === "run.updated" &&
+        (event.payload.status === "completed" || event.payload.status === "failed")
+          ? compaction.afterSettledRun(event.threadId, event.payload.id).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("Bot auto-compaction failed", {
                   threadId: event.threadId,

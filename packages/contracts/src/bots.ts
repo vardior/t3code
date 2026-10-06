@@ -31,6 +31,7 @@ export const BotSummary = Schema.Struct({
   homeThreadId: ThreadId,
   scheduledTaskIds: Schema.Array(ScheduledTaskId),
   paused: Schema.Boolean,
+  pausedUntil: Schema.optionalKey(IsoDateTime),
   homeThreadMissing: Schema.optionalKey(Schema.Boolean),
   homeThreadArchived: Schema.optionalKey(Schema.Boolean),
   homeThreadQueueHeld: Schema.optionalKey(Schema.Boolean),
@@ -76,9 +77,16 @@ export const BOT_WS_METHODS = {
   botsList: "bots.list",
   botsGet: "bots.get",
   botsSetPaused: "bots.setPaused",
+  botsSubscribeChanges: "bots.subscribeChanges",
 } as const;
 
 export const BotsRpcGroup = RpcGroup.make(
+  Rpc.make(BOT_WS_METHODS.botsSubscribeChanges, {
+    payload: BotListInput,
+    success: Schema.Struct({}),
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+    stream: true,
+  }),
   Rpc.make(BOT_WS_METHODS.botsGet, {
     payload: BotGetInput,
     success: BotDetail,
@@ -98,6 +106,7 @@ export const BotsRpcGroup = RpcGroup.make(
 
 export const BOT_RPC_REQUIRED_SCOPES = {
   [BOT_WS_METHODS.botsList]: AuthOrchestrationReadScope,
+  [BOT_WS_METHODS.botsSubscribeChanges]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsGet]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
 } satisfies Record<RpcGroup.Rpcs<typeof BotsRpcGroup>["_tag"], AuthEnvironmentScope>;

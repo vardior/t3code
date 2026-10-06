@@ -35,4 +35,4 @@ Bots always notify when they reply. Tapping a bot's notification opens its chat.
 
 ## Long-running context
 
-A bot's home thread compacts its context automatically after a turn uses more than 150,000 tokens, so the bot keeps working in the same thread. The chat marks the point with **Context reset** and the size before and after.
+A bot's home thread compacts its context automatically when its context passes 250,000 tokens or 80% of the model's context window, whichever is lower, so the bot keeps working in the same thread. The chat marks the point with **Context reset** and the size before and after.

@@ -568,10 +568,27 @@ export const make = Effect.gen(function* () {
       // Subagents and side chats have no relay rows to clear; per-event tombstones would needlessly redeliver user aggregates.
       return;
     }
+    const botHome = threadShell !== null && (yield* bots.isHomeThread(threadId));
+    let autoCompaction = false;
+    if (botHome && threadShell.latestRunId !== null) {
+      const records = yield* threads.getThreadRecords(threadId, ["runs", "messages"], {
+        runIds: [threadShell.latestRunId],
+        messageRunIds: [threadShell.latestRunId],
+      });
+      const run = records.runs.find((candidate) => candidate.id === threadShell.latestRunId);
+      autoCompaction = records.messages.some(
+        (message) =>
+          message.id === run?.userMessageId &&
+          message.id.startsWith("bot-auto-compact:") &&
+          message.createdBy === "agent" &&
+          message.creationSource === "server" &&
+          message.text.trim().toLowerCase() === "/compact" &&
+          message.attachments.length === 0,
+      );
+    }
     const notificationsSuppressed =
-      threadShell !== null &&
-      !(yield* settings.getSettings).notifyAgentThreads &&
-      !(yield* bots.isHomeThread(threadId));
+      autoCompaction ||
+      (threadShell !== null && !(yield* settings.getSettings).notifyAgentThreads && !botHome);
     if (notificationsSuppressed && !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)) {
       return;
     }
