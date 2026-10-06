@@ -371,7 +371,12 @@ function BotConversation(props: {
           }
           ListEmptyComponent={
             threadLoadFailed ? undefined : (
-              <View className="gap-3 py-6">
+              <View
+                className="gap-3 py-6"
+                style={
+                  Platform.OS === "android" ? { marginBottom: initialComposerHeight } : undefined
+                }
+              >
                 <Text className="text-center text-sm text-foreground-muted">
                   {unavailableReason ?? `Nothing between you and ${bot.name} yet.`}
                 </Text>
