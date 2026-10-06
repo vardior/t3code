@@ -1,6 +1,11 @@
 import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+
+import { writeFileStringAtomically } from "../atomicWrite.ts";
 
 const BotConfigFile = Schema.Struct({
   name: Schema.String,
@@ -34,3 +39,30 @@ export class BotSchedulePauseTransition extends Context.Reference<boolean>(
   "t3/bots/BotSchedulePauseTransition",
   { defaultValue: () => false },
 ) {}
+
+const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown), {
+  space: 2,
+});
+const decodeJsonObject = Schema.decodeUnknownEffect(JsonObject);
+const encodeJsonObject = Schema.encodeEffect(JsonObject);
+const PAUSE_KEYS = new Set(["paused", "pausedUntil", "pausedReason", "pausedScheduleIds"]);
+
+export const writeBotPauseFields = Effect.fn("writeBotPauseFields")(function* (
+  configPath: string,
+  fields: Record<string, unknown> | null,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const document = yield* decodeJsonObject(yield* fileSystem.readFileString(configPath));
+  const next =
+    fields === null
+      ? Object.fromEntries(Object.entries(document).filter(([key]) => !PAUSE_KEYS.has(key)))
+      : { ...document, ...fields };
+  yield* writeFileStringAtomically({
+    filePath: configPath,
+    contents: `${yield* encodeJsonObject(next)}\n`,
+  }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(Path.Path, path),
+  );
+});

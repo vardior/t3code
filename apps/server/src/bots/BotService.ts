@@ -20,10 +20,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 
@@ -34,6 +34,7 @@ import {
   isPaused,
   listedScheduleIds,
   ownThreadIds,
+  writeBotPauseFields,
   type BotConfigFile,
 } from "./BotConfig.ts";
 
@@ -59,13 +60,7 @@ const replyPreview = (text: string) => {
     : plainText;
 };
 
-const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown), {
-  space: 2,
-});
-const decodeJsonObject = Schema.decodeUnknownEffect(JsonObject);
-const encodeJsonObject = Schema.encodeEffect(JsonObject);
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
-const PAUSE_KEYS = new Set(["paused", "pausedUntil", "pausedReason", "pausedScheduleIds"]);
 const isBotError = Schema.is(BotError);
 
 const isPauseExpired = (config: BotConfigFile, nowMs: number) =>
@@ -101,7 +96,6 @@ export const layer = Layer.effect(
     const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
 
     const homeThreadLookupLock = yield* Semaphore.make(1);
-    const pauseLock = yield* Semaphore.make(1);
     let homeThreadIds = new Set<ThreadId>();
     let homeThreadIdsExpireAt = 0;
     let homeThreadReadWarningLogged = false;
@@ -337,15 +331,9 @@ export const layer = Layer.effect(
     const readBot = (id: string, botDir: string) =>
       Effect.gen(function* () {
         const configPath = path.join(botDir, "bot.json");
-        let config = yield* fileSystem
+        const config = yield* fileSystem
           .readFileString(configPath)
           .pipe(Effect.flatMap(decodeBotConfig));
-        if (isPauseExpired(config, yield* Clock.currentTimeMillis)) {
-          yield* setPaused({ botId: id, paused: false }, true);
-          config = yield* fileSystem
-            .readFileString(configPath)
-            .pipe(Effect.flatMap(decodeBotConfig));
-        }
         const bot: BotSummary = {
           id,
           name: config.name,
@@ -416,23 +404,10 @@ export const layer = Layer.effect(
         const config = yield* decodeBotConfig(raw);
         if (onlyIfExpired && !isPauseExpired(config, yield* Clock.currentTimeMillis)) return {};
         const writePauseFields = (fields: Record<string, unknown> | null) =>
-          Effect.gen(function* () {
-            const freshRaw = yield* fileSystem.readFileString(configPath);
-            const document = yield* decodeJsonObject(freshRaw);
-            const next =
-              fields === null
-                ? Object.fromEntries(
-                    Object.entries(document).filter(([key]) => !PAUSE_KEYS.has(key)),
-                  )
-                : { ...document, ...fields };
-            yield* writeFileStringAtomically({
-              filePath: configPath,
-              contents: `${yield* encodeJsonObject(next)}\n`,
-            }).pipe(
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-              Effect.provideService(Path.Path, path),
-            );
-          });
+          writeBotPauseFields(configPath, fields).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          );
 
         if (input.paused) {
           const botScheduleIds = new Set(yield* scheduleIdsFor(config));
@@ -471,9 +446,7 @@ export const layer = Layer.effect(
           return {};
         const { tasks } = yield* scheduledTasks.list();
         const disabledIds = new Set(tasks.filter((task) => !task.enabled).map((task) => task.id));
-        const resumeIds = (config.pausedScheduleIds ?? listedScheduleIds(config)).filter((id) =>
-          disabledIds.has(id),
-        );
+        const resumeIds = (config.pausedScheduleIds ?? []).filter((id) => disabledIds.has(id));
         const enabledIds: ScheduledTaskId[] = [];
         yield* Effect.gen(function* () {
           for (const id of resumeIds) {
@@ -491,7 +464,8 @@ export const layer = Layer.effect(
         return {};
       }).pipe(
         Effect.uninterruptible,
-        pauseLock.withPermit,
+        Effect.provideService(BotSchedulePauseTransition, true),
+        scheduledTasks.withBotPauseLock,
         Effect.tap(() => refreshHomeThreadIds()),
         Effect.mapError((cause) =>
           isBotError(cause)
@@ -502,6 +476,45 @@ export const layer = Layer.effect(
               }),
         ),
       );
+
+    const restoreExpiredPauses = Effect.gen(function* () {
+      const ids = yield* readBotIds();
+      yield* Effect.forEach(
+        ids,
+        (botId) =>
+          Effect.gen(function* () {
+            const configPath = path.join(botsDir, botId, "bot.json");
+            if (
+              !(yield* fileSystem
+                .exists(configPath)
+                .pipe(Effect.catchCause(() => Effect.succeed(false))))
+            )
+              return;
+            const config = yield* fileSystem
+              .readFileString(configPath)
+              .pipe(Effect.flatMap(decodeBotConfig));
+            if (isPauseExpired(config, yield* Clock.currentTimeMillis)) {
+              yield* setPaused({ botId, paused: false }, true);
+            }
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Cannot restore expired bot pause", { botId, cause }),
+            ),
+          ),
+        { discard: true },
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Cannot scan expired bot pauses", { botsDir, cause }),
+      ),
+    );
+
+    yield* restoreExpiredPauses;
+    yield* restoreExpiredPauses.pipe(
+      Effect.repeat(Schedule.spaced("1 minute")),
+      Effect.delay("1 minute"),
+      Effect.forkScoped,
+    );
 
     return BotService.of({ get, list, isHomeThread, setPaused });
   }),

@@ -40,6 +40,7 @@ import {
   isPaused,
   listedScheduleIds,
   ownThreadIds,
+  writeBotPauseFields,
 } from "../bots/BotConfig.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -117,8 +118,6 @@ const LEGACY_DELIVERY_OUTCOMES: ReadonlySet<string> = new Set([
 interface WebhookOrigin {
   readonly relayHookBaseUrl: string | null;
 }
-
-const isScheduledTaskError = Schema.is(ScheduledTaskError);
 
 const ENDPOINT_KEY = /^[0-9a-f]{16}$/;
 
@@ -276,6 +275,7 @@ interface WebhookDeliveryRow {
 export class ScheduledTaskService extends Context.Service<
   ScheduledTaskService,
   {
+    readonly withBotPauseLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
     readonly list: () => Effect.Effect<ScheduledTaskListResult, ScheduledTaskError>;
     readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;
     readonly upsert: (
@@ -516,40 +516,63 @@ export const layer = Layer.effect(
     const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim();
     const botsDir =
       configuredBotsDir || (Option.isSome(config) ? path.join(config.value.baseDir, "bots") : null);
-    const assertBotScheduleCanEnable = (id: ScheduledTaskId, threadId: ThreadId | null) =>
+    const pauseLock = yield* Semaphore.make(1);
+    const withBotPauseLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.gen(function* () {
-        if (botsDir === null || (yield* BotSchedulePauseTransition)) return;
+        if (yield* BotSchedulePauseTransition) return yield* effect;
+        return yield* effect.pipe(pauseLock.withPermit);
+      });
+    const pausedBotsForSchedule = (id: ScheduledTaskId, threadId: ThreadId | null) =>
+      Effect.gen(function* () {
+        if (botsDir === null) return [];
         const ids = yield* fileSystem
           .readDirectory(botsDir)
           .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])));
         const now = yield* Clock.currentTimeMillis;
-        for (const botId of ids.filter((id) => BOT_ID.test(id))) {
-          const configPath = path.join(botsDir, botId, "bot.json");
-          if (!(yield* fileSystem.exists(configPath))) continue;
-          const bot = yield* fileSystem
-            .readFileString(configPath)
-            .pipe(Effect.flatMap(decodeBotConfig));
-          if (
-            isPaused(bot, now) &&
-            (listedScheduleIds(bot).includes(id) ||
-              (threadId !== null && ownThreadIds(bot).includes(threadId)))
-          ) {
-            return yield* taskError(
-              `Paused with bot ${bot.name}. Resume the bot before enabling this task.`,
-              { taskId: id },
-            );
-          }
-        }
+        const bots = yield* Effect.forEach(
+          ids.filter((id) => BOT_ID.test(id)),
+          (botId) =>
+            Effect.gen(function* () {
+              const configPath = path.join(botsDir, botId, "bot.json");
+              if (
+                !(yield* fileSystem
+                  .exists(configPath)
+                  .pipe(Effect.catchCause(() => Effect.succeed(false))))
+              )
+                return null;
+              const bot = yield* fileSystem
+                .readFileString(configPath)
+                .pipe(Effect.flatMap(decodeBotConfig));
+              return isPaused(bot, now) &&
+                (listedScheduleIds(bot).includes(id) ||
+                  bot.pausedScheduleIds?.includes(id) ||
+                  (threadId !== null && ownThreadIds(bot).includes(threadId)))
+                ? { bot, configPath }
+                : null;
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Skipping unreadable bot schedule state", { botId, cause }).pipe(
+                  Effect.as(null),
+                ),
+              ),
+            ),
+        );
+        return bots.filter((bot) => bot !== null);
       }).pipe(
         Effect.mapError((cause) =>
-          isScheduledTaskError(cause)
-            ? cause
-            : taskError("Could not check whether this task's bot is paused.", {
-                taskId: id,
-                cause,
-              }),
+          taskError("Could not check whether this task's bot is paused.", { taskId: id, cause }),
         ),
       );
+    const assertBotScheduleCanEnable = (id: ScheduledTaskId, threadId: ThreadId | null) =>
+      Effect.gen(function* () {
+        const pausedBot = (yield* pausedBotsForSchedule(id, threadId))[0];
+        if (pausedBot !== undefined) {
+          return yield* taskError(
+            `Paused with bot ${pausedBot.bot.name}. Resume the bot before enabling this task.`,
+            { taskId: id },
+          );
+        }
+      });
 
     const webhookPermits = yield* Ref.make<ReadonlyMap<ScheduledTaskId, Semaphore.Semaphore>>(
       new Map(),
@@ -1465,6 +1488,9 @@ ${checkOutput}` : basePrompt;
       // keep their run history, and so real load failures propagate instead
       // of silently resetting an existing row.
       const existingTask = yield* findTask(id);
+      if (input.id === undefined && input.commandId !== undefined && existingTask !== null) {
+        return { task: existingTask };
+      }
       const threadMode = resolveThreadMode(input, existingTask);
       const keptThreadId = input.threadId ?? existingTask?.threadId ?? null;
       // A bound thread belongs to its project, so moving the task leaves it for a new one.
@@ -1486,7 +1512,11 @@ ${checkOutput}` : basePrompt;
           ? managedRuntimeModeDenial(managedPolicy.summary, input.runtimeMode)
           : undefined;
       if (modeDenial !== undefined) return yield* taskError(modeDenial, { taskId: id });
-      if (input.enabled) {
+      const pausedBots =
+        input.enabled && existingTask === null && !input.requireExisting
+          ? yield* pausedBotsForSchedule(id, input.threadId ?? null)
+          : [];
+      if (input.enabled && (existingTask !== null || input.requireExisting)) {
         yield* assertBotScheduleCanEnable(id, input.threadId ?? null);
         if (existingTask !== null) yield* assertBotScheduleCanEnable(id, existingTask.threadId);
       }
@@ -1560,6 +1590,7 @@ ${checkOutput}` : basePrompt;
               return { token, secret, secretChanged };
             })
           : { token: null, secret: null, secretChanged: true };
+      const enabled = input.enabled && pausedBots.length === 0;
       const workspaceStrategy: ScheduledTask["workspaceStrategy"] =
         input.workspaceStrategy.type === "worktree" &&
         (yield* managedFolders.isScratchProject(input.projectId))
@@ -1567,7 +1598,7 @@ ${checkOutput}` : basePrompt;
           : input.workspaceStrategy;
       const scheduleUnchanged =
         existingTask !== null &&
-        existingTask.enabled === input.enabled &&
+        existingTask.enabled === enabled &&
         isSameSchedule(existingTask.schedule, schedule);
       if (!scheduleUnchanged)
         yield* requireFutureOnce({ enabled: input.enabled, schedule }, now, id);
@@ -1575,7 +1606,7 @@ ${checkOutput}` : basePrompt;
         id,
         title: input.title,
         prompt: input.prompt,
-        enabled: input.enabled,
+        enabled,
         schedule,
         ...keptCheckCommand(input.checkCommand, existingTask),
         projectId: input.projectId,
@@ -1591,7 +1622,7 @@ ${checkOutput}` : basePrompt;
         updatedAt: iso(now),
         nextRunAt: scheduleUnchanged
           ? existingTask.nextRunAt
-          : nextRunAt({ enabled: input.enabled, schedule }, now),
+          : nextRunAt({ enabled, schedule }, now),
         lastRunAt: existingTask?.lastRunAt ?? null,
         lastRunStatus: existingTask?.lastRunStatus ?? "never",
         lastRunError: existingTask?.lastRunError ?? null,
@@ -1603,15 +1634,27 @@ ${checkOutput}` : basePrompt;
         scheduleUnchanged ? existingTask.schedule : null,
         webhook,
       );
+      for (const { bot, configPath } of pausedBots) {
+        yield* writeBotPauseFields(configPath, {
+          pausedScheduleIds: [...new Set([...(bot.pausedScheduleIds ?? []), id])],
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError((cause) =>
+            taskError("Could not remember this task for bot resume.", { taskId: id, cause }),
+          ),
+        );
+      }
       yield* notifyChanged;
       return { task: (yield* findTask(id)) ?? task };
-    });
+    }, withBotPauseLock);
 
     const setEnabled: ScheduledTaskService["Service"]["setEnabled"] = Effect.fn(
       "ScheduledTaskService.setEnabled",
     )(function* (input) {
       const existing = yield* loadTask(input.id);
-      if (input.enabled) yield* assertBotScheduleCanEnable(input.id, existing.threadId);
+      if (input.enabled && !(yield* BotSchedulePauseTransition))
+        yield* assertBotScheduleCanEnable(input.id, existing.threadId);
       if (existing.enabled === input.enabled) return { task: existing };
       if (
         input.enabled &&
@@ -1655,7 +1698,7 @@ ${checkOutput}` : basePrompt;
       return {
         task: { ...existing, enabled: input.enabled, nextRunAt: next, updatedAt: iso(now) },
       };
-    });
+    }, withBotPauseLock);
 
     const forgetWebhookTask = (id: ScheduledTaskId) =>
       Effect.all(
@@ -2667,6 +2710,7 @@ ${checkOutput}` : basePrompt;
     yield* scheduler.register("webhook-coalescing", dispatchPending());
 
     return ScheduledTaskService.of({
+      withBotPauseLock,
       list,
       subscribeList,
       upsert,
