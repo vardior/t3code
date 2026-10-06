@@ -273,7 +273,9 @@ function BotConversation(props: {
   };
   const history = thread.history;
   const historyError = history.error;
-  const error = composer.error ?? uploadError ?? Option.getOrNull(thread.error);
+  const error = composer.error ?? uploadError;
+  const conversationShown = projection !== null && thread.status !== "deleted";
+  const threadLoadFailed = threadError !== null && thread.status !== "deleted";
   return (
     <View className="flex-1 bg-screen">
       <ScreenHeader
@@ -294,7 +296,7 @@ function BotConversation(props: {
         <KeyboardAwareLegendList
           key={listMountKey}
           ref={listRef}
-          data={unavailableReason === null ? items : []}
+          data={conversationShown ? items : []}
           extraData={schedules.data}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
@@ -368,23 +370,13 @@ function BotConversation(props: {
             ) : undefined
           }
           ListEmptyComponent={
-            <View className="gap-3 py-6">
-              <Text
-                accessibilityRole={threadError ? "alert" : undefined}
-                className="text-center text-sm text-foreground-muted"
-              >
-                {unavailableReason ?? `Nothing between you and ${bot.name} yet.`}
-              </Text>
-              {threadError ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={retryThread}
-                  className="self-center p-2"
-                >
-                  <Text className="text-primary-text">Try again</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            threadLoadFailed ? undefined : (
+              <View className="gap-3 py-6">
+                <Text className="text-center text-sm text-foreground-muted">
+                  {unavailableReason ?? `Nothing between you and ${bot.name} yet.`}
+                </Text>
+              </View>
+            )
           }
           ListFooterComponent={
             unavailableReason !== null ? undefined : status.kind === "working" ? (
@@ -454,7 +446,17 @@ function BotConversation(props: {
           className="absolute bottom-0 left-0 right-0 gap-2 border-t border-border-subtle bg-screen px-4 pt-3"
           style={{ paddingBottom: composerBottomInset }}
         >
-          {unavailableReason ? (
+          {threadLoadFailed ? (
+            <View className="flex-row items-center gap-2">
+              <Text accessibilityRole="alert" className="flex-1 text-sm text-destructive">
+                {unavailableReason}
+              </Text>
+              <Pressable accessibilityRole="button" onPress={retryThread} className="p-2">
+                <Text className="text-sm text-primary-text">Try again</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {unavailableReason && !threadLoadFailed ? (
             <Text className="text-sm text-foreground-muted">{unavailableReason}</Text>
           ) : null}
           {error ? (
