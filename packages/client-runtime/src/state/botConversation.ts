@@ -98,6 +98,22 @@ export function botConversationStatus(
   return { kind: "failed", error: error?.type === "error" ? error.failure.message : null };
 }
 
+export function botWakeSenderLabel(input: {
+  readonly senderTitle?: string | null;
+  readonly scheduleTitle?: string | null;
+  readonly botName: string;
+  readonly scheduled: boolean;
+}): string {
+  const senderTitle = input.senderTitle?.trim();
+  if (senderTitle) return senderTitle;
+  const prefix = `bot ${input.botName} `;
+  const scheduleTitle = input.scheduleTitle?.trim();
+  const scheduleName = scheduleTitle?.startsWith(prefix)
+    ? scheduleTitle.slice(prefix.length).trim()
+    : scheduleTitle;
+  return scheduleName || (input.scheduled ? "a scheduled task" : "another thread");
+}
+
 export function buildBotChat(input: {
   readonly bot: BotSummary;
   readonly messages: ReadonlyArray<ChatMessage>;

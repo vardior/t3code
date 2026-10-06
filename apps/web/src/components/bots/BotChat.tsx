@@ -27,9 +27,8 @@ import {
   type MouseEvent,
 } from "react";
 
-import { useComposerDraftStore } from "../../composerDraftStore";
-
 import { useAssetUrls } from "../../assets/assetUrls";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
@@ -44,6 +43,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   buildBotChat,
   botConversationStatus,
+  botWakeSenderLabel,
   rewriteThreadLinks,
   threadIdFromHref,
   type BotChatItem,
@@ -113,7 +113,7 @@ export function BotChat(props: {
     } else if (followEnd.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [items, status.kind, thread.history.loading]);
+  }, [thread.history.loading]);
   useEffect(() => {
     const content = scrollContent.current;
     if (!content) return;
@@ -126,6 +126,17 @@ export function BotChat(props: {
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
+  const latestReply = items.findLast((item) => item.kind === "bot");
+  const statusAnnouncement =
+    status.kind === "working"
+      ? `${props.bot.name} is working.`
+      : status.kind === "needs-attention"
+        ? status.request === "approval"
+          ? "Needs your approval."
+          : "Needs your input."
+        : status.kind === "failed"
+          ? "Run failed."
+          : `${props.bot.name} is ready.`;
   const onRunSettled = useEffectEvent(props.onRunSettled);
   useEffect(() => {
     if (!working) onRunSettled();
@@ -237,6 +248,10 @@ export function BotChat(props: {
           ) : null}
         </div>
       </div>
+      <div className="sr-only" aria-live="polite" aria-atomic="false">
+        <span>{statusAnnouncement}</span>
+        {latestReply ? <span key={latestReply.id}>{props.bot.name} replied.</span> : null}
+      </div>
       <BotComposer
         bot={props.bot}
         environmentId={props.environmentId}
@@ -317,7 +332,13 @@ function YourMessage(props: {
     <div className="flex max-w-[85%] flex-col items-end gap-1 self-end">
       {imageUrls.map((url, index) =>
         url ? (
-          <a key={item.imageIds[index]} href={url} target="_blank" rel="noreferrer">
+          <a
+            key={item.imageIds[index]}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open attached image ${index + 1}`}
+          >
             <img alt="" className="max-h-64 rounded-2xl" src={url} />
           </a>
         ) : null,
@@ -342,21 +363,24 @@ function WakeRow(props: {
     item.senderThreadId ? scopeThreadRef(props.environmentId, item.senderThreadId) : null,
   );
   const scheduleTitle = props.schedules.find((task) => task.id === item.scheduledTaskId)?.title;
-  const botPrefix = `bot ${props.botName} `;
-  const scheduleName = scheduleTitle?.startsWith(botPrefix)
-    ? scheduleTitle.slice(botPrefix.length)
-    : scheduleTitle;
-  const from =
-    sender?.title ?? scheduleName ?? (item.scheduledTaskId ? "a scheduled task" : "another thread");
+  const from = botWakeSenderLabel({
+    senderTitle: sender?.title ?? null,
+    scheduleTitle: scheduleTitle ?? null,
+    botName: props.botName,
+    scheduled: item.scheduledTaskId !== null,
+  });
   const replyPreview =
     item.reply
       ?.split("\n")
       .find((line) => line.trim())
       ?.replace(/[*`#>]/g, "") ?? "no reply yet";
   return (
-    <details className="group max-w-[85%] self-start text-muted-foreground text-xs">
+    <details className="group min-w-0 max-w-[85%] self-start text-muted-foreground text-xs">
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full border border-border/70 px-3 py-1.5 hover:bg-accent/60 hover:text-foreground">
-        <span className="shrink-0">From {from}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0">From</span>
+          <span className="truncate">{from}</span>
+        </span>
         <span className="truncate opacity-70">· {replyPreview}</span>
       </summary>
       <div className="mt-2 flex flex-col gap-2">

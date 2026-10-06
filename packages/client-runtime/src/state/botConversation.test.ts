@@ -15,6 +15,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   botConversationStatus,
+  botWakeSenderLabel,
   buildBotChat,
   slackMarkupToMarkdown,
   slackTextFromCommand,
@@ -603,5 +604,36 @@ describe("botConversationStatus", () => {
         turnItems: [],
       }),
     ).toEqual({ kind: "failed", error: null });
+  });
+});
+
+describe("botWakeSenderLabel", () => {
+  const input = { botName: "Helper", scheduled: false };
+
+  it("names a known sender before considering schedule metadata", () => {
+    expect(
+      botWakeSenderLabel({
+        ...input,
+        senderTitle: " Release coordinator ",
+        scheduleTitle: "bot Helper Check",
+      }),
+    ).toBe("Release coordinator");
+  });
+
+  it("falls back to another thread without exposing identifiers", () => {
+    expect(botWakeSenderLabel(input)).toBe("another thread");
+    expect(botWakeSenderLabel({ ...input, senderTitle: " " })).toBe("another thread");
+  });
+
+  it("keeps scheduled wake labels readable", () => {
+    expect(
+      botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: "bot Helper Check builds" }),
+    ).toBe("Check builds");
+    expect(botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: " " })).toBe(
+      "a scheduled task",
+    );
+    expect(botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: "Daily update" })).toBe(
+      "Daily update",
+    );
   });
 });
