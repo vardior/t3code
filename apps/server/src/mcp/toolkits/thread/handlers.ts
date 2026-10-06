@@ -8,7 +8,7 @@ import {
   type OrchestrationV2Command,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { modelSelectionCommandType, modelSelectionsEqual } from "@t3tools/shared/model";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -216,8 +216,22 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         const modelSelection = yield* required(input.modelSelection, "modelSelection");
         const {
           threads,
+          scope,
+          caller,
           projection: { thread },
         } = yield* readThread(input.threadId);
+        if (
+          scope.thread?.threadId === thread.id &&
+          caller !== undefined &&
+          caller.activeRunId !== null &&
+          !modelSelectionsEqual(thread.modelSelection, modelSelection)
+        ) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message:
+              "Changing the calling thread's model selection would interrupt this active run. Configure another thread, or ask the user to change this thread after the run ends.",
+          });
+        }
         const type = modelSelectionCommandType(thread.providerInstanceId, modelSelection);
         const result = yield* threads
           .dispatch({ type, threadId: thread.id, commandId: yield* newCommandId(), modelSelection })
