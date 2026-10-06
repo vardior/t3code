@@ -200,6 +200,7 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as BotService from "./bots/BotService.ts";
+import * as BotAutoCompaction from "./bots/BotAutoCompaction.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
@@ -647,6 +648,11 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,
+  BotAutoCompaction.workerLive.pipe(
+    Layer.provideMerge(BotAutoCompaction.layer),
+    Layer.provide(BotService.layer),
+    Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
+  ),
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   DatabaseStorage.layer.pipe(
     Layer.provide(ProjectionMaintenance.layer),

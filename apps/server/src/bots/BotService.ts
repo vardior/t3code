@@ -72,6 +72,7 @@ export class BotService extends Context.Service<
   BotService,
   {
     readonly list: () => Effect.Effect<BotListResult, BotError>;
+    readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean, BotError>;
     readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
   }
 >()("t3/bots/BotService") {}
@@ -214,6 +215,28 @@ export const layer = Layer.effect(
         return { bots: bots.flatMap((bot) => Option.toArray(bot)) };
       });
 
+    const isHomeThread = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        if (configuredBotsDir === null && !(yield* fileSystem.exists(botsDir))) return false;
+        const entries = yield* fileSystem.readDirectory(botsDir);
+        for (const id of entries) {
+          if (!BOT_ID.test(id)) continue;
+          const raw = yield* fileSystem
+            .readFileString(path.join(botsDir, id, "bot.json"))
+            .pipe(Effect.catchCause(() => Effect.succeed(null)));
+          if (raw === null) continue;
+          const config = yield* decodeBotConfig(raw).pipe(
+            Effect.catchCause(() => Effect.succeed(null)),
+          );
+          if (config?.homeThreadId === threadId) return true;
+        }
+        return false;
+      }).pipe(
+        Effect.mapError(
+          (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
+        ),
+      );
+
     const setScheduleIdsEnabled = (ids: ReadonlyArray<ScheduledTaskId>, enabled: boolean) =>
       Effect.forEach(ids, (id) => scheduledTasks.setEnabled({ id, enabled }), { discard: true });
 
@@ -274,6 +297,6 @@ export const layer = Layer.effect(
         ),
       );
 
-    return BotService.of({ list, setPaused });
+    return BotService.of({ list, isHomeThread, setPaused });
   }),
 );

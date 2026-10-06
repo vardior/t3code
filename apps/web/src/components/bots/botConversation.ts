@@ -58,6 +58,7 @@ type ChatMessage = Pick<
   | "id"
   | "role"
   | "createdBy"
+  | "creationSource"
   | "senderThreadId"
   | "scheduledTaskId"
   | "runId"
@@ -82,7 +83,8 @@ export function buildBotChat(input: {
       message.role === "user" &&
       !(
         message.createdBy === "agent" &&
-        message.senderThreadId === input.bot.homeThreadId &&
+        (message.senderThreadId === input.bot.homeThreadId ||
+          message.creationSource === "server") &&
         message.text === "/compact"
       ),
   );

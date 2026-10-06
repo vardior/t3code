@@ -66,6 +66,7 @@ const message = (input: {
   createdAt: string;
   text: string;
   createdBy?: "user" | "agent";
+  creationSource?: "web" | "mcp" | "provider" | "server";
   senderThreadId?: string;
   scheduledTaskId?: string;
   streaming?: boolean;
@@ -74,6 +75,9 @@ const message = (input: {
   id: MessageId.make(input.id),
   role: input.role,
   createdBy: input.createdBy ?? (input.role === "user" ? "user" : "agent"),
+  creationSource:
+    input.creationSource ??
+    (input.role === "assistant" ? "provider" : input.createdBy === "agent" ? "mcp" : "web"),
   ...(input.senderThreadId ? { senderThreadId: ThreadId.make(input.senderThreadId) } : {}),
   ...(input.scheduledTaskId
     ? { scheduledTaskId: ScheduledTaskId.make(input.scheduledTaskId) }
@@ -291,6 +295,33 @@ const botWithoutHistory: BotSummary = {
 };
 
 describe("buildBotChat compaction rows", () => {
+  it("hides a server-queued /compact and keeps its context reset divider", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [
+        message({
+          id: "server-compact",
+          role: "user",
+          runId: "run-compact",
+          createdAt: "2026-10-01T00:01:00.000Z",
+          text: "/compact",
+          createdBy: "agent",
+          creationSource: "server",
+        }),
+      ],
+      runs: [{ id: RunId.make("run-compact"), status: "completed" }],
+      turnItems: [
+        compactionItem({
+          id: "compact",
+          runId: "run-compact",
+          completedAt: "2026-10-01T00:02:00.000Z",
+        }),
+      ],
+    });
+
+    expect(items).toMatchObject([{ kind: "compaction", text: "Context reset" }]);
+  });
+
   it("shows one divider for a self-sent /compact without a wake, user row, or reply", () => {
     const items = buildBotChat({
       bot: botWithoutHistory,

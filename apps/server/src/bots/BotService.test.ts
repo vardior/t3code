@@ -1,7 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ScheduledTaskId } from "@t3tools/contracts";
+import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -248,6 +248,17 @@ it.effect("lists bots with their charter and the worker threads their home threa
         },
       ],
     });
+    const homeMatches = yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        return [
+          yield* bots.isHomeThread(ThreadId.make("home")),
+          yield* bots.isHomeThread(ThreadId.make("triage")),
+        ];
+      }),
+    );
+    expect(homeMatches).toEqual([true, false]);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
