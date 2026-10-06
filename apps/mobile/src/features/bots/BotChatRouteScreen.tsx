@@ -1,7 +1,7 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
-import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
+import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
@@ -16,16 +16,8 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
-import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, View, type ViewInstance } from "react-native";
 import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -51,12 +43,18 @@ import {
   composerAttachmentUploadBlockReason,
 } from "../../state/composer-attachment-uploads";
 import { uuidv4 } from "../../lib/uuid";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentThread, environmentThreads, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
-import { botChatScrollReducer, botComposerReducer, initialBotComposer } from "./botChat.logic";
+import {
+  botChatScrollReducer,
+  botComposerAtom,
+  botComposerReducer,
+  isBotSendDraftUnchanged,
+} from "./botChat.logic";
 import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
 
 type BotChatRouteProps = StaticScreenProps<{
@@ -239,13 +237,15 @@ function BotConversation(props: {
     if (listMountKey === "loading") return;
     listRef.current?.reportContentInset({ bottom: contentInsetEndAdjustment.value });
   }, [contentInsetEndAdjustment, listMountKey]);
-  const [composer, dispatch] = useReducer(
-    botComposerReducer,
-    JSON.stringify([environmentId, bot.id]),
-    initialBotComposer,
-  );
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
   const draftKey = `${environmentId}:bot-chat-${encodeURIComponent(bot.homeThreadId)}`;
+  const composerAtom = botComposerAtom(draftKey);
+  const composer = useAtomValue(composerAtom);
+  const dispatch = (action: Parameters<typeof botComposerReducer>[1]) =>
+    appAtomRegistry.set(
+      composerAtom,
+      botComposerReducer(appAtomRegistry.get(composerAtom), action),
+    );
   const draft = useComposerDraft(draftKey);
   const serverConfig = useEnvironmentServerConfig(environmentId);
   const getDraftKey = useCallback(() => draftKey, [draftKey]);
@@ -264,7 +264,6 @@ function BotConversation(props: {
   };
   const attachmentsUploading = composerAttachmentsStillUploading(uploadInput);
   const uploadError = composerAttachmentUploadBlockReason({ ...uploadInput, connected });
-  const pending = useRef(false);
   const sending = composer.pendingRequestId !== null;
   const busy = sending;
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
@@ -331,19 +330,19 @@ function BotConversation(props: {
     !attachmentsUploading &&
     uploadError === null &&
     (draft.text.trim().length > 0 || draft.attachments.length > 0);
-  usePreventRemove(busy && connected, () =>
-    Alert.alert("Command pending", "Wait for the bot command to finish before leaving."),
-  );
   const openThread = useCallback(
     (threadId: ThreadId, targetEnvironmentId = environmentId) => {
-      if (!pending.current || !connected)
-        navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
+      navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
     },
-    [navigation, environmentId, connected],
+    [navigation, environmentId],
   );
   const send = async () => {
-    if (!canSend || projection === null || pending.current) return;
-    pending.current = true;
+    if (
+      !canSend ||
+      projection === null ||
+      appAtomRegistry.get(composerAtom).pendingRequestId !== null
+    )
+      return;
     const requestId = uuidv4();
     const sentText = draft.text;
     dispatch({ type: "send", requestId, hasContent: true });
@@ -378,12 +377,11 @@ function BotConversation(props: {
           : squashAtomCommandFailure(result);
       error =
         failure === null ? null : failure instanceof Error ? failure.message : String(failure);
-      if (success && getComposerDraftSnapshot(draftKey).text === sentText)
+      if (success && isBotSendDraftUnchanged(draft, getComposerDraftSnapshot(draftKey)))
         clearComposerDraftContent(draftKey);
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
     } finally {
-      pending.current = false;
       dispatch({ type: "settled", scope: composer.scope, requestId, success, error });
     }
   };
@@ -403,7 +401,6 @@ function BotConversation(props: {
           {
             accessibilityLabel: `About ${bot.name}`,
             icon: "info.circle",
-            disabled: busy && connected,
             onPress: () => navigation.navigate("BotInfo", { environmentId, botId: bot.id }),
           },
         ]}

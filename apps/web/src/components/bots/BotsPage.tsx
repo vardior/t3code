@@ -61,7 +61,9 @@ export function BotsPage({
   const unavailable =
     isReady &&
     (requestedEnvironmentId
-      ? !queries.some((query) => query.environmentId === requestedEnvironmentId)
+      ? !queries.some((query) => query.environmentId === requestedEnvironmentId) ||
+        (disconnected.some((environment) => environment.environmentId === requestedEnvironmentId) &&
+          relevantQueries.every((query) => query.data === null))
       : queries.length === 0 || (bots.length === 0 && disconnected.length > 0));
   const pageState = unavailable ? (
     <BotsState
@@ -172,7 +174,7 @@ export function BotsPage({
               <BotsState
                 key={environment.environmentId}
                 title={`${environment.label} is disconnected`}
-                description="Connect to this environment to see its bots."
+                description="Reconnect to message these bots."
               />
             ))}
             {bots.map((entry) => (

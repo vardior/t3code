@@ -1,3 +1,4 @@
+import { AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -5,6 +6,8 @@ import {
   botThreadLinkTarget,
   botMarkdownThreadLinks,
   botComposerReducer,
+  botComposerAtom,
+  isBotSendDraftUnchanged,
   botStatusLabel,
   initialBotComposer,
 } from "./botChat.logic";
@@ -130,5 +133,58 @@ describe("bot thread links", () => {
         ["remote"],
       ),
     ).toBe("Unknown [Remote](https://t3.invalid/remote/thread) [Web](https://example.com)");
+  });
+});
+
+describe("bot send ownership", () => {
+  it("retains a pending send and its result after the chat leaves", () => {
+    const registry = AtomRegistry.make();
+    const atom = botComposerAtom("background-send");
+    const stop = registry.subscribe(atom, () => {});
+    try {
+      registry.set(
+        atom,
+        botComposerReducer(registry.get(atom), {
+          type: "send",
+          requestId: "send",
+          hasContent: true,
+        }),
+      );
+      stop();
+      expect(registry.get(botComposerAtom("background-send")).pendingRequestId).toBe("send");
+      registry.set(
+        atom,
+        botComposerReducer(registry.get(atom), {
+          type: "settled",
+          scope: "background-send",
+          requestId: "send",
+          success: false,
+          error: "Offline",
+        }),
+      );
+      expect(registry.get(botComposerAtom("background-send"))).toEqual({
+        scope: "background-send",
+        pendingRequestId: null,
+        error: "Offline",
+      });
+      expect(registry.get(botComposerAtom("other-chat")).pendingRequestId).toBeNull();
+    } finally {
+      stop();
+      registry.dispose();
+    }
+  });
+
+  it("clears only the sent draft and ignores upload metadata changes", () => {
+    const sent = { text: "hello", attachments: [{ id: "image" }] };
+    const uploaded = { id: "image", uploadedAttachmentId: "upload" };
+    expect(isBotSendDraftUnchanged(sent, { ...sent, attachments: [uploaded] })).toBe(true);
+    expect(isBotSendDraftUnchanged(sent, { ...sent, text: "new draft" })).toBe(false);
+    expect(isBotSendDraftUnchanged(sent, { ...sent, attachments: [] })).toBe(false);
+    expect(isBotSendDraftUnchanged(sent, { ...sent, attachments: [{ id: "new image" }] })).toBe(
+      false,
+    );
+    expect(
+      isBotSendDraftUnchanged(sent, { ...sent, attachments: [uploaded, { id: "new image" }] }),
+    ).toBe(false);
   });
 });

@@ -240,6 +240,11 @@ function BotInfo(props: {
                       ? ` · ${formatNextScheduledTaskRun(task.nextRunAt, now)}`
                       : ""}
                 </Text>
+                {task.lastRunStatus === "failed" || task.lastRunError ? (
+                  <Text className="text-sm text-danger-foreground" numberOfLines={2}>
+                    Last run failed: {task.lastRunError || "Unknown error"}
+                  </Text>
+                ) : null}
               </Pressable>
               <ThemedSwitch
                 accessibilityLabel={`${task.enabled ? "Pause" : "Resume"} schedule ${task.title}`}

@@ -239,6 +239,11 @@ function ScheduleRow(props: {
           {scheduleLabel(props.task.schedule)} · {props.task.modelSelection.model} ·{" "}
           {scheduleStatus(props.task)}
         </span>
+        {props.task.lastRunStatus === "failed" || props.task.lastRunError ? (
+          <span className="line-clamp-2 text-destructive text-xs">
+            Last run failed: {props.task.lastRunError || "Unknown error"}
+          </span>
+        ) : null}
       </button>
       <Switch
         aria-label={`${props.task.enabled ? "Pause" : "Resume"} schedule ${props.task.title}`}

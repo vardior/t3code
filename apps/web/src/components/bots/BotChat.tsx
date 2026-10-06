@@ -1,3 +1,4 @@
+import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -31,6 +32,7 @@ import { useAssetUrls } from "../../assets/assetUrls";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import {
@@ -121,8 +123,16 @@ export function BotChat(props: {
       setUnarchiving(false);
     }
   };
+  const { presentation } = useEnvironmentPresentation(props.environmentId);
+  const connectionReason =
+    presentation?.connection.phase === "connected"
+      ? null
+      : presentation === null
+        ? "Environment unavailable. Reconnect to message this bot."
+        : `${connectionStatusText(presentation.connection)} Reconnect to message this bot.`;
   const disabledReason =
-    thread.status === "deleted"
+    connectionReason ??
+    (thread.status === "deleted"
       ? "This bot's home thread is missing"
       : homeThreadArchived
         ? "Home thread archived"
@@ -130,7 +140,7 @@ export function BotChat(props: {
           ? "Could not load this bot’s home thread"
           : projection === null
             ? "Loading this bot’s home thread…"
-            : null;
+            : null);
   const items = useMemo(
     () =>
       projectChat({

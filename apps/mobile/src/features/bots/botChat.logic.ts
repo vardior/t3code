@@ -1,4 +1,5 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { Atom } from "effect/reactivity";
 
 export function botStatusLabel(
   status: {
@@ -28,6 +29,23 @@ type BotComposerState = {
 
 export function initialBotComposer(scope: string): BotComposerState {
   return { scope, pendingRequestId: null, error: null };
+}
+
+export const botComposerAtom = Atom.family((scope: string) =>
+  Atom.make(initialBotComposer(scope)).pipe(Atom.keepAlive),
+);
+
+type BotSendDraft = {
+  readonly text: string;
+  readonly attachments: ReadonlyArray<{ readonly id: string }>;
+};
+
+export function isBotSendDraftUnchanged(sent: BotSendDraft, current: BotSendDraft) {
+  return (
+    current.text === sent.text &&
+    current.attachments.length === sent.attachments.length &&
+    current.attachments.every((attachment, index) => attachment.id === sent.attachments[index]?.id)
+  );
 }
 
 type BotComposerAction =

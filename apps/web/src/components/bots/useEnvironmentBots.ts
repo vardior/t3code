@@ -6,9 +6,10 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentSummaries } from "../../state/presentation";
 import { formatEnvironmentQueryError } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { retainEnvironmentBotQueries } from "./environmentBots.logic";
 
 const environmentBotsAtom = Atom.make((get) => {
-  const queries = get(environmentSummaries.connectedEnvironmentIdsAtom).map((environmentId) => {
+  const current = get(environmentSummaries.environmentIdsAtom).map((environmentId) => {
     const atom = serverEnvironment.bots.list({ environmentId, input: {} });
     const result = get(atom);
     return {
@@ -22,6 +23,10 @@ const environmentBotsAtom = Atom.make((get) => {
       refresh: () => appAtomRegistry.refresh(atom),
     };
   });
+  const previous = Option.getOrNull(
+    get.self<{ readonly queries: ReadonlyArray<(typeof current)[number]> }>(),
+  );
+  const queries = retainEnvironmentBotQueries(current, previous?.queries ?? []);
   return {
     queries,
     bots: queries.flatMap(
@@ -29,7 +34,7 @@ const environmentBotsAtom = Atom.make((get) => {
         data?.bots.map((bot) => ({ environmentId, bot, refresh })) ?? [],
     ),
   };
-});
+}).pipe(Atom.keepAlive);
 
 export function useEnvironmentBots() {
   return useAtomValue(environmentBotsAtom);
