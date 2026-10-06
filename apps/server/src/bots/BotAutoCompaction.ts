@@ -76,9 +76,14 @@ export const layer = Layer.effect(
         projection.providerTurns,
         run.activeAttemptId,
       );
+      const maxTokens = providerTurn?.tokenUsage?.maxTokens;
+      const threshold =
+        maxTokens != null && maxTokens > 0
+          ? Math.min(COMPACTION_THRESHOLD, maxTokens * 0.8)
+          : COMPACTION_THRESHOLD;
       if (
         providerTurn?.status !== "completed" ||
-        (providerTurn.tokenUsage?.usedTokens ?? 0) <= COMPACTION_THRESHOLD
+        (providerTurn.tokenUsage?.usedTokens ?? 0) <= threshold
       )
         return;
 

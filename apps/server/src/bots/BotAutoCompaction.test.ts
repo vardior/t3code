@@ -24,6 +24,7 @@ const sourceMessageId = MessageId.make("bot-message");
 function projection(
   input: {
     usedTokens?: number;
+    maxTokens?: number;
     sourceText?: string;
     queuedCompact?: boolean;
   } = {},
@@ -73,7 +74,7 @@ function projection(
         runAttemptId: attemptId,
         ordinal: 1,
         status: "completed",
-        tokenUsage: { usedTokens: input.usedTokens ?? 250_001 },
+        tokenUsage: { usedTokens: input.usedTokens ?? 250_001, maxTokens: input.maxTokens },
       },
     ],
   } as unknown as OrchestrationV2ThreadProjection;
@@ -154,6 +155,22 @@ describe("BotAutoCompaction", () => {
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
       yield* service.afterCompletedRun(homeThreadId, runId);
       assert.isEmpty(yield* Ref.get(deliveries));
+    }),
+  );
+
+  it.effect.each([
+    { usedTokens: 160_001, maxTokens: 200_000, expected: 1 },
+    { usedTokens: 160_000, maxTokens: 200_000, expected: 0 },
+    { usedTokens: 250_001, maxTokens: 1_000_000, expected: 1 },
+    { usedTokens: 250_000, maxTokens: 1_000_000, expected: 0 },
+  ])("compacts at the capped window threshold: %j", ({ usedTokens, maxTokens, expected }) =>
+    Effect.gen(function* () {
+      const { layer, deliveries } = yield* harness({
+        projection: projection({ usedTokens, maxTokens }),
+      });
+      const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
+      yield* service.afterCompletedRun(homeThreadId, runId);
+      assert.lengthOf(yield* Ref.get(deliveries), expected);
     }),
   );
 
