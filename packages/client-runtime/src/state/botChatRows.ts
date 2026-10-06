@@ -7,6 +7,8 @@ export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolea
       left.id === right.id &&
       left.at === right.at &&
       left.text === right.text &&
+      left.runId === right.runId &&
+      left.runStatus === right.runStatus &&
       left.imageIds.length === right.imageIds.length &&
       left.imageIds.every((id, index) => id === right.imageIds[index])
     );

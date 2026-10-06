@@ -8,6 +8,7 @@ import {
   botChatHistoryStart,
   botConversationStatus,
   isBotQueueHeld,
+  shouldLoadEarlierBotChatHistory,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   isAtomCommandInterrupted,
@@ -15,7 +16,15 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
 import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -285,6 +294,31 @@ function BotConversation(props: {
   const loadEarlier = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
+  const autoHistory = useRef({ pages: 0, cursor: null as string | null });
+  const hasOwnerMessage = items.some((item) => item.kind === "you");
+  const canLoadHistory = connected && projection !== null && thread.status !== "deleted";
+  useEffect(() => {
+    if (
+      !canLoadHistory ||
+      !shouldLoadEarlierBotChatHistory({
+        hasOwnerMessage,
+        history: thread.history,
+        autoLoadedPages: autoHistory.current.pages,
+      }) ||
+      autoHistory.current.cursor === thread.history.historyCursor
+    )
+      return;
+    autoHistory.current.cursor = thread.history.historyCursor;
+    autoHistory.current.pages += 1;
+    void loadEarlier({ environmentId, input: { threadId: bot.homeThreadId } });
+  }, [
+    canLoadHistory,
+    hasOwnerMessage,
+    thread.history,
+    loadEarlier,
+    environmentId,
+    bot.homeThreadId,
+  ]);
   const ready =
     connected &&
     projection !== null &&
@@ -386,6 +420,7 @@ function BotConversation(props: {
               item={item}
               botName={bot.name}
               environmentId={environmentId}
+              threadId={bot.homeThreadId}
               scheduleTitle={
                 item.kind === "wake" && item.scheduledTaskId !== null
                   ? scheduleTitles.get(item.scheduledTaskId)
@@ -443,7 +478,9 @@ function BotConversation(props: {
             ) : undefined
           }
           ListEmptyComponent={
-            threadLoadFailed ? undefined : (
+            threadLoadFailed ||
+            (unavailableReason === null &&
+              (history.hasMoreHistory || history.loading)) ? undefined : (
               <View
                 className="gap-3 py-6"
                 style={

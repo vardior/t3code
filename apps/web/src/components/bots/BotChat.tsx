@@ -56,10 +56,12 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
   botChatHistoryStart,
+  botChatRunStatusLabel,
   botConversationStatus,
   botWakeSenderLabel,
   isBotQueueHeld,
   rewriteThreadLinks,
+  shouldLoadEarlierBotChatHistory,
   threadIdFromHref,
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
@@ -86,7 +88,7 @@ export function BotChat(props: {
   const scrollContent = useRef<HTMLDivElement>(null);
   const followEnd = useRef(true);
   const earlierScroll = useRef<{ height: number; top: number } | null>(null);
-  const loadEarlier = () => {
+  const loadEarlier = useCallback(() => {
     const container = scrollContainer.current;
     if (container)
       earlierScroll.current = { height: container.scrollHeight, top: container.scrollTop };
@@ -94,7 +96,7 @@ export function BotChat(props: {
       environmentId: props.environmentId,
       input: { threadId: props.bot.homeThreadId },
     });
-  };
+  }, [loadEarlierHistory, props.environmentId, props.bot.homeThreadId]);
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
   );
@@ -149,6 +151,24 @@ export function BotChat(props: {
       projection?.turnItems,
     ],
   );
+  const autoHistory = useRef({ pages: 0, cursor: null as string | null });
+  const hasOwnerMessage = items.some((item) => item.kind === "you");
+  const canLoadHistory = projection !== null && thread.status !== "deleted";
+  useEffect(() => {
+    if (
+      !canLoadHistory ||
+      !shouldLoadEarlierBotChatHistory({
+        hasOwnerMessage,
+        history: thread.history,
+        autoLoadedPages: autoHistory.current.pages,
+      }) ||
+      autoHistory.current.cursor === thread.history.historyCursor
+    )
+      return;
+    autoHistory.current.cursor = thread.history.historyCursor;
+    autoHistory.current.pages += 1;
+    loadEarlier();
+  }, [canLoadHistory, hasOwnerMessage, thread.history, loadEarlier]);
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
     [projection],
@@ -322,7 +342,7 @@ export function BotChat(props: {
             </div>
           ) : projection === null ? (
             <p className="text-center text-muted-foreground text-sm">Loading…</p>
-          ) : items.length === 0 ? (
+          ) : items.length === 0 && !thread.history.hasMoreHistory && !thread.history.loading ? (
             <p className="text-center text-muted-foreground text-sm">
               Nothing between you and {props.bot.name} yet.
             </p>
@@ -332,6 +352,7 @@ export function BotChat(props: {
               key={item.id}
               item={item}
               environmentId={props.environmentId}
+              threadId={props.bot.homeThreadId}
               onOpenThread={openThread}
               scheduleTitle={
                 item.kind === "wake"
@@ -411,6 +432,7 @@ export function BotChat(props: {
 const ChatRow = memo(function ChatRow(props: {
   readonly item: BotChatItem;
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly scheduleTitle: string | null;
   readonly botName: string;
@@ -436,7 +458,9 @@ const ChatRow = memo(function ChatRow(props: {
     );
   }
   if (item.kind === "you") {
-    return <YourMessage item={item} environmentId={props.environmentId} />;
+    return (
+      <YourMessage item={item} environmentId={props.environmentId} threadId={props.threadId} />
+    );
   }
   if (item.kind === "compaction") {
     return (
@@ -467,8 +491,24 @@ function BotMarkdown(props: { readonly text: string; readonly environmentId: Env
 function YourMessage(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "you" }>;
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
 }) {
   const { item } = props;
+  const label = botChatRunStatusLabel(item.runStatus);
+  const cancelQueuedRun = useAtomCommand(threadEnvironment.cancelQueuedRun);
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = async () => {
+    if (cancelling || item.runId === null) return;
+    setCancelling(true);
+    try {
+      await cancelQueuedRun({
+        environmentId: props.environmentId,
+        input: { threadId: props.threadId, runId: item.runId },
+      });
+    } finally {
+      setCancelling(false);
+    }
+  };
   const resources = useMemo(
     () => item.imageIds.map((attachmentId) => ({ _tag: "attachment" as const, attachmentId })),
     [item.imageIds],
@@ -494,6 +534,20 @@ function YourMessage(props: {
           {item.text}
         </p>
       ) : null}
+      {label ? (
+        <div className="flex items-center gap-2 text-xs">
+          <span
+            className={item.runStatus === "failed" ? "text-destructive" : "text-muted-foreground"}
+          >
+            {label}
+          </span>
+          {item.runStatus === "queued" && item.runId !== null ? (
+            <Button size="sm" variant="ghost" disabled={cancelling} onClick={() => void cancel()}>
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -516,10 +570,12 @@ const WakeRow = memo(function WakeRow(props: {
     scheduled: item.scheduledTaskId !== null,
   });
   const replyPreview =
+    botChatRunStatusLabel(item.runStatus) ??
     item.reply
       ?.split("\n")
       .find((line) => line.trim())
-      ?.replace(/[*`#>]/g, "") ?? "no reply yet";
+      ?.replace(/[*`#>]/g, "") ??
+    "no reply yet";
   return (
     <details
       className="group min-w-0 max-w-[85%] self-start text-muted-foreground text-xs"
@@ -530,7 +586,13 @@ const WakeRow = memo(function WakeRow(props: {
           <span className="shrink-0">From</span>
           <span className="truncate">{from}</span>
         </span>
-        <span className="truncate opacity-70">· {replyPreview}</span>
+        <span
+          className={
+            item.runStatus === "failed" ? "truncate text-destructive" : "truncate opacity-70"
+          }
+        >
+          · {replyPreview}
+        </span>
       </summary>
       {expanded ? (
         <div className="mt-2 flex flex-col gap-2">

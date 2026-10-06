@@ -21,6 +21,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   botChatHistoryStart,
+  botChatRunStatusLabel,
   botConversationStatus,
   botThreadShellStatus,
   botThreadShellStatusLabel,
@@ -30,6 +31,7 @@ import {
   buildBotChat,
   slackMarkupToMarkdown,
   slackTextFromCommand,
+  shouldLoadEarlierBotChatHistory,
 } from "./botConversation.ts";
 
 describe("slackTextFromCommand", () => {
@@ -316,6 +318,129 @@ const botWithoutHistory: BotSummary = {
   scheduledTaskIds: [],
   paused: false,
 };
+
+describe("bot chat run status", () => {
+  it.each([
+    ["failed", "Failed"],
+    ["interrupted", "Stopped"],
+    ["cancelled", "Stopped"],
+    ["queued", "Queued"],
+    ["running", null],
+    ["completed", null],
+  ] as const)("preserves %s on owner and wake rows after a later run", (status, label) => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [
+        message({
+          id: "owner",
+          role: "user",
+          runId: "owner-run",
+          createdAt: "2026-10-01T00:00:00Z",
+          text: "Hello",
+        }),
+        message({
+          id: "wake",
+          role: "user",
+          runId: "wake-run",
+          createdAt: "2026-10-01T00:01:00Z",
+          text: "Wake",
+          createdBy: "agent",
+          senderThreadId: "sender",
+        }),
+        message({
+          id: "later",
+          role: "user",
+          runId: "later-run",
+          createdAt: "2026-10-01T00:02:00Z",
+          text: "Later",
+        }),
+      ],
+      runs: [
+        { id: RunId.make("owner-run"), status },
+        { id: RunId.make("wake-run"), status },
+        { id: RunId.make("later-run"), status: "completed" },
+      ],
+      turnItems: [],
+    });
+    expect(items[0]).toMatchObject({ kind: "you", runId: "owner-run", runStatus: status });
+    expect(items[1]).toMatchObject({ kind: "wake", reply: null, runStatus: status });
+    for (const item of items.slice(0, 2)) {
+      if (item.kind !== "you" && item.kind !== "wake") throw new Error("Expected incoming row");
+      expect(botChatRunStatusLabel(item.runStatus)).toBe(label);
+    }
+  });
+
+  it.each([false, true])("labels a queued owner message with queueHeld=%s", (queueHeld) => {
+    const [item] = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [
+        message({
+          id: "queued",
+          role: "user",
+          runId: "queued-run",
+          createdAt: "2026-10-01T00:00:00Z",
+          text: "Wait",
+        }),
+      ],
+      runs: [
+        { id: RunId.make("active-run"), status: "running" },
+        { id: RunId.make("queued-run"), status: "queued", queueHeld },
+      ],
+      turnItems: [],
+    });
+    expect(item).toMatchObject({ kind: "you", runId: "queued-run", runStatus: "queued" });
+    if (item?.kind !== "you") throw new Error("Expected owner row");
+    expect(botChatRunStatusLabel(item.runStatus)).toBe("Queued");
+  });
+});
+
+describe("bot chat automatic history", () => {
+  const history = { hasMoreHistory: true, historyCursor: "earlier", loading: false, error: null };
+  const input = { hasOwnerMessage: false, history, autoLoadedPages: 0 };
+
+  it("loads through wake-only pages until an owner message appears", () => {
+    const wake = message({
+      id: "wake",
+      role: "user",
+      runId: "wake-run",
+      createdAt: "2026-10-01T00:01:00Z",
+      text: "Wake",
+      createdBy: "agent",
+      senderThreadId: "sender",
+    });
+    const owner = message({
+      id: "owner",
+      role: "user",
+      runId: "owner-run",
+      createdAt: "2026-10-01T00:00:00Z",
+      text: "Hello",
+    });
+    for (const messages of [[], [wake], [owner, wake]]) {
+      const items = buildBotChat({ bot: botWithoutHistory, messages, runs: [], turnItems: [] });
+      expect(
+        shouldLoadEarlierBotChatHistory({
+          ...input,
+          hasOwnerMessage: items.some((item) => item.kind === "you"),
+        }),
+      ).toBe(!messages.includes(owner));
+    }
+  });
+
+  it("stops after five pages and waits during loads or errors", () => {
+    expect(shouldLoadEarlierBotChatHistory({ ...input, autoLoadedPages: 4 })).toBe(true);
+    expect(shouldLoadEarlierBotChatHistory({ ...input, autoLoadedPages: 5 })).toBe(false);
+    for (const change of [
+      { hasMoreHistory: false },
+      { historyCursor: null },
+      { loading: true },
+      { error: "Unavailable" },
+    ]) {
+      expect(
+        shouldLoadEarlierBotChatHistory({ ...input, history: { ...history, ...change } }),
+      ).toBe(false);
+    }
+  });
+});
 
 describe("buildBotChat compaction rows", () => {
   it("hides a server-queued /compact and keeps its context reset divider", () => {

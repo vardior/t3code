@@ -1,6 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   botWakeSenderLabel,
+  botChatRunStatusLabel,
   rewriteThreadLinks,
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
@@ -19,6 +20,8 @@ import {
 import { useWorkspaceEnvironmentIds } from "../../state/workspace";
 import { botMarkdownThreadLinks, botThreadLinkTarget } from "./botChat.logic";
 import { useThreadShell } from "../../state/entities";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 import { ThreadMarkdownImage } from "../threads/ThreadMarkdownImage";
 
@@ -26,6 +29,7 @@ export const BotChatRow = memo(function BotChatRow(props: {
   readonly item: BotChatItem;
   readonly botName: string;
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly scheduleTitle: string | undefined;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
@@ -69,9 +73,66 @@ export const BotChatRow = memo(function BotChatRow(props: {
           onOpenThread={props.onOpenThread}
         />
       ) : null}
+      {item.kind === "you" ? (
+        <OwnerMessageStatus
+          item={item}
+          environmentId={props.environmentId}
+          threadId={props.threadId}
+        />
+      ) : null}
     </View>
   );
 });
+
+function OwnerMessageStatus(props: {
+  readonly item: Extract<BotChatItem, { readonly kind: "you" }>;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const { item } = props;
+  const label = botChatRunStatusLabel(item.runStatus);
+  const cancelQueuedRun = useAtomCommand(
+    threadEnvironment.cancelQueuedRun,
+    "cancel queued message",
+  );
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = async () => {
+    if (cancelling || item.runId === null) return;
+    setCancelling(true);
+    try {
+      await cancelQueuedRun({
+        environmentId: props.environmentId,
+        input: { threadId: props.threadId, runId: item.runId },
+      });
+    } finally {
+      setCancelling(false);
+    }
+  };
+  if (label === null) return null;
+  return (
+    <View className="flex-row items-center gap-3">
+      <Text
+        className={
+          item.runStatus === "failed"
+            ? "text-xs text-danger-foreground"
+            : "text-xs text-foreground-muted"
+        }
+      >
+        {label}
+      </Text>
+      {item.runStatus === "queued" && item.runId !== null ? (
+        <Pressable
+          accessibilityRole="button"
+          disabled={cancelling}
+          onPress={() => void cancel()}
+          className="py-2 disabled:opacity-50"
+        >
+          <Text className="text-xs text-primary-text">{cancelling ? "Cancelling…" : "Cancel"}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 function WorkerRow(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
@@ -117,10 +178,12 @@ function WakeRow(props: {
     scheduled: props.item.scheduledTaskId !== null,
   });
   const preview =
+    botChatRunStatusLabel(props.item.runStatus) ??
     props.item.reply
       ?.split("\n")
       .find((line) => line.trim())
-      ?.replace(/[*`#>]/g, "") ?? "no reply yet";
+      ?.replace(/[*`#>]/g, "") ??
+    "no reply yet";
   return (
     <View className="max-w-[85%] self-start gap-2">
       <Pressable
@@ -132,7 +195,14 @@ function WakeRow(props: {
         }}
         className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70"
       >
-        <Text numberOfLines={2} className="text-xs text-foreground-muted">
+        <Text
+          numberOfLines={2}
+          className={
+            props.item.runStatus === "failed"
+              ? "text-xs text-danger-foreground"
+              : "text-xs text-foreground-muted"
+          }
+        >
           From {from} · {preview}
         </Text>
       </Pressable>

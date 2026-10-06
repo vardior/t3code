@@ -1,5 +1,6 @@
 import {
   ThreadId,
+  type RunId,
   type BotDetail,
   type BotSummary,
   type ChatAttachmentId,
@@ -19,6 +20,7 @@ import * as Hash from "effect/Hash";
 
 import type { EnvironmentThreadShell } from "./models.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
+import type { ThreadHistoryMeta } from "./threadHistoryMerge.ts";
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
 
@@ -29,6 +31,8 @@ export type BotChatItem =
       readonly at: number;
       readonly text: string;
       readonly imageIds: ReadonlyArray<ChatAttachmentId>;
+      readonly runId: RunId | null;
+      readonly runStatus: OrchestrationV2Run["status"] | null;
     }
   | { readonly kind: "bot"; readonly id: string; readonly at: number; readonly text: string }
   | { readonly kind: "compaction"; readonly id: string; readonly at: number; readonly text: string }
@@ -40,6 +44,7 @@ export type BotChatItem =
       readonly scheduledTaskId: ScheduledTaskId | null;
       readonly text: string;
       readonly reply: string | null;
+      readonly runStatus: OrchestrationV2Run["status"] | null;
     }
   | {
       readonly kind: "worker";
@@ -196,6 +201,31 @@ export function botChatHistoryStart(
   return Math.min(...messages.map((message) => DateTime.toEpochMillis(message.createdAt)));
 }
 
+export function shouldLoadEarlierBotChatHistory(input: {
+  readonly hasOwnerMessage: boolean;
+  readonly history: Pick<
+    ThreadHistoryMeta,
+    "hasMoreHistory" | "historyCursor" | "loading" | "error"
+  >;
+  readonly autoLoadedPages: number;
+}): boolean {
+  return (
+    !input.hasOwnerMessage &&
+    input.history.hasMoreHistory &&
+    input.history.historyCursor !== null &&
+    !input.history.loading &&
+    input.history.error === null &&
+    input.autoLoadedPages < 5
+  );
+}
+
+export function botChatRunStatusLabel(status: OrchestrationV2Run["status"] | null) {
+  if (status === "failed") return "Failed";
+  if (status === "interrupted" || status === "cancelled") return "Stopped";
+  if (status === "queued") return "Queued";
+  return null;
+}
+
 export function buildBotChat(input: {
   readonly bot: BotSummary;
   readonly since?: number | undefined;
@@ -221,6 +251,7 @@ export function buildBotChat(input: {
       message.scheduledTaskId === undefined,
   );
   const ownerRunIds = new Set(ownerMessages.flatMap((message) => message.runId ?? []));
+  const runStatusById = new Map(input.runs.map((run) => [run.id, run.status]));
   const activeRunIds = new Set(
     input.runs.filter((run) => isActiveRunStatus(run.status)).map((run) => run.id),
   );
@@ -255,6 +286,8 @@ export function buildBotChat(input: {
       imageIds: message.attachments.flatMap((attachment) =>
         attachment.type === "image" ? [attachment.id] : [],
       ),
+      runId: message.runId,
+      runStatus: message.runId === null ? null : (runStatusById.get(message.runId) ?? null),
     })),
     ...replies.map((message) => ({
       kind: "bot" as const,
@@ -289,6 +322,7 @@ export function buildBotChat(input: {
           scheduledTaskId: first.scheduledTaskId ?? null,
           text: wakes.map((wake) => wake.text).join("\n\n"),
           reply: finalReplyByRun.get(runId)?.text ?? null,
+          runStatus: runStatusById.get(first.runId!) ?? null,
         },
       ];
     }),
@@ -300,6 +334,8 @@ export function buildBotChat(input: {
         at: Date.parse(dm.at),
         text: dm.text,
         imageIds: [],
+        runId: null,
+        runStatus: null,
       })),
     ...dmSends.map(({ item, text }) => ({
       kind: "bot" as const,

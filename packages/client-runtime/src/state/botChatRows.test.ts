@@ -50,7 +50,7 @@ describe("bot chat row projection", () => {
       messages: [message, { ...assistant, streaming: false, text: "Done" }],
     });
     expect(settled).toHaveLength(2);
-    expect(settled[0]).toBe(initial[0]);
+    expect(settled[0]).toMatchObject({ kind: "you", runStatus: "completed" });
     expect(settled[1]).toMatchObject({ kind: "bot", text: "Done" });
   });
 
@@ -105,10 +105,35 @@ describe("bot chat row projection", () => {
       at: 1,
       text: "",
       imageIds: [ChatAttachmentId.make("image")],
+      runId: RunId.make("run"),
+      runStatus: "running" as const,
     };
     expect(botChatItemsEqual(item, { ...item, imageIds: [...item.imageIds] })).toBe(true);
     expect(
       botChatItemsEqual(item, { ...item, imageIds: [ChatAttachmentId.make("replacement")] }),
     ).toBe(false);
+  });
+
+  it("updates a queued row when it starts or is cancelled while preserving other rows", () => {
+    const project = createBotChatProjector();
+    const input = {
+      bot,
+      messages: [
+        message,
+        { ...message, id: MessageId.make("queued"), runId: RunId.make("queued-run") },
+      ],
+      runs: [
+        { id: RunId.make("run"), status: "running" as const },
+        { id: RunId.make("queued-run"), status: "queued" as const },
+      ],
+      turnItems: [],
+    };
+    const initial = project(input);
+    for (const status of ["running", "cancelled"] as const) {
+      const updated = project({ ...input, runs: [input.runs[0]!, { ...input.runs[1]!, status }] });
+      expect(updated[0]).toBe(initial[0]);
+      expect(updated[1]).not.toBe(initial[1]);
+      expect(updated[1]).toMatchObject({ runStatus: status, runId: "queued-run" });
+    }
   });
 });
