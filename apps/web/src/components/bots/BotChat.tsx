@@ -20,6 +20,8 @@ import {
   useEffect,
   useEffectEvent,
   useMemo,
+  useLayoutEffect,
+  useRef,
   useState,
   type ClipboardEvent,
   type MouseEvent,
@@ -57,11 +59,19 @@ export function BotChat(props: {
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
-  const loadEarlier = () =>
+  const scrollContainer = useRef<HTMLDivElement>(null);
+  const scrollContent = useRef<HTMLDivElement>(null);
+  const followEnd = useRef(true);
+  const earlierScroll = useRef<{ height: number; top: number } | null>(null);
+  const loadEarlier = () => {
+    const container = scrollContainer.current;
+    if (container)
+      earlierScroll.current = { height: container.scrollHeight, top: container.scrollTop };
     void loadEarlierHistory({
       environmentId: props.environmentId,
       input: { threadId: props.bot.homeThreadId },
     });
+  };
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
   );
@@ -93,6 +103,29 @@ export function BotChat(props: {
       setStopping(false);
     }
   };
+  useLayoutEffect(() => {
+    const container = scrollContainer.current;
+    if (!container) return;
+    const earlier = earlierScroll.current;
+    if (earlier) {
+      container.scrollTop = earlier.top + container.scrollHeight - earlier.height;
+      if (!thread.history.loading) earlierScroll.current = null;
+    } else if (followEnd.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [items, status.kind, thread.history.loading]);
+  useEffect(() => {
+    const content = scrollContent.current;
+    if (!content) return;
+    const observer = new ResizeObserver(() => {
+      const container = scrollContainer.current;
+      if (container && followEnd.current && earlierScroll.current === null) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
   const onRunSettled = useEffectEvent(props.onRunSettled);
   useEffect(() => {
     if (!working) onRunSettled();
@@ -121,8 +154,17 @@ export function BotChat(props: {
       aria-label={`Conversation with ${props.bot.name}`}
       className="flex min-w-0 flex-1 flex-col"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto" onClickCapture={interceptThreadLinks}>
-        <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-6">
+      <div
+        ref={scrollContainer}
+        className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
+        onClickCapture={interceptThreadLinks}
+        onScroll={(event) => {
+          const container = event.currentTarget;
+          followEnd.current =
+            container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        }}
+      >
+        <div ref={scrollContent} className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-6">
           {thread.history.hasMoreHistory || thread.history.error !== null ? (
             <div className="flex flex-col items-center gap-1.5">
               <Button
@@ -193,7 +235,6 @@ export function BotChat(props: {
               </Button>
             </div>
           ) : null}
-          <div key={`${items.length}:${working}`} ref={scrollIntoViewOnMount} />
         </div>
       </div>
       <BotComposer
@@ -503,8 +544,4 @@ function BotComposer(props: {
       </Button>
     </form>
   );
-}
-
-function scrollIntoViewOnMount(element: HTMLDivElement | null) {
-  element?.scrollIntoView({ block: "end" });
 }
