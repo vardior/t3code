@@ -133,7 +133,6 @@ function BotConversation(props: {
   const listRef = useRef<LegendListRef>(null);
   const composerOverlayRef = useRef<ViewInstance>(null);
   const followEndAfterDisclosure = useRef(false);
-  const disclosureAnchor = useRef<{ readonly key: string; readonly top: number } | null>(null);
   useLayoutEffect(() => {
     if (items.length === 0) return;
     if (followEndAfterDisclosure.current) void listRef.current?.scrollToEnd({ animated: false });
@@ -286,19 +285,14 @@ function BotConversation(props: {
               onOpenThread={openThread}
               onPreview={setPreview}
               onDisclosureToggle={() => {
-                const state = listRef.current?.getState();
                 followEndAfterDisclosure.current = botChatScrollReducer(
                   followEndAfterDisclosure.current,
                   {
                     type: "disclosure",
-                    atEnd: state?.isWithinMaintainScrollAtEndThreshold ?? false,
+                    atEnd:
+                      listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
                   },
                 );
-                const position = state?.positionByKey(item.id);
-                disclosureAnchor.current =
-                  state && position !== undefined
-                    ? { key: item.id, top: position - state.scroll }
-                    : null;
               }}
             />
           )}
@@ -318,24 +312,6 @@ function BotConversation(props: {
               followEndAfterDisclosure.current,
               { type: "drag" },
             );
-          }}
-          onItemSizeChanged={({ itemKey }) => {
-            const anchor = disclosureAnchor.current;
-            if (anchor?.key !== itemKey) return;
-            disclosureAnchor.current = null;
-            if (followEndAfterDisclosure.current) return;
-            requestAnimationFrame(() => {
-              const state = listRef.current?.getState();
-              const position = state?.positionByKey(itemKey);
-              if (!state || position === undefined) return;
-              const drift = position - state.scroll - anchor.top;
-              if (Math.abs(drift) > 1) {
-                void listRef.current?.scrollToOffset({
-                  offset: state.scroll + drift,
-                  animated: false,
-                });
-              }
-            });
           }}
           initialScrollAtEnd
           alignItemsAtEnd
