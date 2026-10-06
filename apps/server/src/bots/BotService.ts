@@ -18,12 +18,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 
+const HOME_THREAD_CACHE_TTL_MS = 30_000;
 const MAX_WORKERS_PER_BOT = 50;
 const MAX_SLACK_DMS_PER_BOT = 200;
 const MAX_REPLY_PREVIEW_LENGTH = 200;
@@ -89,7 +91,7 @@ export class BotService extends Context.Service<
   BotService,
   {
     readonly list: () => Effect.Effect<BotListResult, BotError>;
-    readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean, BotError>;
+    readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
   }
 >()("t3/bots/BotService") {}
@@ -103,6 +105,48 @@ export const layer = Layer.effect(
     const scheduledTasks = yield* ScheduledTaskService;
     const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim() || null;
     const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
+
+    const homeThreadLookupLock = yield* Semaphore.make(1);
+    let homeThreadIds = new Set<ThreadId>();
+    let homeThreadIdsExpireAt = 0;
+    let homeThreadReadWarningLogged = false;
+
+    const readBotIds = () =>
+      fileSystem.readDirectory(botsDir).pipe(
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])),
+        Effect.map((entries) => entries.filter((id) => BOT_ID.test(id)).toSorted()),
+      );
+
+    const cacheHomeThreadIds = (ids: Iterable<ThreadId>) =>
+      Effect.gen(function* () {
+        homeThreadIds = new Set(ids);
+        homeThreadIdsExpireAt = (yield* Clock.currentTimeMillis) + HOME_THREAD_CACHE_TTL_MS;
+      });
+
+    const warnHomeThreadReadFailure = (cause: unknown) =>
+      Effect.gen(function* () {
+        if (homeThreadReadWarningLogged) return;
+        homeThreadReadWarningLogged = true;
+        yield* Effect.logWarning("Cannot read bot home threads", { botsDir, cause });
+      });
+
+    const refreshHomeThreadIds = () =>
+      Effect.gen(function* () {
+        const ids = yield* readBotIds();
+        const configs = yield* Effect.forEach(ids, (id) =>
+          fileSystem.readFileString(path.join(botsDir, id, "bot.json")).pipe(
+            Effect.flatMap(decodeBotConfig),
+            Effect.catchCause((cause) => warnHomeThreadReadFailure(cause).pipe(Effect.as(null))),
+          ),
+        );
+        yield* cacheHomeThreadIds(
+          configs.flatMap((config) => (config === null ? [] : [config.homeThreadId])),
+        );
+      }).pipe(
+        Effect.catchCause((cause) =>
+          warnHomeThreadReadFailure(cause).pipe(Effect.andThen(cacheHomeThreadIds([]))),
+        ),
+      );
 
     const listWorkers = (homeThreadId: ThreadId, ownThreadIds: ReadonlySet<string>) =>
       sql<WorkerRow>`
@@ -236,21 +280,13 @@ export const layer = Layer.effect(
 
     const list = () =>
       Effect.gen(function* () {
-        if (configuredBotsDir === null) {
-          const exists = yield* fileSystem
-            .exists(botsDir)
-            .pipe(Effect.catchCause(() => Effect.succeed(false)));
-          if (!exists) return { bots: [] };
-        }
-        const entries = yield* fileSystem
-          .readDirectory(botsDir)
-          .pipe(
-            Effect.mapError(
-              (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
-            ),
-          );
+        const entries = yield* readBotIds().pipe(
+          Effect.mapError(
+            (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
+          ),
+        );
         const bots = yield* Effect.forEach(
-          entries.filter((id) => BOT_ID.test(id)).toSorted(),
+          entries,
           (id) => {
             const botDir = path.join(botsDir, id);
             return fileSystem.exists(path.join(botDir, "bot.json")).pipe(
@@ -262,30 +298,18 @@ export const layer = Layer.effect(
           },
           { concurrency: 4 },
         );
-        return { bots: bots.flatMap((bot) => Option.toArray(bot)) };
+        const summaries = bots.flatMap((bot) => Option.toArray(bot));
+        yield* cacheHomeThreadIds(summaries.map((bot) => bot.homeThreadId));
+        return { bots: summaries };
       });
 
     const isHomeThread = (threadId: ThreadId) =>
       Effect.gen(function* () {
-        if (configuredBotsDir === null && !(yield* fileSystem.exists(botsDir))) return false;
-        const entries = yield* fileSystem.readDirectory(botsDir);
-        for (const id of entries) {
-          if (!BOT_ID.test(id)) continue;
-          const raw = yield* fileSystem
-            .readFileString(path.join(botsDir, id, "bot.json"))
-            .pipe(Effect.catchCause(() => Effect.succeed(null)));
-          if (raw === null) continue;
-          const config = yield* decodeBotConfig(raw).pipe(
-            Effect.catchCause(() => Effect.succeed(null)),
-          );
-          if (config?.homeThreadId === threadId) return true;
+        if ((yield* Clock.currentTimeMillis) >= homeThreadIdsExpireAt) {
+          yield* refreshHomeThreadIds();
         }
-        return false;
-      }).pipe(
-        Effect.mapError(
-          (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
-        ),
-      );
+        return homeThreadIds.has(threadId);
+      }).pipe(homeThreadLookupLock.withPermit);
 
     const setScheduleIdsEnabled = (ids: ReadonlyArray<ScheduledTaskId>, enabled: boolean) =>
       Effect.forEach(ids, (id) => scheduledTasks.setEnabled({ id, enabled }), { discard: true });
@@ -337,6 +361,7 @@ export const layer = Layer.effect(
         );
         return {};
       }).pipe(
+        Effect.tap(() => refreshHomeThreadIds()),
         Effect.mapError((cause) =>
           isBotError(cause)
             ? cause

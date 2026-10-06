@@ -6,9 +6,11 @@ import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import { ServerConfig } from "../config.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
@@ -151,11 +153,16 @@ it.effect(
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-home-" });
       expect(yield* listBots({ baseDir })).toEqual({ bots: [] });
-      const configured = yield* listBots({
-        baseDir,
-        env: { T3CODE_BOTS_DIR: path.join(baseDir, "elsewhere") },
-      }).pipe(Effect.flip);
-      expect(configured._tag).toBe("BotError");
+      for (const env of [{}, { T3CODE_BOTS_DIR: path.join(baseDir, "elsewhere") }]) {
+        yield* withBots(
+          { baseDir, env },
+          Effect.gen(function* () {
+            const bots = yield* BotService.BotService;
+            expect(yield* bots.list()).toEqual({ bots: [] });
+            expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(false);
+          }),
+        );
+      }
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
@@ -488,5 +495,87 @@ it.effect("previews only the latest settled final assistant reply, as bounded pl
     expect(preview!.text).toHaveLength(200);
     const { lastReply: _, ...oldBot } = (yield* listBots({ baseDir })).bots[0]!;
     expect((yield* decodeBot(oldBot)).lastReply).toBeUndefined();
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("caches home thread lookups for 30 seconds and refreshes them after listing", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-cache-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    const configPath = path.join(botDir, "bot.json");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(configPath, toJson({ name: "Helper", homeThreadId: "home" }));
+    let directoryReads = 0;
+    let configReads = 0;
+    const trackedFs = FileSystem.FileSystem.of({
+      ...fs,
+      readDirectory: (...args) =>
+        Effect.suspend(() => {
+          directoryReads++;
+          return fs.readDirectory(...args);
+        }),
+      readFileString: (...args) =>
+        Effect.suspend(() => {
+          if (args[0] === configPath) configReads++;
+          return fs.readFileString(...args);
+        }),
+    });
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(true);
+        yield* fs.writeFileString(configPath, toJson({ name: "Helper", homeThreadId: "new-home" }));
+        yield* TestClock.adjust("29999 millis");
+        expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(true);
+        expect(yield* bots.isHomeThread(ThreadId.make("new-home"))).toBe(false);
+        expect([directoryReads, configReads]).toEqual([1, 1]);
+        yield* TestClock.adjust("1 millis");
+        expect(yield* bots.isHomeThread(ThreadId.make("new-home"))).toBe(true);
+        expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(false);
+        expect([directoryReads, configReads]).toEqual([2, 2]);
+        yield* fs.writeFileString(
+          configPath,
+          toJson({ name: "Helper", homeThreadId: "listed-home" }),
+        );
+        yield* bots.list();
+        expect(yield* bots.isHomeThread(ThreadId.make("listed-home"))).toBe(true);
+        expect([directoryReads, configReads]).toEqual([3, 3]);
+        yield* fs.writeFileString(
+          configPath,
+          toJson({ name: "Helper", homeThreadId: "paused-home" }),
+        );
+        yield* bots.setPaused({ botId: "helper", paused: true });
+        const readsAfterPause = [directoryReads, configReads];
+        expect(yield* bots.isHomeThread(ThreadId.make("paused-home"))).toBe(true);
+        expect([directoryReads, configReads]).toEqual(readsAfterPause);
+      }),
+    ).pipe(Effect.provideService(FileSystem.FileSystem, trackedFs));
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("does not fail home thread lookups when the bots path is unreadable", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-unreadable-" });
+    yield* fs.writeFileString(path.join(baseDir, "bots"), "not a directory");
+    const warnings: unknown[] = [];
+    const logger = Logger.make(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(message);
+    });
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(false);
+        yield* TestClock.adjust("30 seconds");
+        expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(false);
+        expect((yield* bots.list().pipe(Effect.flip))._tag).toBe("BotError");
+      }),
+    ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+    expect(warnings).toHaveLength(1);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
