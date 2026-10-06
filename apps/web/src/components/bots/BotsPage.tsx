@@ -80,6 +80,11 @@ export function BotsPage({
       description={failedQuery.error!}
       retry={failedQuery.refresh}
     />
+  ) : !relevantQueries.some((query) => query.supported) ? (
+    <BotsState
+      title="Bots aren't available"
+      description="This environment's server doesn't support bots."
+    />
   ) : botId ? (
     <BotsState title="Bot not found" description="This bot may have been removed." />
   ) : (

@@ -13,6 +13,9 @@ const environmentBotsAtom = Atom.make((get) => {
     const result = get(atom);
     return {
       environmentId,
+      supported:
+        get(serverEnvironment.configValueAtom(environmentId))?.environment.capabilities.bots ===
+        true,
       data: Option.getOrNull(AsyncResult.value(result)),
       error: result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
       isLoading: result._tag === "Initial" || result.waiting,
