@@ -169,17 +169,19 @@ export function BotChat(props: {
   }, []);
   const latestReply = items.findLast((item) => item.kind === "bot");
   const statusAnnouncement =
-    status.kind === "working"
-      ? `${props.bot.name} is working.`
-      : status.kind === "needs-attention"
-        ? status.request === "approval"
-          ? "Needs your approval."
-          : "Needs your input."
-        : status.kind === "failed"
-          ? "Run failed."
-          : status.kind === "stopped"
-            ? "Stopped."
-            : `${props.bot.name} is ready.`;
+    disabledReason !== null
+      ? disabledReason
+      : status.kind === "working"
+        ? `${props.bot.name} is working.`
+        : status.kind === "needs-attention"
+          ? status.request === "approval"
+            ? "Needs your approval."
+            : "Needs your input."
+          : status.kind === "failed"
+            ? "Run failed."
+            : status.kind === "stopped"
+              ? "Stopped."
+              : `${props.bot.name} is ready.`;
   const onRunSettled = useEffectEvent(() => {
     props.onRunSettled();
     detail.refresh();

@@ -78,7 +78,7 @@ const BOT_THREAD_STATUS_LABELS = {
   "needs-approval": "Needs your approval",
   "needs-input": "Needs your input",
   failed: "Failed",
-  stopped: "Stopped",
+  stopped: null,
 } as const;
 
 export function botThreadShellStatusLabel(status: ReturnType<typeof botThreadShellStatus>) {
