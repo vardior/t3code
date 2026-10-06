@@ -24,6 +24,7 @@ import * as BotService from "./BotService.ts";
 const decodeBot = Schema.decodeUnknownEffect(BotSummary);
 
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const fromJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
 const testLayer = Layer.mergeAll(SqlitePersistence.layerMemory, NodeServices.layer);
 
@@ -578,4 +579,133 @@ it.effect("does not fail home thread lookups when the bots path is unreadable", 
     ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
     expect(warnings).toHaveLength(1);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect.each([true, false])("preserves intervening bot.json edits when paused=%s", (paused) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-edit-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    const configPath = path.join(botDir, "bot.json");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    const pauseFields = paused
+      ? {}
+      : {
+          paused: true,
+          pausedUntil: "2999-01-01T00:00:00Z",
+          pausedReason: "Taking a break",
+          pausedScheduleIds: [],
+        };
+    yield* fs.writeFileString(
+      configPath,
+      toJson({
+        name: "Helper",
+        homeThreadId: "home",
+        removedByAgent: true,
+        ...pauseFields,
+      }),
+    );
+    let edited = false;
+    const editingFs = FileSystem.FileSystem.of({
+      ...fs,
+      readFileString: (filePath, ...args) =>
+        fs.readFileString(filePath, ...args).pipe(
+          Effect.flatMap((raw) => {
+            if (filePath !== configPath || edited) return Effect.succeed(raw);
+            edited = true;
+            return fs
+              .writeFileString(
+                configPath,
+                toJson({
+                  name: "Renamed by agent",
+                  homeThreadId: "home",
+                  agentState: { cursor: "new" },
+                  ...pauseFields,
+                }),
+              )
+              .pipe(Effect.as(raw));
+          }),
+        ),
+    });
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        yield* bots.setPaused({ botId: "helper", paused });
+      }),
+    ).pipe(Effect.provideService(FileSystem.FileSystem, editingFs));
+    expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual({
+      name: "Renamed by agent",
+      homeThreadId: "home",
+      agentState: { cursor: "new" },
+      ...(paused
+        ? {
+            paused: true,
+            pausedReason: "Paused from the Bots view",
+            pausedScheduleIds: [],
+          }
+        : {}),
+    });
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect.each([{ paused: true }, { pausedUntil: "2999-01-01T00:00:00Z" }])(
+  "resumes only disabled listed schedules for bot pause fields %j",
+  (pauseFields) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-resume-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(botDir, "bot.json"),
+        toJson({
+          name: "Helper",
+          homeThreadId: "home",
+          scheduledTaskId: "listed-disabled",
+          dmRelayScheduledTaskId: "listed-enabled",
+          ...pauseFields,
+        }),
+      );
+      for (const schedule of [
+        { id: "listed-disabled", enabled: false },
+        { id: "listed-enabled", enabled: true },
+        { id: "discovered-disabled", enabled: false },
+        { id: "discovered-enabled", enabled: true },
+      ]) {
+        yield* insertSchedule(sql, {
+          ...schedule,
+          threadId: "home",
+          createdAt: "2026-10-01T00:00:00.000Z",
+        });
+      }
+      yield* withBots(
+        { baseDir },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+          const before = (yield* schedules.list()).tasks.find(
+            (task) => task.id === "listed-enabled",
+          );
+          yield* bots.setPaused({ botId: "helper", paused: false });
+          const { tasks } = yield* schedules.list();
+          expect(Object.fromEntries(tasks.map((task) => [task.id, task.enabled]))).toEqual({
+            "listed-disabled": true,
+            "listed-enabled": true,
+            "discovered-disabled": false,
+            "discovered-enabled": true,
+          });
+          expect(tasks.find((task) => task.id === "listed-enabled")).toEqual(before);
+          expect(yield* fromJson(yield* fs.readFileString(path.join(botDir, "bot.json")))).toEqual({
+            name: "Helper",
+            homeThreadId: "home",
+            scheduledTaskId: "listed-disabled",
+            dmRelayScheduledTaskId: "listed-enabled",
+          });
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

@@ -60,9 +60,11 @@ const BotConfigFile = Schema.Struct({
 type BotConfigFile = typeof BotConfigFile.Type;
 
 const decodeBotConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(BotConfigFile));
-const decodeJsonObject = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
-);
+const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown), {
+  space: 2,
+});
+const decodeJsonObject = Schema.decodeUnknownEffect(JsonObject);
+const encodeJsonObject = Schema.encodeEffect(JsonObject);
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
 const PAUSE_KEYS = new Set(["paused", "pausedUntil", "pausedReason", "pausedScheduleIds"]);
 const isBotError = Schema.is(BotError);
@@ -322,15 +324,24 @@ export const layer = Layer.effect(
         const configPath = path.join(botsDir, input.botId, "bot.json");
         const raw = yield* fileSystem.readFileString(configPath);
         const config = yield* decodeBotConfig(raw);
-        const document = yield* decodeJsonObject(raw);
-        const writeConfig = (next: Record<string, unknown>) =>
-          writeFileStringAtomically({
-            filePath: configPath,
-            contents: `${JSON.stringify(next, null, 2)}\n`,
-          }).pipe(
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-            Effect.provideService(Path.Path, path),
-          );
+        const writePauseFields = (fields: Record<string, unknown> | null) =>
+          Effect.gen(function* () {
+            const freshRaw = yield* fileSystem.readFileString(configPath);
+            const document = yield* decodeJsonObject(freshRaw);
+            const next =
+              fields === null
+                ? Object.fromEntries(
+                    Object.entries(document).filter(([key]) => !PAUSE_KEYS.has(key)),
+                  )
+                : { ...document, ...fields };
+            yield* writeFileStringAtomically({
+              filePath: configPath,
+              contents: `${yield* encodeJsonObject(next)}\n`,
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            );
+          });
 
         if (input.paused) {
           if (config.paused === true) return {};
@@ -339,8 +350,7 @@ export const layer = Layer.effect(
           const enabledIds = tasks
             .filter((task) => task.enabled && botScheduleIds.has(task.id))
             .map((task) => task.id);
-          yield* writeConfig({
-            ...document,
+          yield* writePauseFields({
             paused: true,
             pausedReason: "Paused from the Bots view",
             pausedScheduleIds: enabledIds,
@@ -351,14 +361,12 @@ export const layer = Layer.effect(
 
         if (!isPaused(config, yield* Clock.currentTimeMillis)) return {};
         const { tasks } = yield* scheduledTasks.list();
-        const existingIds = new Set(tasks.map((task) => task.id));
+        const disabledIds = new Set(tasks.filter((task) => !task.enabled).map((task) => task.id));
         const resumeIds = (config.pausedScheduleIds ?? listedScheduleIds(config)).filter((id) =>
-          existingIds.has(id),
+          disabledIds.has(id),
         );
         yield* setScheduleIdsEnabled(resumeIds, true);
-        yield* writeConfig(
-          Object.fromEntries(Object.entries(document).filter(([key]) => !PAUSE_KEYS.has(key))),
-        );
+        yield* writePauseFields(null);
         return {};
       }).pipe(
         Effect.tap(() => refreshHomeThreadIds()),
