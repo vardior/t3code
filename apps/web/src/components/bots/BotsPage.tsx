@@ -33,7 +33,7 @@ export function BotsPage({
   readonly environmentId: string | undefined;
 }) {
   useEscapeToGoBack();
-  const { environments } = useEnvironments();
+  const { environments, isReady } = useEnvironments();
   const { bots, queries } = useEnvironmentBots();
   const navigate = useNavigate();
   const [infoOpen, setInfoOpen] = useState(false);
@@ -41,6 +41,40 @@ export function BotsPage({
   const selected = selection?.bot ?? null;
   const environmentId = selection?.environmentId;
   const showEnvironmentLabels = new Set(bots.map((entry) => entry.environmentId)).size > 1;
+  const disconnected = environments.filter(
+    (environment) => environment.connection.phase !== "connected",
+  );
+  const relevantQueries = requestedEnvironmentId
+    ? queries.filter((query) => query.environmentId === requestedEnvironmentId)
+    : queries;
+  const failedQuery = relevantQueries.find((query) => query.error !== null);
+  const loading = !isReady || relevantQueries.some((query) => query.isLoading);
+  const unavailable =
+    isReady &&
+    (requestedEnvironmentId
+      ? !queries.some((query) => query.environmentId === requestedEnvironmentId)
+      : queries.length === 0 || (bots.length === 0 && disconnected.length > 0));
+  const pageState = unavailable ? (
+    <BotsState
+      title="Environment disconnected"
+      description="Connect to the environment to see its bots."
+    />
+  ) : loading ? (
+    <BotsState title="Loading bots…" />
+  ) : failedQuery ? (
+    <BotsState
+      title="Could not load bots"
+      description={failedQuery.error!}
+      retry={failedQuery.refresh}
+    />
+  ) : botId ? (
+    <BotsState title="Bot not found" description="This bot may have been removed." />
+  ) : (
+    <BotsState
+      title="No bots yet"
+      description="Add a bot folder to the bots directory in your T3 home."
+    />
+  );
   const selectBot = (entry: typeof selection) =>
     void navigate({
       to: "/bots",
@@ -61,7 +95,7 @@ export function BotsPage({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full min-w-0 items-center gap-2">
-            {selected ? (
+            {botId ? (
               <Button
                 aria-label="All bots"
                 className="md:hidden"
@@ -101,16 +135,28 @@ export function BotsPage({
             aria-label="Bots"
             className={cn(
               "min-h-0 w-full shrink-0 flex-col overflow-y-auto border-border/60 md:flex md:w-72 md:border-r",
-              selected ? "hidden" : "flex",
+              selected || botId || bots.length === 0 ? "hidden" : "flex",
             )}
           >
             {queries.map((query) =>
               query.error ? (
-                <p key={query.environmentId} className="p-4 text-sm text-destructive">
-                  Could not load bots: {query.error}
-                </p>
+                <BotsState
+                  key={query.environmentId}
+                  title={`Could not load bots from ${environments.find((environment) => environment.environmentId === query.environmentId)?.label ?? query.environmentId}`}
+                  description={query.error}
+                  retry={query.refresh}
+                />
+              ) : query.isLoading && query.data === null ? (
+                <BotsState key={query.environmentId} title="Loading bots…" />
               ) : null,
             )}
+            {disconnected.map((environment) => (
+              <BotsState
+                key={environment.environmentId}
+                title={`${environment.label} is disconnected`}
+                description="Connect to this environment to see its bots."
+              />
+            ))}
             {bots.map((entry) => (
               <BotListItem
                 key={`${entry.environmentId}:${entry.bot.id}`}
@@ -138,8 +184,19 @@ export function BotsPage({
               onRunSettled={selection!.refresh}
             />
           ) : (
-            <div className="hidden flex-1 items-center justify-center text-sm text-muted-foreground md:flex">
-              {bots.length > 0 ? "Pick a bot to see your conversation." : null}
+            <div
+              className={cn(
+                "flex min-w-0 flex-1 items-center justify-center",
+                bots.length > 0 && !botId && "hidden md:flex",
+              )}
+            >
+              {bots.length > 0 && !botId ? (
+                <p className="text-sm text-muted-foreground">
+                  Pick a bot to see your conversation.
+                </p>
+              ) : (
+                pageState
+              )}
             </div>
           )}
         </div>
@@ -158,11 +215,36 @@ export function BotsPage({
   );
 }
 
+function BotsState({
+  title,
+  description,
+  retry,
+}: {
+  readonly title: string;
+  readonly description?: string;
+  readonly retry?: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className="flex min-w-0 flex-col items-center gap-2 p-6 text-center text-sm text-muted-foreground"
+    >
+      <p className="font-medium text-foreground">{title}</p>
+      {description ? <p className="max-w-sm break-words">{description}</p> : null}
+      {retry ? (
+        <Button size="sm" variant="outline" onClick={retry}>
+          Retry
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function BotListItem(props: {
   readonly bot: BotSummary;
   readonly environmentId: EnvironmentId;
   readonly selected: boolean;
-  readonly environmentLabel?: string;
+  readonly environmentLabel: string | undefined;
   readonly onSelect: () => void;
   readonly refresh: () => void;
 }) {
