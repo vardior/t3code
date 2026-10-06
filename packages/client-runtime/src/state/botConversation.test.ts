@@ -569,6 +569,56 @@ describe("botConversationStatus", () => {
     ).toEqual({ kind: "needs-attention", request: "input" });
   });
 
+  it("reports stopped only when the latest run was interrupted", () => {
+    expect(
+      botConversationStatus({
+        runs: [
+          { ...run, ordinal: 2, status: "interrupted" },
+          { ...run, status: "failed" },
+        ],
+        runtimeRequests: [],
+        turnItems: [],
+      }),
+    ).toEqual({ kind: "stopped" });
+    expect(
+      botConversationStatus({
+        runs: [
+          { ...run, status: "interrupted" },
+          { ...run, ordinal: 2, status: "completed" },
+        ],
+        runtimeRequests: [],
+        turnItems: [],
+      }),
+    ).toEqual({ kind: "idle" });
+  });
+
+  it.each(["failed", "interrupted"] as const)(
+    "prioritizes attention over working over a latest %s run",
+    (status) => {
+      const runs = [run, { ...run, id: RunId.make("latest"), ordinal: 2, status }];
+      expect(botConversationStatus({ runs, runtimeRequests: [request], turnItems: [] })).toEqual({
+        kind: "needs-attention",
+        request: "approval",
+      });
+      expect(botConversationStatus({ runs, runtimeRequests: [], turnItems: [] })).toEqual({
+        kind: "working",
+      });
+      const item: OrchestrationV2TurnItem = {
+        ...commandItem({ id: "question", command: "", completedAt: "2026-10-01T00:01:00Z" }),
+        type: "user_input_request",
+        requestId: request.id,
+        questions: [],
+      };
+      expect(
+        botConversationStatus({
+          runs: [runs[1]!],
+          runtimeRequests: [{ ...request, kind: "user_input" }],
+          turnItems: [item],
+        }),
+      ).toEqual({ kind: "needs-attention", request: "input" });
+    },
+  );
+
   it("reports only the latest failed run and its own error", () => {
     const item: OrchestrationV2TurnItem = {
       ...commandItem({

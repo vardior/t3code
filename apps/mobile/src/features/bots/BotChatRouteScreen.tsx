@@ -2,7 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
-import { buildBotChat, isBotWorking } from "@t3tools/client-runtime/state/bot-conversation";
+import {
+  botConversationStatus,
+  buildBotChat,
+  isBotWorking,
+} from "@t3tools/client-runtime/state/bot-conversation";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -103,6 +107,10 @@ function BotConversation(props: {
       }),
     [bot, projection],
   );
+  const status = useMemo(
+    () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
+    [projection],
+  );
   const working = isBotWorking(projection?.runs ?? []);
   useBotRunSettlement(working, props.refresh);
   const navigation = useNavigation();
@@ -162,6 +170,17 @@ function BotConversation(props: {
   const pending = useRef(false);
   const sending = composer.pendingRequestId !== null;
   const busy = sending;
+  const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const [stopping, setStopping] = useState(false);
+  const stop = async () => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await interruptTurn({ environmentId, input: { threadId: bot.homeThreadId } });
+    } finally {
+      setStopping(false);
+    }
+  };
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const loadEarlier = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
@@ -321,9 +340,56 @@ function BotConversation(props: {
             </Text>
           }
           ListFooterComponent={
-            working ? (
+            status.kind === "working" ? (
+              <View className="self-start flex-row items-center gap-2 rounded-2xl bg-card px-3.5 py-2">
+                <Text className="text-sm text-foreground-muted">Working…</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop agent"
+                  accessibilityState={{ disabled: stopping || !ready }}
+                  disabled={stopping || !ready}
+                  onPress={() => void stop()}
+                  className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
+                >
+                  <Text className="text-sm text-foreground-muted">
+                    {stopping ? "Stopping…" : "Stop"}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : status.kind === "needs-attention" || status.kind === "failed" ? (
+              <View className="self-start gap-2 rounded-2xl bg-card px-3.5 py-2">
+                <Text
+                  accessibilityRole={status.kind === "failed" ? "alert" : undefined}
+                  className={
+                    status.kind === "failed"
+                      ? "text-sm text-destructive"
+                      : "text-sm text-foreground"
+                  }
+                >
+                  {status.kind === "failed"
+                    ? `Run failed${status.error ? `: ${status.error}` : "."}`
+                    : status.request === "approval"
+                      ? "Needs your approval"
+                      : "Needs your input"}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => openThread(bot.homeThreadId)}
+                  className="self-start rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
+                >
+                  <Text className="text-sm text-primary-text">
+                    {status.kind === "failed"
+                      ? "Open thread"
+                      : status.request === "approval"
+                        ? "Review approval in thread"
+                        : "Answer in thread"}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : status.kind === "stopped" ? (
               <Text className="self-start rounded-2xl bg-card px-3.5 py-2 text-sm text-foreground-muted">
-                Working…
+                Stopped
               </Text>
             ) : undefined
           }

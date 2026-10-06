@@ -136,7 +136,9 @@ export function BotChat(props: {
           : "Needs your input."
         : status.kind === "failed"
           ? "Run failed."
-          : `${props.bot.name} is ready.`;
+          : status.kind === "stopped"
+            ? "Stopped."
+            : `${props.bot.name} is ready.`;
   const onRunSettled = useEffectEvent(props.onRunSettled);
   useEffect(() => {
     if (!working) onRunSettled();
@@ -244,6 +246,10 @@ export function BotChat(props: {
               >
                 Open thread
               </Button>
+            </div>
+          ) : status.kind === "stopped" ? (
+            <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-muted-foreground text-sm">
+              Stopped
             </div>
           ) : null}
         </div>

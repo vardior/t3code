@@ -80,7 +80,7 @@ export function botConversationStatus(
     readonly runs: ReadonlyArray<ChatRun & Pick<OrchestrationV2Run, "ordinal">>;
   },
 ):
-  | { readonly kind: "idle" | "working" }
+  | { readonly kind: "idle" | "working" | "stopped" }
   | { readonly kind: "needs-attention"; readonly request: "approval" | "input" }
   | { readonly kind: "failed"; readonly error: string | null } {
   const pending = derivePendingThreadRequests(projection);
@@ -91,6 +91,7 @@ export function botConversationStatus(
     (current, run) => (current === null || run.ordinal > current.ordinal ? run : current),
     null,
   );
+  if (latest?.status === "interrupted") return { kind: "stopped" };
   if (latest?.status !== "failed") return { kind: "idle" };
   const error = projection.turnItems.findLast(
     (item) => item.runId === latest.id && item.type === "error",

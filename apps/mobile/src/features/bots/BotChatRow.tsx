@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
+  botWakeSenderLabel,
   rewriteThreadLinks,
   threadIdFromHref,
   type BotChatItem,
@@ -109,12 +110,12 @@ function WakeRow(props: {
       : null,
   );
   const title = props.schedules.find((task) => task.id === props.item.scheduledTaskId)?.title;
-  const prefix = `bot ${props.botName} `;
-  const schedule = title?.startsWith(prefix) ? title.slice(prefix.length) : title;
-  const from =
-    sender?.title ??
-    schedule ??
-    (props.item.scheduledTaskId ? "a scheduled task" : "another thread");
+  const from = botWakeSenderLabel({
+    senderTitle: sender?.title,
+    scheduleTitle: title,
+    botName: props.botName,
+    scheduled: props.item.scheduledTaskId !== null,
+  });
   const preview =
     props.item.reply
       ?.split("\n")
