@@ -18,6 +18,7 @@ import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
+  WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { BotAvatar } from "./BotAvatar";
@@ -118,7 +119,11 @@ export function BotsPage({
               {selected ? (
                 <>
                   <WorkspaceBreadcrumbSeparator />
-                  <WorkspaceBreadcrumbItem current>{selected.name}</WorkspaceBreadcrumbItem>
+                  <WorkspaceBreadcrumbItem current>
+                    <WorkspaceBreadcrumbText title={selected.name}>
+                      {selected.name}
+                    </WorkspaceBreadcrumbText>
+                  </WorkspaceBreadcrumbItem>
                 </>
               ) : null}
             </WorkspaceBreadcrumb>
