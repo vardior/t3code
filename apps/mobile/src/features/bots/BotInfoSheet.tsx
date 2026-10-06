@@ -32,12 +32,6 @@ import { useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
-import {
-  showGitActionResult,
-  useGitActionResultNotification,
-  dismissGitActionResult,
-} from "../../state/use-vcs-action-state";
-import { GitActionProgressOverlay } from "../threads/GitActionProgressOverlay";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { startScheduledTaskEditor } from "../settings/scheduled-task-editor-state";
@@ -61,44 +55,29 @@ export function BotInfoSheet({
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const theme = useUniwindTheme();
-  const { result: commandNotification } = useGitActionResultNotification();
   const content = (
-    <View className="flex-1">
-      <ScrollView
-        className="flex-1"
-        contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
-        contentContainerClassName="gap-5 px-5 pt-4"
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
-      >
-        {bot ? (
-          <BotInfo key={bot.id} bot={bot} environmentId={environmentId} refresh={bots.refresh} />
-        ) : (
-          <View className="gap-2">
-            <Text className="text-base text-foreground-muted">
-              {bots.error ??
-                (bots.data === null ? "Loading…" : "Bot unavailable in this environment.")}
-            </Text>
-            {bots.error ? (
-              <Pressable accessibilityRole="button" onPress={bots.refresh}>
-                <Text className="text-primary-text">Try again</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        )}
-      </ScrollView>
-      <GitActionProgressOverlay
-        progress={
-          commandNotification
-            ? {
-                phase: commandNotification.type,
-                label: commandNotification.title,
-                description: commandNotification.description ?? null,
-              }
-            : { phase: "idle", label: null, description: null }
-        }
-        onDismiss={dismissGitActionResult}
-      />
-    </View>
+    <ScrollView
+      className="flex-1"
+      contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+      contentContainerClassName="gap-5 px-5 pt-4"
+      contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
+    >
+      {bot ? (
+        <BotInfo key={bot.id} bot={bot} environmentId={environmentId} refresh={bots.refresh} />
+      ) : (
+        <View className="gap-2">
+          <Text className="text-base text-foreground-muted">
+            {bots.error ??
+              (bots.data === null ? "Loading…" : "Bot unavailable in this environment.")}
+          </Text>
+          {bots.error ? (
+            <Pressable accessibilityRole="button" onPress={bots.refresh}>
+              <Text className="text-primary-text">Try again</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      )}
+    </ScrollView>
   );
 
   if (Platform.OS === "ios") {
@@ -188,7 +167,6 @@ function BotInfo(props: {
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : String(failure);
       setError(message);
-      showGitActionResult({ type: "error", title: "Bot command failed", description: message });
       pending.current = false;
       setBusy(false);
       return;
@@ -201,7 +179,6 @@ function BotInfo(props: {
       const failure = squashAtomCommandFailure(result);
       const message = failure instanceof Error ? failure.message : String(failure);
       setError(message);
-      showGitActionResult({ type: "error", title: "Bot command failed", description: message });
     }
   };
   const openThread = (threadId: ThreadId, targetEnvironmentId = environmentId) => {
