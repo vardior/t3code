@@ -242,11 +242,16 @@ export const layer = Layer.effect(
         }),
       );
 
-    const isThreadMissing = (threadId: ThreadId) =>
-      sql<{ readonly found: number }>`
-        SELECT 1 AS found FROM orchestration_v2_projection_threads
+    const readHomeThreadState = (threadId: ThreadId) =>
+      sql<{ readonly archived_at: string | null }>`
+        SELECT archived_at FROM orchestration_v2_projection_threads
         WHERE thread_id = ${threadId} AND deleted_at IS NULL
-      `.pipe(Effect.map((rows) => rows.length === 0));
+      `.pipe(
+        Effect.map((rows) => ({
+          homeThreadMissing: rows.length === 0,
+          homeThreadArchived: rows[0]?.archived_at != null,
+        })),
+      );
 
     const isThreadQueueHeld = (threadId: ThreadId) =>
       sql<{ readonly found: number }>`
@@ -351,7 +356,7 @@ export const layer = Layer.effect(
           homeThreadId: config.homeThreadId,
           scheduledTaskIds: yield* scheduleIdsFor(config),
           paused: isPaused(config, yield* Clock.currentTimeMillis),
-          homeThreadMissing: yield* isThreadMissing(config.homeThreadId),
+          ...(yield* readHomeThreadState(config.homeThreadId)),
           ...((yield* isThreadQueueHeld(config.homeThreadId)) ? { homeThreadQueueHeld: true } : {}),
           lastReply: yield* readLastReply(config.homeThreadId),
         };

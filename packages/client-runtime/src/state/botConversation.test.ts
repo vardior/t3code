@@ -20,6 +20,7 @@ import {
   botChatHistoryStart,
   botConversationStatus,
   botThreadShellStatus,
+  botThreadShellStatusLabel,
   isBotQueueHeld,
   isBotWorking,
   botWakeSenderLabel,
@@ -749,6 +750,24 @@ describe("botWakeSenderLabel", () => {
 });
 
 describe("botThreadShellStatus", () => {
+  it("shows archived homes before activity or attention and allows unarchived homes again", () => {
+    const shell = presentThreadShell(EnvironmentId.make("env"), {
+      ...v2ThreadShell,
+      archivedAt: at("2026-10-01T00:00:00Z"),
+      latestRunId: RunId.make("run"),
+      status: "running",
+      pendingRuntimeRequest: {
+        id: RuntimeRequestId.make("request"),
+        kind: "command",
+        createdAt: at("2026-10-01T00:00:00Z"),
+      },
+    });
+    expect(botThreadShellStatus(shell)).toBe("archived");
+    expect(botThreadShellStatus(undefined, false, { homeThreadArchived: true })).toBe("archived");
+    expect(botThreadShellStatus(shell, true, { homeThreadArchived: true })).toBe("missing");
+    expect(botThreadShellStatus({ ...shell, archivedAt: null })).toBe("needs-approval");
+    expect(botThreadShellStatusLabel("archived")).toBe("Home thread archived");
+  });
   it("shows a held queue while preserving an executed failure or active run", () => {
     const shell = presentThreadShell(EnvironmentId.make("env"), {
       ...v2ThreadShell,

@@ -104,14 +104,30 @@ function BotConversation(props: {
   const projection = Option.getOrNull(thread.data);
   const retryThread = useAtomRefresh(environmentThreads.stateAtom(environmentId, bot.homeThreadId));
   const threadError = Option.getOrNull(thread.error);
+  const homeThreadArchived =
+    projection !== null ? projection.thread.archivedAt !== null : bot.homeThreadArchived === true;
+  const unarchiveThread = useAtomCommand(threadEnvironment.unarchive, "unarchive thread");
+  const [unarchiving, setUnarchiving] = useState(false);
+  const unarchive = async () => {
+    if (unarchiving) return;
+    setUnarchiving(true);
+    try {
+      await unarchiveThread({ environmentId, input: { threadId: bot.homeThreadId } });
+      props.refresh();
+    } finally {
+      setUnarchiving(false);
+    }
+  };
   const unavailableReason =
     thread.status === "deleted"
       ? "This bot's home thread is missing"
-      : threadError !== null
-        ? `Could not load this bot's home thread: ${threadError}`
-        : projection === null
-          ? "Loading this bot's home thread…"
-          : null;
+      : homeThreadArchived
+        ? "Home thread archived"
+        : threadError !== null
+          ? `Could not load this bot's home thread: ${threadError}`
+          : projection === null
+            ? "Loading this bot's home thread…"
+            : null;
   const schedules = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
@@ -225,7 +241,8 @@ function BotConversation(props: {
   const loadEarlier = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
-  const ready = projection !== null && thread.status === "live" && threadError === null;
+  const ready =
+    projection !== null && thread.status === "live" && threadError === null && !homeThreadArchived;
   const canSend =
     ready &&
     !busy &&
@@ -487,6 +504,18 @@ function BotConversation(props: {
           ) : null}
           {unavailableReason && !threadLoadFailed ? (
             <Text className="text-sm text-foreground-muted">{unavailableReason}</Text>
+          ) : null}
+          {homeThreadArchived && thread.status !== "deleted" ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={unarchiving}
+              onPress={() => void unarchive()}
+              className="self-start rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
+            >
+              <Text className="text-sm text-primary-text">
+                {unarchiving ? "Unarchiving…" : "Unarchive"}
+              </Text>
+            </Pressable>
           ) : null}
           {error ? (
             <Text accessibilityRole="alert" className="text-sm text-danger-foreground">

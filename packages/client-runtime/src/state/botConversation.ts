@@ -61,7 +61,7 @@ export function isActiveRunStatus(status: string | null | undefined): boolean {
 export function botThreadShellStatus(
   shell: EnvironmentThreadShell | null | undefined,
   homeThreadMissing = false,
-  homeThreadState: Pick<BotSummary, "homeThreadQueueHeld"> = {},
+  homeThreadState: Pick<BotSummary, "homeThreadQueueHeld" | "homeThreadArchived"> = {},
 ):
   | "idle"
   | "working"
@@ -70,8 +70,10 @@ export function botThreadShellStatus(
   | "failed"
   | "stopped"
   | "missing"
+  | "archived"
   | "queue-held" {
   if (homeThreadMissing) return "missing";
+  if (homeThreadState.homeThreadArchived || shell?.archivedAt != null) return "archived";
   const request = shell?.source.pendingRuntimeRequest?.kind;
   if (request === "user_input") return "needs-input";
   if (request && request !== "auth_refresh" && request !== "dynamic_tool_call")
@@ -93,6 +95,7 @@ const BOT_THREAD_STATUS_LABELS = {
   failed: "Failed",
   stopped: null,
   missing: "Home thread missing",
+  archived: "Home thread archived",
   "queue-held": "Queue held",
 } as const;
 

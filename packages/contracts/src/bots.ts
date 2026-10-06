@@ -32,6 +32,7 @@ export const BotSummary = Schema.Struct({
   scheduledTaskIds: Schema.Array(ScheduledTaskId),
   paused: Schema.Boolean,
   homeThreadMissing: Schema.optionalKey(Schema.Boolean),
+  homeThreadArchived: Schema.optionalKey(Schema.Boolean),
   homeThreadQueueHeld: Schema.optionalKey(Schema.Boolean),
   lastReply: Schema.optionalKey(
     Schema.NullOr(Schema.Struct({ text: Schema.String, at: IsoDateTime })),

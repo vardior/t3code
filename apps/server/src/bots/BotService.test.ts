@@ -259,6 +259,7 @@ it.effect("lists only summaries and gets charter, Slack DMs and spawned workers"
           scheduledTaskIds: ["task-1"],
           paused: false,
           homeThreadMissing: false,
+          homeThreadArchived: false,
           lastReply: null,
         },
       ],
@@ -348,7 +349,7 @@ it.effect("lists only summaries and gets charter, Slack DMs and spawned workers"
     );
     expect(bytesRead).toBeGreaterThan(0);
     expect(bytesRead).toBeLessThan(Buffer.byteLength(dms.map((dm) => toJson(dm)).join("\n")));
-    expect(Buffer.byteLength(toJson(summary))).toBe(152);
+    expect(Buffer.byteLength(toJson(summary))).toBe(179);
     expect(Buffer.byteLength(toJson({ bots: [{ ...summary.bots[0], ...tail }] }))).toBeGreaterThan(
       100_000,
     );
@@ -682,7 +683,7 @@ it.effect("reports a held queue only while held runs remain queued", () =>
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect("flags bots whose home thread is deleted or absent but not archived", () =>
+it.effect("distinguishes archived home threads from deleted and absent ones", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const fs = yield* FileSystem.FileSystem;
@@ -712,6 +713,18 @@ it.effect("flags bots whose home thread is deleted or absent but not archived", 
       archived: false,
       deleted: true,
     });
+    expect(Object.fromEntries(bots.map((bot) => [bot.id, bot.homeThreadArchived]))).toEqual({
+      absent: false,
+      active: false,
+      archived: true,
+      deleted: false,
+    });
+    const { homeThreadArchived: _, ...oldBot } = bots.find((bot) => bot.id === "archived")!;
+    expect((yield* decodeBot(oldBot)).homeThreadArchived).toBeUndefined();
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL WHERE thread_id = 'archived-home'`;
+    expect(
+      (yield* listBots({ baseDir })).bots.find((bot) => bot.id === "archived")!.homeThreadArchived,
+    ).toBe(false);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

@@ -102,14 +102,35 @@ export function BotChat(props: {
   );
   const projectChat = useMemo(() => createBotChatProjector(), []);
   const threadError = Option.getOrNull(thread.error);
+  const homeThreadArchived =
+    projection !== null
+      ? projection.thread.archivedAt !== null
+      : props.bot.homeThreadArchived === true;
+  const unarchiveThread = useAtomCommand(threadEnvironment.unarchive);
+  const [unarchiving, setUnarchiving] = useState(false);
+  const unarchive = async () => {
+    if (unarchiving) return;
+    setUnarchiving(true);
+    try {
+      await unarchiveThread({
+        environmentId: props.environmentId,
+        input: { threadId: props.bot.homeThreadId },
+      });
+      props.onRunSettled();
+    } finally {
+      setUnarchiving(false);
+    }
+  };
   const disabledReason =
     thread.status === "deleted"
       ? "This bot's home thread is missing"
-      : threadError !== null
-        ? "Could not load this bot’s home thread"
-        : projection === null
-          ? "Loading this bot’s home thread…"
-          : null;
+      : homeThreadArchived
+        ? "Home thread archived"
+        : threadError !== null
+          ? "Could not load this bot’s home thread"
+          : projection === null
+            ? "Loading this bot’s home thread…"
+            : null;
   const items = useMemo(
     () =>
       projectChat({
@@ -276,6 +297,16 @@ export function BotChat(props: {
               className="flex flex-col items-center gap-2 text-sm text-muted-foreground"
             >
               <p>{disabledReason}</p>
+              {homeThreadArchived && thread.status !== "deleted" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={unarchiving}
+                  onClick={() => void unarchive()}
+                >
+                  {unarchiving ? "Unarchiving…" : "Unarchive"}
+                </Button>
+              ) : null}
               {threadError !== null && thread.status !== "deleted" ? (
                 <>
                   <p>{threadError}</p>
@@ -310,7 +341,7 @@ export function BotChat(props: {
               botName={props.bot.name}
             />
           ))}
-          {working ? (
+          {working && !homeThreadArchived ? (
             <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-muted-foreground text-sm">
               <span>Working…</span>
               <Button size="sm" variant="ghost" disabled={stopping} onClick={() => void stop()}>
