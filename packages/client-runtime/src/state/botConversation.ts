@@ -175,7 +175,7 @@ export function botConversationStatus(
   const error = projection.turnItems.findLast(
     (item) => item.runId === latest.id && item.type === "error",
   );
-  return { kind: "failed", error: error?.type === "error" ? error.failure.message : null };
+  return { kind: "failed", error: error?.type === "error" ? error.failure.message : sessionError };
 }
 
 export function botWakeSenderLabel(input: {

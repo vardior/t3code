@@ -11,6 +11,7 @@ import {
   type BotSummary,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Run,
+  type OrchestrationV2ProviderSession,
 } from "@t3tools/contracts";
 import { v2Projection, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { deriveLatestThreadRun } from "./threadExecution.ts";
@@ -676,6 +677,33 @@ describe("botConversationStatus", () => {
     expect(
       botConversationStatus({ ...projection, runs: [failed, { ...queued, status: "running" }] }),
     ).toEqual({ kind: "working" });
+  });
+
+  it("shows a session-only usage limit error while newer wakes are held", () => {
+    const sessionError = "You have hit your usage limit";
+    const projection = {
+      ...v2Projection,
+      runs: [
+        { ...run, status: "failed" as const, completedAt: run.requestedAt },
+        {
+          ...run,
+          id: RunId.make("queued"),
+          ordinal: 2,
+          status: "queued" as const,
+          queueHeld: true,
+          startedAt: null,
+        },
+      ],
+      turnItems: [],
+      providerSessions: [
+        {
+          providerInstanceId: v2Projection.thread.providerInstanceId,
+          lastError: sessionError,
+        } as OrchestrationV2ProviderSession,
+      ],
+    };
+    expect(botConversationStatus(projection)).toEqual({ kind: "failed", error: sessionError });
+    expect(isBotWorking(projection.runs, [], sessionError)).toBe(false);
   });
 
   it("distinguishes pending approval from an active run", () => {
