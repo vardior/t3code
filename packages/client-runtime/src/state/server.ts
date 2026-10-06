@@ -37,6 +37,7 @@ import {
   createRuntimeCommand,
   scheduleAtomCommandEffect,
 } from "./runtime.ts";
+import { createBotsEnvironmentAtoms } from "./bots.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
@@ -1339,11 +1340,7 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
-    bots: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:server:bots",
-      tag: WS_METHODS.botsList,
-      staleTimeMs: 10_000,
-    }),
+    bots: createBotsEnvironmentAtoms(runtime, configScheduler, configConcurrency),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan.
     usageSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
@@ -1571,12 +1568,6 @@ export function createServerEnvironmentAtoms<R, E>(
     setScheduledTaskEnabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:set-enabled",
       tag: WS_METHODS.scheduledTasksSetEnabled,
-      scheduler: configScheduler,
-      concurrency: configConcurrency,
-    }),
-    setBotPaused: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:bot:set-paused",
-      tag: WS_METHODS.botsSetPaused,
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),

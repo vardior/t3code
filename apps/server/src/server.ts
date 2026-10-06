@@ -199,8 +199,7 @@ import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsag
 import * as UsageService from "./usage/UsageService.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
-import * as BotService from "./bots/BotService.ts";
-import * as BotAutoCompaction from "./bots/BotAutoCompaction.ts";
+import * as BotsRuntime from "./bots/runtime.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
@@ -648,11 +647,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,
-  BotAutoCompaction.workerLive.pipe(
-    Layer.provideMerge(BotAutoCompaction.layer),
-    Layer.provide(BotService.layer),
-    Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
-  ),
+  BotsRuntime.workerLive,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   DatabaseStorage.layer.pipe(
     Layer.provide(ProjectionMaintenance.layer),
@@ -854,7 +849,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
-  Layer.provide(BotService.layer),
+  Layer.provide(BotsRuntime.layer),
 );
 
 const layerMakeServer = Layer.unwrap(

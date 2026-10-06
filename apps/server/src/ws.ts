@@ -129,6 +129,7 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
 import * as Bots from "./bots/BotService.ts";
+import * as BotsRpc from "./bots/rpc.ts";
 import {
   bufferShellLiveStream,
   coalesceShellApplicationEvents,
@@ -2387,8 +2388,7 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
-        [WS_METHODS.botsList]: (_input) => bots.list(),
-        [WS_METHODS.botsSetPaused]: (input) => bots.setPaused(input),
+        ...BotsRpc.makeHandlers(bots),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({

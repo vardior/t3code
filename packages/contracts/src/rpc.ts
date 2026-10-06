@@ -384,13 +384,7 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
-import {
-  BotError,
-  BotListInput,
-  BotListResult,
-  BotSetPausedInput,
-  BotSetPausedResult,
-} from "./bots.ts";
+import { BOT_WS_METHODS, BotsRpcGroup } from "./bots.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -565,8 +559,7 @@ export const WS_METHODS = {
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
-  botsList: "bots.list",
-  botsSetPaused: "bots.setPaused",
+  ...BOT_WS_METHODS,
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -2054,18 +2047,6 @@ const WsScheduledTasksGetWebhookDeliveryRpc = Rpc.make(
   },
 );
 
-const WsBotsListRpc = Rpc.make(WS_METHODS.botsList, {
-  payload: BotListInput,
-  success: BotListResult,
-  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
-});
-
-const WsBotsSetPausedRpc = Rpc.make(WS_METHODS.botsSetPaused, {
-  payload: BotSetPausedInput,
-  success: BotSetPausedResult,
-  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
-});
-
 const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
@@ -2154,8 +2135,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsSecretsAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
-  WsBotsListRpc,
-  WsBotsSetPausedRpc,
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
@@ -2306,4 +2285,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2SubscribePromptSuggestionRpc,
-).middleware(RpcScopeAuthorization);
+)
+  .merge(BotsRpcGroup)
+  .middleware(RpcScopeAuthorization);

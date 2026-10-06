@@ -129,7 +129,7 @@ function PauseBotButton(props: {
   readonly environmentId: EnvironmentId;
   readonly onPausedChange: () => void;
 }) {
-  const setPaused = useAtomCommand(serverEnvironment.setBotPaused, { label: "bot pause toggle" });
+  const setPaused = useAtomCommand(serverEnvironment.bots.setPaused, { label: "bot pause toggle" });
   const [busy, setBusy] = useState(false);
   const paused = props.bot.paused;
 

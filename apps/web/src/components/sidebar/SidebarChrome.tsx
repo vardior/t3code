@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ArrowRightIcon, BotIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -15,6 +15,7 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
+import { BotsSidebarItem } from "../bots/BotsSidebarItem";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -193,7 +194,7 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-function SidebarUtilityItem({
+export function SidebarUtilityItem({
   icon,
   label,
   onClick,
@@ -250,11 +251,6 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/usage" });
   };
 
-  const handleBotsClick = () => {
-    closeMobileSidebar();
-    void navigate({ to: "/bots" });
-  };
-
   const handleBackClick = () => {
     closeMobileSidebar();
     void navigateToMainApp();
@@ -288,7 +284,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
-          <SidebarUtilityItem icon={<BotIcon />} label="Bots" onClick={handleBotsClick} />
+          <BotsSidebarItem closeMobileSidebar={closeMobileSidebar} />
         </>
       )}
       <SidebarThreadUndoNotice />

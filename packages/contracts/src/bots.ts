@@ -1,4 +1,13 @@
 import * as Schema from "effect/Schema";
+import * as Rpc from "effect/rpc/Rpc";
+import * as RpcGroup from "effect/rpc/RpcGroup";
+
+import {
+  type AuthEnvironmentScope,
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  EnvironmentAuthorizationError,
+} from "./auth.ts";
 
 import { IsoDateTime, ScheduledTaskId, ThreadId } from "./baseSchemas.ts";
 
@@ -49,3 +58,26 @@ export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
+
+export const BOT_WS_METHODS = {
+  botsList: "bots.list",
+  botsSetPaused: "bots.setPaused",
+} as const;
+
+export const BotsRpcGroup = RpcGroup.make(
+  Rpc.make(BOT_WS_METHODS.botsList, {
+    payload: BotListInput,
+    success: BotListResult,
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+  }),
+  Rpc.make(BOT_WS_METHODS.botsSetPaused, {
+    payload: BotSetPausedInput,
+    success: BotSetPausedResult,
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+  }),
+);
+
+export const BOT_RPC_REQUIRED_SCOPES = {
+  [BOT_WS_METHODS.botsList]: AuthOrchestrationReadScope,
+  [BOT_WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
+} satisfies Record<RpcGroup.Rpcs<typeof BotsRpcGroup>["_tag"], AuthEnvironmentScope>;

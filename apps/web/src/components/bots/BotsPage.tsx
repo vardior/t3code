@@ -29,7 +29,7 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
   useEscapeToGoBack();
   const environmentId = usePrimaryEnvironmentId();
   const botsQuery = useEnvironmentQuery(
-    environmentId ? serverEnvironment.bots({ environmentId, input: {} }) : null,
+    environmentId ? serverEnvironment.bots.list({ environmentId, input: {} }) : null,
   );
   const navigate = useNavigate();
   const [infoOpen, setInfoOpen] = useState(false);
