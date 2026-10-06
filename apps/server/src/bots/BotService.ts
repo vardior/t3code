@@ -30,6 +30,7 @@ import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts"
 const HOME_THREAD_CACHE_TTL_MS = 30_000;
 const MAX_WORKERS_PER_BOT = 50;
 const MAX_SLACK_DMS_PER_BOT = 200;
+const MAX_SLACK_DM_BYTES = 2 * 1024 * 1024;
 const MAX_REPLY_PREVIEW_LENGTH = 200;
 
 const replyPreview = (text: string) => {
@@ -112,6 +113,7 @@ export const layer = Layer.effect(
     const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
 
     const homeThreadLookupLock = yield* Semaphore.make(1);
+    const pauseLock = yield* Semaphore.make(1);
     let homeThreadIds = new Set<ThreadId>();
     let homeThreadIdsExpireAt = 0;
     let homeThreadReadWarningLogged = false;
@@ -138,12 +140,27 @@ export const layer = Layer.effect(
     const refreshHomeThreadIds = () =>
       Effect.gen(function* () {
         const ids = yield* readBotIds();
+        let readFailed = false;
         const configs = yield* Effect.forEach(ids, (id) =>
-          fileSystem.readFileString(path.join(botsDir, id, "bot.json")).pipe(
-            Effect.flatMap(decodeBotConfig),
-            Effect.catchCause((cause) => warnHomeThreadReadFailure(cause).pipe(Effect.as(null))),
+          Effect.gen(function* () {
+            const configPath = path.join(botsDir, id, "bot.json");
+            if (
+              !(yield* fileSystem
+                .exists(configPath)
+                .pipe(Effect.catchCause(() => Effect.succeed(false))))
+            )
+              return null;
+            return yield* fileSystem
+              .readFileString(configPath)
+              .pipe(Effect.flatMap(decodeBotConfig));
+          }).pipe(
+            Effect.catchCause((cause) => {
+              readFailed = true;
+              return warnHomeThreadReadFailure(cause).pipe(Effect.as(null));
+            }),
           ),
         );
+        if (!readFailed) homeThreadReadWarningLogged = false;
         yield* cacheHomeThreadIds(
           configs.flatMap((config) => (config === null ? [] : [config.homeThreadId])),
         );
@@ -249,9 +266,11 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const file = yield* fileSystem.open(path.join(botDir, "dm-log.jsonl"));
         let position = Number((yield* file.stat).size);
-        let bytes = new Uint8Array(0);
-        while (position > 0) {
-          const start = Math.max(0, position - 64 * 1024);
+        let leadingBytes = new Uint8Array(0);
+        let totalRead = 0;
+        const newestDms: BotSlackDm[] = [];
+        while (position > 0 && totalRead < MAX_SLACK_DM_BYTES) {
+          const start = Math.max(0, position - Math.min(64 * 1024, MAX_SLACK_DM_BYTES - totalRead));
           yield* file.seek(BigInt(start), "start");
           const chunk = new Uint8Array(position - start);
           let read = 0;
@@ -260,20 +279,24 @@ export const layer = Layer.effect(
             if (count === 0) break;
             read += count;
           }
-          const combined = new Uint8Array(read + bytes.length);
+          totalRead += read;
+          const combined = new Uint8Array(read + leadingBytes.length);
           combined.set(chunk.subarray(0, read));
-          combined.set(bytes, read);
-          bytes = combined;
+          combined.set(leadingBytes, read);
           position = start;
-          const lines = new TextDecoder().decode(bytes).split("\n");
-          const dms = (position > 0 ? lines.slice(1) : lines).flatMap((line) =>
-            Option.toArray(decodeSlackDmLine(line)),
-          );
-          if (dms.length >= MAX_SLACK_DMS_PER_BOT || position === 0) {
-            return dms.slice(-MAX_SLACK_DMS_PER_BOT);
+          const firstNewline = combined.indexOf(10);
+          const completeStart =
+            position === 0 ? 0 : firstNewline < 0 ? combined.length : firstNewline + 1;
+          leadingBytes = combined.slice(0, completeStart);
+          const lines = new TextDecoder().decode(combined.subarray(completeStart)).split("\n");
+          for (let index = lines.length - 1; index >= 0; index--) {
+            const dm = decodeSlackDmLine(lines[index]!);
+            if (Option.isSome(dm)) newestDms.push(dm.value);
+            if (newestDms.length === MAX_SLACK_DMS_PER_BOT) return newestDms.toReversed();
           }
+          if (read === 0) break;
         }
-        return [];
+        return newestDms.toReversed();
       }).pipe(
         Effect.scoped,
         Effect.catchCause(() => Effect.succeed([])),
@@ -423,10 +446,24 @@ export const layer = Layer.effect(
         const resumeIds = (config.pausedScheduleIds ?? listedScheduleIds(config)).filter((id) =>
           disabledIds.has(id),
         );
-        yield* setScheduleIdsEnabled(resumeIds, true);
-        yield* writePauseFields(null);
+        const enabledIds: ScheduledTaskId[] = [];
+        yield* Effect.gen(function* () {
+          for (const id of resumeIds) {
+            yield* scheduledTasks.setEnabled({ id, enabled: true });
+            enabledIds.push(id);
+          }
+          yield* writePauseFields(null);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            setScheduleIdsEnabled(enabledIds, false).pipe(
+              Effect.flatMap(() => Effect.failCause(cause)),
+            ),
+          ),
+        );
         return {};
       }).pipe(
+        Effect.uninterruptible,
+        pauseLock.withPermit,
         Effect.tap(() => refreshHomeThreadIds()),
         Effect.mapError((cause) =>
           isBotError(cause)

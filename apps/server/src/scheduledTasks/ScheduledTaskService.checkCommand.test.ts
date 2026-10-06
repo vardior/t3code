@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ScheduledTaskId, ScheduledTaskUpsertInput } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/process";
 import * as Fiber from "effect/Fiber";
@@ -74,10 +75,11 @@ it.effect(
       yield* TestClock.setTime(Date.parse(now) + 1_000);
 
       const launchedPrompts = yield* Ref.make<ReadonlyArray<string>>([]);
+      const newsDispatched = yield* Deferred.make<void>();
       let dueWork = Effect.void;
       yield* Effect.scoped(
         Effect.gen(function* () {
-          yield* Layer.build(
+          const context = yield* Layer.build(
             Layer.provideMerge(
               ScheduledTaskService.layer.pipe(Layer.provide(NodeServices.layer)),
               Layer.mergeAll(
@@ -86,7 +88,10 @@ it.effect(
                     Ref.update(launchedPrompts, (prompts) => [
                       ...prompts,
                       input.initialMessage?.text ?? "",
-                    ]).pipe(Effect.andThen(Effect.die(new Error("launch recorded")))),
+                    ]).pipe(
+                      Effect.andThen(Deferred.succeed(newsDispatched, undefined)),
+                      Effect.andThen(Effect.die(new Error("launch recorded"))),
+                    ),
                 }),
                 Layer.mock(ThreadManagementService.ThreadManagementService)({}),
                 Layer.mock(SecretRequests.SecretRequests)({}),
@@ -101,7 +106,22 @@ it.effect(
               ),
             ),
           );
+          const service = Context.get(context, ScheduledTaskService.ScheduledTaskService);
+          const settled = yield* service.subscribeList().pipe(
+            Stream.filter(({ tasks }) =>
+              tasks.every(
+                (task) =>
+                  task.nextRunAt !== null &&
+                  task.nextRunAt > now &&
+                  task.lastRunStatus !== "running",
+              ),
+            ),
+            Stream.runHead,
+            Effect.forkChild,
+          );
           yield* dueWork;
+          yield* Deferred.await(newsDispatched);
+          yield* Fiber.join(settled);
         }),
       );
 
@@ -295,16 +315,18 @@ it.effect(
         checkCommand: "check",
       });
       yield* sql`UPDATE scheduled_tasks SET schedule_json = '{"type":"interval","everyMs":60000}' WHERE task_id = 'fast'`;
-      yield* TestClock.setTime(Date.parse(now) + 1_000);
       const entered = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       const fastDispatched = yield* Deferred.make<void>();
+      const slowDispatched = yield* Deferred.make<void>();
       const launched = yield* Ref.make<ReadonlyArray<string>>([]);
       let dueWork = Effect.void;
       yield* Effect.gen(function* () {
         const service = yield* ScheduledTaskService.ScheduledTaskService;
-        const due = yield* Effect.forkChild(dueWork);
+        yield* dueWork;
         yield* Deferred.await(entered);
+        yield* TestClock.adjust("1 second");
+        yield* dueWork;
         yield* Deferred.await(fastDispatched);
         assert.deepEqual(yield* Ref.get(launched), ["fast"]);
         const overlap = yield* service
@@ -312,7 +334,7 @@ it.effect(
           .pipe(Effect.flip);
         assert.include(String(overlap.cause), "already running");
         yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(due);
+        yield* Deferred.await(slowDispatched);
         assert.deepEqual(yield* Ref.get(launched), ["fast", "slow"]);
       }).pipe(
         Effect.provide(
@@ -334,7 +356,7 @@ it.effect(
                       Effect.andThen(
                         input.title === "fast"
                           ? Deferred.succeed(fastDispatched, undefined)
-                          : Effect.void,
+                          : Deferred.succeed(slowDispatched, undefined),
                       ),
                       Effect.andThen(Effect.die("launch recorded")),
                     ),

@@ -4,6 +4,9 @@ import { expect, it } from "@effect/vitest";
 import { BotSummary, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -498,9 +501,13 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect.each([true, false])(
-  "restores schedules and preserves bot.json when the pause write fails, initially paused=%s",
-  (paused) =>
+it.effect.each([
+  { paused: false, nextPaused: true },
+  { paused: true, nextPaused: true },
+  { paused: true, nextPaused: false },
+])(
+  "restores schedules and preserves bot.json when the state write fails: %s",
+  ({ paused, nextPaused }) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const fs = yield* FileSystem.FileSystem;
@@ -543,12 +550,16 @@ it.effect.each([true, false])(
         Effect.gen(function* () {
           const bots = yield* BotService.BotService;
           const schedules = yield* ScheduledTaskService.ScheduledTaskService;
-          const error = yield* bots.setPaused({ botId: "helper", paused: true }).pipe(Effect.flip);
-          expect(error.message).toBe("Cannot pause bot helper");
+          const error = yield* bots
+            .setPaused({ botId: "helper", paused: nextPaused })
+            .pipe(Effect.flip);
+          expect(error.message).toBe(`Cannot ${nextPaused ? "pause" : "resume"} bot helper`);
           expect(error.cause).toBe(writeError);
           expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual(config);
           expect(
-            (yield* schedules.list()).tasks.map((task) => ({ id: task.id, enabled: task.enabled })),
+            (yield* schedules.list()).tasks
+              .map((task) => ({ id: task.id, enabled: task.enabled }))
+              .toSorted((left, right) => left.id.localeCompare(right.id)),
           ).toEqual([
             { id: "already-off", enabled: false },
             { id: "enabled", enabled: true },
@@ -852,4 +863,168 @@ it.effect.each([{ paused: true }, { pausedUntil: "2999-01-01T00:00:00Z" }])(
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("finishes an interrupted pause before a concurrent resume reads its state", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-interrupt-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    const configPath = path.join(botDir, "bot.json");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(configPath, toJson({ name: "Helper", homeThreadId: "home" }));
+    yield* insertSchedule(sql, {
+      id: "wake",
+      threadId: "home",
+      enabled: true,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    });
+    const writing = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let held = false;
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+        const pause = yield* bots
+          .setPaused({ botId: "helper", paused: true })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(writing);
+        expect((yield* schedules.list()).tasks[0]?.enabled).toBe(false);
+        yield* Effect.sync(() => pause.interruptUnsafe());
+        const resume = yield* bots
+          .setPaused({ botId: "helper", paused: false })
+          .pipe(Effect.forkChild);
+        yield* Deferred.succeed(release, undefined);
+        expect(Exit.isFailure(yield* Fiber.await(pause))).toBe(true);
+        yield* Fiber.join(resume);
+        expect((yield* schedules.list()).tasks[0]?.enabled).toBe(true);
+        expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual({
+          name: "Helper",
+          homeThreadId: "home",
+        });
+      }),
+    ).pipe(
+      Effect.provideService(FileSystem.FileSystem, {
+        ...fs,
+        rename: (source, target) => {
+          if (target !== configPath || held) return fs.rename(source, target);
+          held = true;
+          return Deferred.succeed(writing, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(fs.rename(source, target)),
+          );
+        },
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("caps sparse DM log reads and keeps the newest valid messages in order", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-sparse-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(botDir, "bot.json"),
+      toJson({ name: "Helper", homeThreadId: "home" }),
+    );
+    const dms = [
+      { text: "older", at: "2026-10-01T00:00:00Z" },
+      { text: "newer 🌍", at: "2026-10-01T00:01:00Z" },
+    ];
+    yield* fs.writeFileString(
+      path.join(botDir, "dm-log.jsonl"),
+      [
+        toJson({ text: "outside cap", at: "2026-10-01T00:00:00Z" }),
+        '{"other":"'.concat("x".repeat(3 * 1024 * 1024), '"}'),
+        toJson(dms[0]),
+        "invalid\n".repeat(20000),
+        toJson(dms[1]),
+      ].join("\n"),
+    );
+    let bytesRead = 0;
+    const detail = yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        return yield* (yield* BotService.BotService).get({ botId: "helper" });
+      }),
+    ).pipe(
+      Effect.provideService(FileSystem.FileSystem, {
+        ...fs,
+        open: (filePath, options) =>
+          fs.open(filePath, options).pipe(
+            Effect.map(
+              (file) =>
+                new Proxy(file, {
+                  get: (target, property) =>
+                    property === "read"
+                      ? (buffer: Uint8Array) =>
+                          target.read(buffer).pipe(
+                            Effect.tap((count) =>
+                              Effect.sync(() => {
+                                bytesRead += count;
+                              }),
+                            ),
+                          )
+                      : Reflect.get(target, property, target),
+                }),
+            ),
+          ),
+      }),
+    );
+    expect(bytesRead).toBe(2 * 1024 * 1024);
+    expect(detail.slackDms).toEqual(dms);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("ignores non-bot entries and warns again after a successful home lookup", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-warning-" });
+    const root = path.join(baseDir, "bots");
+    const botDir = path.join(root, "helper");
+    const configPath = path.join(botDir, "bot.json");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    for (const name of ["bin", "memory", "eval"]) yield* fs.makeDirectory(path.join(root, name));
+    yield* fs.writeFileString(path.join(root, "BOTS.md"), "Bots");
+    yield* fs.writeFileString(configPath, toJson({ name: "Helper", homeThreadId: "home" }));
+    const warnings: unknown[] = [];
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        expect(yield* bots.isHomeThread(ThreadId.make("home"))).toBe(true);
+        expect(warnings).toHaveLength(0);
+        for (const [raw, warningCount] of [
+          ["{", 1],
+          ["{", 1],
+          [toJson({ name: "Helper", homeThreadId: "home" }), 1],
+          ["{", 2],
+        ] as const) {
+          yield* fs.writeFileString(configPath, raw);
+          yield* TestClock.adjust("30 seconds");
+          yield* bots.isHomeThread(ThreadId.make("home"));
+          expect(warnings).toHaveLength(warningCount);
+        }
+      }),
+    ).pipe(
+      Effect.provide(
+        Logger.layer(
+          [
+            Logger.make(({ logLevel, message }) => {
+              if (logLevel === "Warn") warnings.push(message);
+            }),
+          ],
+          { mergeWithExisting: false },
+        ),
+      ),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

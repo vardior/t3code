@@ -511,6 +511,8 @@ export const layer = Layer.effect(
     const webhookFilteredLogWindows = yield* Ref.make<
       ReadonlyMap<ScheduledTaskId, ReadonlyArray<number>>
     >(new Map());
+    const serviceScope = yield* Effect.scope;
+    const scheduledRunPermits = yield* Semaphore.make(8);
     const activeRuns = yield* Ref.make<ReadonlySet<ScheduledTaskId>>(new Set());
     // Notifications re-emit the full list; slow subscribers need only the newest dirty signal.
     const changesPubSub = yield* PubSub.sliding<void>(1);
@@ -1179,6 +1181,7 @@ ${checkOutput}` : basePrompt;
         // The stored row can belong to a replacement, so report this dispatch separately.
         return { task: recorded, threadId, dispatchFailed: !runSucceeded };
       }).pipe(
+        trigger === "scheduled" ? scheduledRunPermits.withPermit : (effect) => effect,
         Effect.onError((cause) =>
           releaseStuckRun(task, startedAtIso, errorMessage(cause), webhook?.deliveryId),
         ),
@@ -1273,6 +1276,7 @@ ${checkOutput}` : basePrompt;
             Effect.catch((cause) =>
               Effect.logWarning("Scheduled task run failed", { taskId: task.id, cause }),
             ),
+            Effect.forkIn(serviceScope),
           ),
         { concurrency: 8, discard: true },
       );
