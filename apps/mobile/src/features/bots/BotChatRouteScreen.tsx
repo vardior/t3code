@@ -1,3 +1,4 @@
+import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
@@ -32,6 +33,7 @@ import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStri
 import { ComposerEditor } from "../../components/ComposerEditor";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { ScreenHeader } from "../../components/ScreenHeader";
+import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentServerConfig } from "../../state/entities";
 import { useComposerMediaAttachments } from "../../state/use-composer-media-attachments";
 import {
@@ -74,6 +76,17 @@ export function BotChatRouteScreen({ route }: BotChatRouteProps) {
 }
 
 function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly botId: string }) {
+  const { presentation } = useEnvironmentPresentation(props.environmentId);
+  const connected = presentation?.connection.phase === "connected";
+  const connectionFailed =
+    presentation?.connection.phase === "error" ||
+    presentation?.connection.phase === "unsupported" ||
+    presentation?.connection.error != null;
+  const connectionReason = connected
+    ? null
+    : presentation === null
+      ? "Environment unavailable. Reconnect to message this bot."
+      : `${connectionStatusText(presentation.connection)} Reconnect to message this bot.`;
   const bots = useBots(props.environmentId);
   const bot = bots.data?.bots.find((entry) => entry.id === props.botId);
   const navigation = useNavigation();
@@ -81,8 +94,16 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
     return (
       <View className="flex-1 bg-screen">
         <ScreenHeader title="Bots" sidebar={false} onBack={() => navigation.goBack()} />
-        <Text className="p-6 text-base text-foreground-muted">
-          {bots.error ?? (bots.data === null ? "Loading…" : "Bot unavailable in this environment.")}
+        <Text
+          className={
+            connectionFailed || (bots.error && connectionReason === null)
+              ? "p-6 text-base text-danger-foreground"
+              : "p-6 text-base text-foreground-muted"
+          }
+        >
+          {connectionReason ??
+            bots.error ??
+            (bots.data === null ? "Loading…" : "Bot unavailable in this environment.")}
         </Text>
         {bots.error ? (
           <Pressable accessibilityRole="button" onPress={bots.refresh} className="p-6">
@@ -97,6 +118,9 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
       bot={bot}
       environmentId={props.environmentId}
       refresh={bots.refresh}
+      connected={connected}
+      connectionReason={connectionReason}
+      connectionFailed={connectionFailed}
     />
   );
 }
@@ -105,8 +129,11 @@ function BotConversation(props: {
   readonly bot: BotSummary;
   readonly environmentId: EnvironmentId;
   readonly refresh: () => void;
+  readonly connected: boolean;
+  readonly connectionFailed: boolean;
+  readonly connectionReason: string | null;
 }) {
-  const { bot, environmentId } = props;
+  const { bot, environmentId, connected, connectionReason, connectionFailed } = props;
   const detail = useBotDetail(environmentId, bot.id);
   const thread = useEnvironmentThread(environmentId, bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
@@ -127,7 +154,8 @@ function BotConversation(props: {
     }
   };
   const unavailableReason =
-    thread.status === "deleted"
+    connectionReason ??
+    (thread.status === "deleted"
       ? "This bot's home thread is missing"
       : homeThreadArchived
         ? "Home thread archived"
@@ -135,7 +163,7 @@ function BotConversation(props: {
           ? `Could not load this bot's home thread: ${threadError}`
           : projection === null
             ? "Loading this bot's home thread…"
-            : null;
+            : null);
   const schedules = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
@@ -231,7 +259,7 @@ function BotConversation(props: {
     states: uploadStates,
   };
   const attachmentsUploading = composerAttachmentsStillUploading(uploadInput);
-  const uploadError = composerAttachmentUploadBlockReason({ ...uploadInput, connected: true });
+  const uploadError = composerAttachmentUploadBlockReason({ ...uploadInput, connected });
   const pending = useRef(false);
   const sending = composer.pendingRequestId !== null;
   const busy = sending;
@@ -263,22 +291,26 @@ function BotConversation(props: {
     reportFailure: false,
   });
   const ready =
-    projection !== null && thread.status === "live" && threadError === null && !homeThreadArchived;
+    connected &&
+    projection !== null &&
+    thread.status === "live" &&
+    threadError === null &&
+    !homeThreadArchived;
   const canSend =
     ready &&
     !busy &&
     !attachmentsUploading &&
     uploadError === null &&
     (draft.text.trim().length > 0 || draft.attachments.length > 0);
-  usePreventRemove(busy, () =>
+  usePreventRemove(busy && connected, () =>
     Alert.alert("Command pending", "Wait for the bot command to finish before leaving."),
   );
   const openThread = useCallback(
     (threadId: ThreadId, targetEnvironmentId = environmentId) => {
-      if (!pending.current)
+      if (!pending.current || !connected)
         navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
     },
-    [navigation, environmentId],
+    [navigation, environmentId, connected],
   );
   const send = async () => {
     if (!canSend || projection === null || pending.current) return;
@@ -342,7 +374,7 @@ function BotConversation(props: {
           {
             accessibilityLabel: `About ${bot.name}`,
             icon: "info.circle",
-            disabled: busy,
+            disabled: busy && connected,
             onPress: () => navigation.navigate("BotInfo", { environmentId, botId: bot.id }),
           },
         ]}
@@ -521,7 +553,18 @@ function BotConversation(props: {
             </View>
           ) : null}
           {unavailableReason && !threadLoadFailed ? (
-            <Text className="text-sm text-foreground-muted">{unavailableReason}</Text>
+            <Text
+              className={
+                connectionFailed
+                  ? "text-sm text-danger-foreground"
+                  : "text-sm text-foreground-muted"
+              }
+            >
+              {unavailableReason}
+            </Text>
+          ) : null}
+          {busy && unavailableReason === null ? (
+            <Text className="text-sm text-foreground-muted">Sending message…</Text>
           ) : null}
           {homeThreadArchived && thread.status !== "deleted" ? (
             <Pressable
