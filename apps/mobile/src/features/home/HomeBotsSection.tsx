@@ -1,4 +1,4 @@
-import { isActiveRunStatus } from "@t3tools/client-runtime/state/bot-conversation";
+import { botThreadShellStatus } from "@t3tools/client-runtime/state/bot-conversation";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
@@ -77,14 +77,23 @@ function HomeBotRow(props: {
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
   const { bot, environmentId, refresh } = props.entry;
-  const working = isActiveRunStatus(props.shell?.latestRun?.status);
+  const status = botThreadShellStatus(props.shell);
+  const working = status === "working";
+  const statusText = {
+    idle: null,
+    working: "Working…",
+    "needs-approval": "Needs your approval",
+    "needs-input": "Needs your input",
+    failed: "Failed",
+    stopped: "Stopped",
+  }[status];
   useBotRunSettlement(working, refresh);
   const lastActivity = props.shell?.latestRun?.completedAt ?? props.shell?.updatedAt ?? null;
   const time = botStatusLabel({ working: false, paused: false, lastActivity }, props.now);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${bot.name}${props.environmentLabel ? `, ${props.environmentLabel}` : ""}${bot.paused ? ", paused" : ""}, ${time}`}
+      accessibilityLabel={`${bot.name}${props.environmentLabel ? `, ${props.environmentLabel}` : ""}${bot.paused ? ", paused" : ""}, ${statusText ?? time}`}
       className="flex-row items-center gap-3 border-b border-border-subtle px-1 py-3 active:opacity-70"
       onPress={() => props.onSelectBot(environmentId, bot.id)}
     >
@@ -106,7 +115,7 @@ function HomeBotRow(props: {
         </View>
         <Text numberOfLines={1} className="text-sm text-foreground-muted">
           {props.environmentLabel ? `${props.environmentLabel} · ` : ""}
-          {working ? "Working…" : (bot.lastReply?.text ?? "Open conversation")}
+          {statusText ?? bot.lastReply?.text ?? "Open conversation"}
         </Text>
       </View>
     </Pressable>

@@ -32,6 +32,12 @@ import { useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import {
+  showGitActionResult,
+  useGitActionResultNotification,
+  dismissGitActionResult,
+} from "../../state/use-vcs-action-state";
+import { GitActionProgressOverlay } from "../threads/GitActionProgressOverlay";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { startScheduledTaskEditor } from "../settings/scheduled-task-editor-state";
@@ -55,29 +61,44 @@ export function BotInfoSheet({
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const theme = useUniwindTheme();
+  const { result: commandNotification } = useGitActionResultNotification();
   const content = (
-    <ScrollView
-      className="flex-1"
-      contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
-      contentContainerClassName="gap-5 px-5 pt-4"
-      contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
-    >
-      {bot ? (
-        <BotInfo key={bot.id} bot={bot} environmentId={environmentId} refresh={bots.refresh} />
-      ) : (
-        <View className="gap-2">
-          <Text className="text-base text-foreground-muted">
-            {bots.error ??
-              (bots.data === null ? "Loading…" : "Bot unavailable in this environment.")}
-          </Text>
-          {bots.error ? (
-            <Pressable accessibilityRole="button" onPress={bots.refresh}>
-              <Text className="text-primary-text">Try again</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      )}
-    </ScrollView>
+    <View className="flex-1">
+      <ScrollView
+        className="flex-1"
+        contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
+        contentContainerClassName="gap-5 px-5 pt-4"
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
+      >
+        {bot ? (
+          <BotInfo key={bot.id} bot={bot} environmentId={environmentId} refresh={bots.refresh} />
+        ) : (
+          <View className="gap-2">
+            <Text className="text-base text-foreground-muted">
+              {bots.error ??
+                (bots.data === null ? "Loading…" : "Bot unavailable in this environment.")}
+            </Text>
+            {bots.error ? (
+              <Pressable accessibilityRole="button" onPress={bots.refresh}>
+                <Text className="text-primary-text">Try again</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        )}
+      </ScrollView>
+      <GitActionProgressOverlay
+        progress={
+          commandNotification
+            ? {
+                phase: commandNotification.type,
+                label: commandNotification.title,
+                description: commandNotification.description ?? null,
+              }
+            : { phase: "idle", label: null, description: null }
+        }
+        onDismiss={dismissGitActionResult}
+      />
+    </View>
   );
 
   if (Platform.OS === "ios") {
@@ -124,6 +145,8 @@ function BotInfo(props: {
   readonly refresh: () => void;
 }) {
   const { bot, environmentId } = props;
+  const [pauseResult, setPauseResult] = useState<{ bot: BotSummary; paused: boolean } | null>(null);
+  const paused = pauseResult?.bot === bot ? pauseResult.paused : bot.paused;
   const detail = useBotDetail(environmentId, bot.id);
   const navigation = useNavigation();
   const shell = useThreadShell(scopeThreadRef(environmentId, bot.homeThreadId));
@@ -159,19 +182,33 @@ function BotInfo(props: {
     pending.current = true;
     setBusy(true);
     setError(null);
-    const result = await command();
+    let result: AtomCommandResult<unknown, unknown>;
+    try {
+      result = await command();
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : String(failure);
+      setError(message);
+      showGitActionResult({ type: "error", title: "Bot command failed", description: message });
+      pending.current = false;
+      setBusy(false);
+      return;
+    }
     props.refresh();
     schedules.refresh();
     pending.current = false;
     setBusy(false);
     if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
       const failure = squashAtomCommandFailure(result);
-      setError(failure instanceof Error ? failure.message : String(failure));
+      const message = failure instanceof Error ? failure.message : String(failure);
+      setError(message);
+      showGitActionResult({ type: "error", title: "Bot command failed", description: message });
     }
   };
-  const openThread = (threadId: ThreadId) => {
+  const openThread = (threadId: ThreadId, targetEnvironmentId = environmentId) => {
     if (pending.current) return;
-    navigation.dispatch(StackActions.replace("Thread", { environmentId, threadId }));
+    navigation.dispatch(
+      StackActions.replace("Thread", { environmentId: targetEnvironmentId, threadId }),
+    );
   };
   const openTask = (task: ScheduledTask) => {
     if (pending.current) return;
@@ -195,7 +232,7 @@ function BotInfo(props: {
         <Text className="text-xl font-t3-semibold text-foreground">{bot.name}</Text>
         <Text className="text-sm text-foreground-muted">
           {shell?.modelSelection.model ?? "Model unknown"}
-          {bot.paused ? " · Paused" : ""}
+          {paused ? " · Paused" : ""}
         </Text>
       </View>
       <SettingsSection title="Schedule">
@@ -230,16 +267,16 @@ function BotInfo(props: {
               <ThemedSwitch
                 accessibilityLabel={`${task.enabled ? "Pause" : "Resume"} schedule ${task.title}`}
                 value={task.enabled}
-                disabled={busy || bot.paused}
+                disabled={busy || paused}
                 onValueChange={(enabled) => {
-                  if (bot.paused) return;
+                  if (paused) return;
                   void act(() => setEnabled({ environmentId, input: { id: task.id, enabled } }));
                 }}
               />
             </View>
           ))
         )}
-        {bot.paused ? (
+        {paused ? (
           <Text className="px-4 pb-3 text-sm text-foreground-muted">
             Resume the bot to change its schedules.
           </Text>
@@ -249,14 +286,20 @@ function BotInfo(props: {
         accessibilityRole="button"
         disabled={busy}
         onPress={() =>
-          void act(() =>
-            setPaused({ environmentId, input: { botId: bot.id, paused: !bot.paused } }),
-          )
+          void act(async () => {
+            const nextPaused = !paused;
+            const result = await setPaused({
+              environmentId,
+              input: { botId: bot.id, paused: nextPaused },
+            });
+            if (result._tag === "Success") setPauseResult({ bot, paused: nextPaused });
+            return result;
+          })
         }
         className="min-h-11 items-center justify-center rounded-full border border-border-subtle px-4 py-3 active:opacity-70 disabled:opacity-50"
       >
         <Text className="font-t3-medium text-foreground">
-          {bot.paused ? "Resume bot" : "Pause bot"}
+          {paused ? "Resume bot" : "Pause bot"}
         </Text>
       </Pressable>
       {error ? (

@@ -2,7 +2,6 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   botWakeSenderLabel,
   rewriteThreadLinks,
-  threadIdFromHref,
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import type { EnvironmentId, ScheduledTask, ThreadId } from "@t3tools/contracts";
@@ -17,6 +16,8 @@ import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
 } from "../../native/SelectableMarkdownText";
+import { useEnvironments } from "../../state/environments";
+import { botMarkdownThreadLinks, botThreadLinkTarget } from "./botChat.logic";
 import { useThreadShell } from "../../state/entities";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 import { ThreadMarkdownImage } from "../threads/ThreadMarkdownImage";
@@ -26,7 +27,7 @@ export function BotChatRow(props: {
   readonly botName: string;
   readonly environmentId: EnvironmentId;
   readonly schedules: ReadonlyArray<ScheduledTask>;
-  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
   readonly onDisclosureToggle: () => void;
 }) {
@@ -75,7 +76,7 @@ export function BotChatRow(props: {
 function WorkerRow(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
   readonly environmentId: EnvironmentId;
-  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.item.threadId));
   const title = shell?.title ?? props.item.title;
@@ -101,7 +102,7 @@ function WakeRow(props: {
   readonly botName: string;
   readonly environmentId: EnvironmentId;
   readonly schedules: ReadonlyArray<ScheduledTask>;
-  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const sender = useThreadShell(
@@ -163,14 +164,20 @@ function WakeRow(props: {
 export function BotMarkdown(props: {
   readonly text: string;
   readonly environmentId: EnvironmentId;
-  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const styles = useMarkdownPreviewStyles();
-  const markdown = rewriteThreadLinks(props.text, "https://t3.invalid");
+  const { environments } = useEnvironments();
+  const knownEnvironmentIds = environments.map((entry) => entry.environmentId);
+  const markdown = botMarkdownThreadLinks(
+    rewriteThreadLinks(props.text, "https://t3.invalid"),
+    knownEnvironmentIds,
+  );
   const onLinkPress = (href: string) => {
-    const threadId = threadIdFromHref(href, "https://t3.invalid", props.environmentId);
-    if (threadId) props.onOpenThread(threadId);
-    else void tryOpenExternalUrl(href, "markdown-link");
+    const target = botThreadLinkTarget(href, knownEnvironmentIds);
+    if (target) props.onOpenThread(target.threadId, target.environmentId);
+    else if (!href.startsWith("https://t3.invalid/") && !href.startsWith("t3-thread://"))
+      void tryOpenExternalUrl(href, "markdown-link");
   };
   if (hasNativeSelectableMarkdownText()) {
     return (

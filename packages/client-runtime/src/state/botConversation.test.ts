@@ -1,5 +1,6 @@
 import {
   ChatAttachmentId,
+  EnvironmentId,
   MessageId,
   RuntimeRequestId,
   NodeId,
@@ -10,11 +11,14 @@ import {
   type BotSummary,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
+import { presentThreadShell } from "./models.ts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   botConversationStatus,
+  botThreadShellStatus,
   botWakeSenderLabel,
   buildBotChat,
   slackMarkupToMarkdown,
@@ -689,5 +693,112 @@ describe("botWakeSenderLabel", () => {
     expect(botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: "Daily update" })).toBe(
       "Daily update",
     );
+  });
+});
+
+describe("botThreadShellStatus", () => {
+  it("prioritizes user requests over active and failed runs", () => {
+    const source = {
+      ...v2ThreadShell,
+      pendingRuntimeRequest: {
+        id: RuntimeRequestId.make("request"),
+        kind: "user_input" as const,
+        createdAt: at("2026-10-01T00:00:00Z"),
+      },
+    };
+    expect(botThreadShellStatus(presentThreadShell(EnvironmentId.make("env"), source))).toBe(
+      "needs-input",
+    );
+    expect(
+      botThreadShellStatus(
+        presentThreadShell(EnvironmentId.make("env"), {
+          ...source,
+          pendingRuntimeRequest: { ...source.pendingRuntimeRequest, kind: "command" },
+        }),
+      ),
+    ).toBe("needs-approval");
+  });
+
+  it("classifies absent, active, completed, failed and interrupted shells", () => {
+    expect(botThreadShellStatus(undefined)).toBe("idle");
+    expect(botThreadShellStatus(presentThreadShell(EnvironmentId.make("env"), v2ThreadShell))).toBe(
+      "idle",
+    );
+    for (const [status, expected] of [
+      ["preparing", "working"],
+      ["queued", "working"],
+      ["starting", "working"],
+      ["running", "working"],
+      ["waiting", "working"],
+      ["completed", "idle"],
+      ["failed", "failed"],
+      ["interrupted", "stopped"],
+    ] as const) {
+      const shell = presentThreadShell(EnvironmentId.make("env"), {
+        ...v2ThreadShell,
+        latestRunId: RunId.make("run"),
+        status,
+      });
+      expect(botThreadShellStatus(shell)).toBe(expected);
+      expect(
+        botThreadShellStatus({
+          ...shell,
+          source: {
+            ...shell.source,
+            pendingRuntimeRequest: {
+              id: RuntimeRequestId.make("request"),
+              kind: "user_input",
+              createdAt: at("2026-10-01T00:00:00Z"),
+            },
+          },
+        }),
+      ).toBe("needs-input");
+    }
+  });
+});
+
+describe("bot auxiliary history", () => {
+  const detail = {
+    charter: null,
+    slackDms: [
+      { at: "2026-09-01T00:00:00Z", text: "old" },
+      { at: "2026-10-01T00:00:00Z", text: "current" },
+      { at: "2026-10-01T00:00:00Z", text: "different" },
+    ],
+    workers: [
+      {
+        threadId: ThreadId.make("old"),
+        title: "Old",
+        status: null,
+        createdAt: "2026-09-01T00:00:00Z",
+      },
+      {
+        threadId: ThreadId.make("current"),
+        title: "Current",
+        status: null,
+        createdAt: "2026-10-01T00:00:00Z",
+      },
+    ],
+  };
+  const input = { bot: botWithoutHistory, detail, messages: [], runs: [], turnItems: [] };
+
+  it("clips auxiliary rows to the loaded window including its boundary", () => {
+    expect(
+      buildBotChat({ ...input, since: Date.parse("2026-10-01T00:00:00Z") }).map((item) =>
+        "text" in item ? item.text : item.kind,
+      ),
+    ).toEqual(["current", "different", "worker"]);
+    expect(buildBotChat(input)).toHaveLength(5);
+    expect(buildBotChat({ ...input, since: Infinity })).toEqual([]);
+  });
+
+  it("keeps DM keys stable as the window slides and distinguishes same-time texts", () => {
+    const full = buildBotChat(input).filter((item) => item.kind === "you");
+    const slid = buildBotChat({
+      ...input,
+      detail: { ...detail, slackDms: detail.slackDms.slice(1) },
+    }).filter((item) => item.kind === "you");
+    expect(slid.map((item) => item.id)).toEqual(full.slice(1).map((item) => item.id));
+    expect(new Set(full.map((item) => item.id)).size).toBe(3);
   });
 });

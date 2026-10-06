@@ -1,3 +1,5 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+
 export function botStatusLabel(
   status: {
     readonly working: boolean;
@@ -20,18 +22,17 @@ export function botStatusLabel(
 
 type BotComposerState = {
   readonly scope: string;
-  readonly text: string;
   readonly pendingRequestId: string | null;
   readonly error: string | null;
 };
 
 export function initialBotComposer(scope: string): BotComposerState {
-  return { scope, text: "", pendingRequestId: null, error: null };
+  return { scope, pendingRequestId: null, error: null };
 }
 
 type BotComposerAction =
-  | { readonly type: "edit"; readonly text: string }
-  | { readonly type: "send"; readonly requestId: string; readonly attachmentCount?: number }
+  | { readonly type: "edit" }
+  | { readonly type: "send"; readonly requestId: string; readonly hasContent: boolean }
   | {
       readonly type: "settled";
       readonly scope: string;
@@ -45,17 +46,15 @@ export function botComposerReducer(
   action: BotComposerAction,
 ) {
   if (action.type === "edit") {
-    return state.pendingRequestId === null ? { ...state, text: action.text, error: null } : state;
+    return { ...state, error: null };
   }
   if (action.type === "send") {
-    if (state.pendingRequestId !== null || (!state.text.trim() && !action.attachmentCount))
-      return state;
+    if (state.pendingRequestId !== null || !action.hasContent) return state;
     return { ...state, pendingRequestId: action.requestId, error: null };
   }
   if (action.scope !== state.scope || action.requestId !== state.pendingRequestId) return state;
   return {
     ...state,
-    text: action.success ? "" : state.text,
     pendingRequestId: null,
     error: action.error,
   };
@@ -66,4 +65,27 @@ export function botChatScrollReducer(
   action: { readonly type: "disclosure"; readonly atEnd: boolean } | { readonly type: "drag" },
 ) {
   return action.type === "drag" ? false : followingEnd || action.atEnd;
+}
+
+export function botThreadLinkTarget(href: string, knownEnvironmentIds: ReadonlyArray<string>) {
+  try {
+    const url = new URL(href);
+    if (url.origin !== "https://t3.invalid") return null;
+    const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    if (parts.length !== 2 || !knownEnvironmentIds.includes(parts[0]!)) return null;
+    return { environmentId: EnvironmentId.make(parts[0]!), threadId: ThreadId.make(parts[1]!) };
+  } catch {
+    return null;
+  }
+}
+
+export function botMarkdownThreadLinks(
+  markdown: string,
+  knownEnvironmentIds: ReadonlyArray<string>,
+) {
+  return markdown.replace(
+    /\[([^\]]+)\]\((https:\/\/t3\.invalid\/[^\s)]+)\)/g,
+    (link, label: string, href: string) =>
+      botThreadLinkTarget(href, knownEnvironmentIds) ? link : label,
+  );
 }

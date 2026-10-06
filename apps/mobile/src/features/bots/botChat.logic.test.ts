@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   botChatScrollReducer,
+  botThreadLinkTarget,
+  botMarkdownThreadLinks,
   botComposerReducer,
   botStatusLabel,
   initialBotComposer,
@@ -31,14 +33,15 @@ describe("bot status", () => {
   });
 });
 
-describe("bot text submission", () => {
-  const draft = botComposerReducer(initialBotComposer("environment-a:bot-a"), {
-    type: "edit",
-    text: "  Check the bots  ",
+describe("bot command state", () => {
+  const draft = initialBotComposer("environment-a:bot-a");
+  const pending = botComposerReducer(draft, {
+    type: "send",
+    requestId: "send-1",
+    hasContent: true,
   });
-  const pending = botComposerReducer(draft, { type: "send", requestId: "send-1" });
 
-  it("retains the draft on command failure and allows retry", () => {
+  it("retains a failure for retry without owning draft content", () => {
     const failed = botComposerReducer(pending, {
       type: "settled",
       scope: draft.scope,
@@ -46,31 +49,13 @@ describe("bot text submission", () => {
       success: false,
       error: "Disconnected",
     });
-    expect(failed).toMatchObject({
-      text: draft.text,
-      pendingRequestId: null,
-      error: "Disconnected",
-    });
-    expect(botComposerReducer(failed, { type: "send", requestId: "send-2" })).toMatchObject({
-      text: draft.text,
-      pendingRequestId: "send-2",
-      error: null,
-    });
-  });
-
-  it("clears the draft only after the queued command succeeds", () => {
+    expect(failed).toEqual({ scope: draft.scope, pendingRequestId: null, error: "Disconnected" });
     expect(
-      botComposerReducer(pending, {
-        type: "settled",
-        scope: draft.scope,
-        requestId: "send-1",
-        success: true,
-        error: null,
-      }),
-    ).toMatchObject({ text: "", pendingRequestId: null, error: null });
+      botComposerReducer(failed, { type: "send", requestId: "send-2", hasContent: true }).error,
+    ).toBeNull();
   });
 
-  it("ignores completion from another bot, environment, or request", () => {
+  it("ignores stale completions and duplicate or empty sends", () => {
     for (const scope of ["environment-a:bot-b", "environment-b:bot-a"]) {
       expect(
         botComposerReducer(pending, {
@@ -86,37 +71,26 @@ describe("bot text submission", () => {
       botComposerReducer(pending, {
         type: "settled",
         scope: draft.scope,
-        requestId: "older-send",
+        requestId: "old",
         success: true,
         error: null,
       }),
     ).toBe(pending);
-  });
-
-  it("submits an image-only draft and settles without dropping failure state", () => {
-    const empty = initialBotComposer("image-only");
-    const sending = botComposerReducer(empty, {
-      type: "send",
-      requestId: "image-send",
-      attachmentCount: 1,
-    });
-    expect(sending.pendingRequestId).toBe("image-send");
     expect(
-      botComposerReducer(sending, {
+      botComposerReducer(pending, { type: "send", requestId: "duplicate", hasContent: true }),
+    ).toBe(pending);
+    expect(botComposerReducer(draft, { type: "send", requestId: "empty", hasContent: false })).toBe(
+      draft,
+    );
+    expect(
+      botComposerReducer(pending, {
         type: "settled",
-        scope: empty.scope,
-        requestId: "image-send",
-        success: false,
-        error: "Upload failed",
+        scope: draft.scope,
+        requestId: "send-1",
+        success: true,
+        error: null,
       }),
-    ).toMatchObject({ pendingRequestId: null, error: "Upload failed" });
-  });
-
-  it("blocks duplicate sends and draft replacement during submission", () => {
-    expect(botComposerReducer(pending, { type: "send", requestId: "send-2" })).toBe(pending);
-    expect(botComposerReducer(pending, { type: "edit", text: "another draft" })).toBe(pending);
-    const empty = initialBotComposer(draft.scope);
-    expect(botComposerReducer(empty, { type: "send", requestId: "empty" })).toBe(empty);
+    ).toEqual(draft);
   });
 });
 
@@ -136,5 +110,25 @@ describe("bot chat end following after disclosure", () => {
 
   it("does not follow new messages when a disclosure was opened away from the end", () => {
     expect(botChatScrollReducer(false, { type: "disclosure", atEnd: false })).toBe(false);
+  });
+});
+
+describe("bot thread links", () => {
+  it("resolves known cross-environment targets and rejects unknown or malformed links", () => {
+    expect(
+      botThreadLinkTarget("https://t3.invalid/remote/thread%201", ["local", "remote"]),
+    ).toEqual({ environmentId: "remote", threadId: "thread 1" });
+    expect(botThreadLinkTarget("https://t3.invalid/unknown/thread", ["local"])).toBeNull();
+    expect(botThreadLinkTarget("https://example.com/local/thread", ["local"])).toBeNull();
+    expect(botThreadLinkTarget("https://t3.invalid/local/%ZZ", ["local"])).toBeNull();
+  });
+
+  it("renders unknown thread links as their text while retaining known and external links", () => {
+    expect(
+      botMarkdownThreadLinks(
+        "[Unknown](https://t3.invalid/unknown/thread) [Remote](https://t3.invalid/remote/thread) [Web](https://example.com)",
+        ["remote"],
+      ),
+    ).toBe("Unknown [Remote](https://t3.invalid/remote/thread) [Web](https://example.com)");
   });
 });

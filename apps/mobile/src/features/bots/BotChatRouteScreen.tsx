@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
@@ -12,6 +12,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
@@ -26,7 +27,12 @@ import { FilePreviewModal, type FilePreviewSource } from "../../components/FileP
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { useEnvironmentServerConfig } from "../../state/entities";
 import { useComposerMediaAttachments } from "../../state/use-composer-media-attachments";
-import { clearComposerDraftContent, useComposerDraft } from "../../state/use-composer-drafts";
+import {
+  clearComposerDraftContent,
+  getComposerDraftSnapshot,
+  setComposerDraftText,
+  useComposerDraft,
+} from "../../state/use-composer-drafts";
 import { prepareComposerDraftAttachments } from "../../state/prepare-composer-draft-attachments";
 import {
   composerAttachmentUploadsAtom,
@@ -36,7 +42,7 @@ import {
 import { uuidv4 } from "../../lib/uuid";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
-import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
+import { useEnvironmentThread, environmentThreads, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
 import { botChatScrollReducer, botComposerReducer, initialBotComposer } from "./botChat.logic";
@@ -95,6 +101,16 @@ function BotConversation(props: {
   const detail = useBotDetail(environmentId, bot.id);
   const thread = useEnvironmentThread(environmentId, bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
+  const retryThread = useAtomRefresh(environmentThreads.stateAtom(environmentId, bot.homeThreadId));
+  const threadError = Option.getOrNull(thread.error);
+  const unavailableReason =
+    thread.status === "deleted"
+      ? "This bot's home thread is missing"
+      : threadError !== null
+        ? `Could not load this bot's home thread: ${threadError}`
+        : projection === null
+          ? "Loading this bot's home thread…"
+          : null;
   const schedules = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
@@ -103,11 +119,18 @@ function BotConversation(props: {
       buildBotChat({
         bot,
         detail: detail.data,
+        since: thread.history.hasMoreHistory
+          ? Math.min(
+              ...(projection?.messages ?? []).map((message) =>
+                DateTime.toEpochMillis(message.createdAt),
+              ),
+            )
+          : undefined,
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [bot, detail.data, projection],
+    [bot, detail.data, projection, thread.history.hasMoreHistory],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
@@ -193,24 +216,26 @@ function BotConversation(props: {
   const loadEarlier = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
-  const ready = projection !== null && thread.status === "live";
+  const ready = projection !== null && thread.status === "live" && threadError === null;
   const canSend =
     ready &&
     !busy &&
     !attachmentsUploading &&
     uploadError === null &&
-    (composer.text.trim().length > 0 || draft.attachments.length > 0);
+    (draft.text.trim().length > 0 || draft.attachments.length > 0);
   usePreventRemove(busy, () =>
     Alert.alert("Command pending", "Wait for the bot command to finish before leaving."),
   );
-  const openThread = (threadId: ThreadId) => {
-    if (!pending.current) navigation.navigate("Thread", { environmentId, threadId });
+  const openThread = (threadId: ThreadId, targetEnvironmentId = environmentId) => {
+    if (!pending.current)
+      navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
   };
   const send = async () => {
     if (!canSend || projection === null || pending.current) return;
     pending.current = true;
     const requestId = uuidv4();
-    dispatch({ type: "send", requestId, attachmentCount: draft.attachments.length });
+    const sentText = draft.text;
+    dispatch({ type: "send", requestId, hasContent: true });
     let success = false;
     let error: string | null = null;
     try {
@@ -227,7 +252,7 @@ function BotConversation(props: {
           message: {
             messageId: MessageId.make(requestId),
             role: "user",
-            text: composer.text.trim(),
+            text: sentText.trim(),
             attachments: prepared.attachments,
           },
           runtimeMode: projection.thread.runtimeMode,
@@ -242,7 +267,8 @@ function BotConversation(props: {
           : squashAtomCommandFailure(result);
       error =
         failure === null ? null : failure instanceof Error ? failure.message : String(failure);
-      if (success) clearComposerDraftContent(draftKey);
+      if (success && getComposerDraftSnapshot(draftKey).text === sentText)
+        clearComposerDraftContent(draftKey);
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
     } finally {
@@ -273,7 +299,7 @@ function BotConversation(props: {
         <KeyboardAwareLegendList
           key={listMountKey}
           ref={listRef}
-          data={items}
+          data={unavailableReason === null ? items : []}
           extraData={schedules.data}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
@@ -322,7 +348,7 @@ function BotConversation(props: {
           maintainVisibleContentPosition
           getItemType={(item) => item.kind}
           ListHeaderComponent={
-            history.hasMoreHistory || historyError ? (
+            unavailableReason === null && (history.hasMoreHistory || historyError) ? (
               <View className="gap-2">
                 <Pressable
                   accessibilityRole="button"
@@ -343,12 +369,26 @@ function BotConversation(props: {
             ) : undefined
           }
           ListEmptyComponent={
-            <Text className="py-6 text-center text-sm text-foreground-muted">
-              {projection === null ? "Loading…" : `Nothing between you and ${bot.name} yet.`}
-            </Text>
+            <View className="gap-3 py-6">
+              <Text
+                accessibilityRole={threadError ? "alert" : undefined}
+                className="text-center text-sm text-foreground-muted"
+              >
+                {unavailableReason ?? `Nothing between you and ${bot.name} yet.`}
+              </Text>
+              {threadError ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={retryThread}
+                  className="self-center p-2"
+                >
+                  <Text className="text-primary-text">Try again</Text>
+                </Pressable>
+              ) : null}
+            </View>
           }
           ListFooterComponent={
-            status.kind === "working" ? (
+            unavailableReason !== null ? undefined : status.kind === "working" ? (
               <View className="self-start flex-row items-center gap-2 rounded-2xl bg-card px-3.5 py-2">
                 <Text className="text-sm text-foreground-muted">Working…</Text>
                 <Pressable
@@ -415,6 +455,9 @@ function BotConversation(props: {
           className="absolute bottom-0 left-0 right-0 gap-2 border-t border-border-subtle bg-screen px-4 pt-3"
           style={{ paddingBottom: composerBottomInset }}
         >
+          {unavailableReason ? (
+            <Text className="text-sm text-foreground-muted">{unavailableReason}</Text>
+          ) : null}
           {error ? (
             <Text accessibilityRole="alert" className="text-sm text-destructive">
               {error}
@@ -437,8 +480,11 @@ function BotConversation(props: {
             />
             <View className="min-w-0 flex-1 rounded-2xl bg-subtle px-3 py-2">
               <ComposerEditor
-                value={composer.text}
-                onChangeText={(text) => dispatch({ type: "edit", text })}
+                value={draft.text}
+                onChangeText={(text) => {
+                  setComposerDraftText(draftKey, text);
+                  dispatch({ type: "edit" });
+                }}
                 onFocus={() => setComposerFocused(true)}
                 onBlur={() => setComposerFocused(false)}
                 environmentId={environmentId}

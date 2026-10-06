@@ -11,7 +11,9 @@ import {
 } from "@t3tools/contracts";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
+import * as Hash from "effect/Hash";
 
+import type { EnvironmentThreadShell } from "./models.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
@@ -54,6 +56,20 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
 
 export function isActiveRunStatus(status: string | null | undefined): boolean {
   return status != null && ACTIVE_RUN_STATUSES.has(status);
+}
+
+export function botThreadShellStatus(
+  shell: EnvironmentThreadShell | null | undefined,
+): "idle" | "working" | "needs-approval" | "needs-input" | "failed" | "stopped" {
+  const request = shell?.source.pendingRuntimeRequest?.kind;
+  if (request === "user_input") return "needs-input";
+  if (request && request !== "auth_refresh" && request !== "dynamic_tool_call")
+    return "needs-approval";
+  const status = shell?.latestRun?.status;
+  if (isActiveRunStatus(status)) return "working";
+  if (status === "failed") return "failed";
+  if (status === "interrupted") return "stopped";
+  return "idle";
 }
 
 type ChatRun = Pick<OrchestrationV2Run, "id" | "status">;
@@ -118,6 +134,7 @@ export function botWakeSenderLabel(input: {
 
 export function buildBotChat(input: {
   readonly bot: BotSummary;
+  readonly since?: number;
   readonly detail?: BotDetail | null;
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly runs: ReadonlyArray<ChatRun>;
@@ -211,27 +228,31 @@ export function buildBotChat(input: {
         },
       ];
     }),
-    ...(input.detail?.slackDms ?? []).map((dm, index) => ({
-      kind: "you" as const,
-      id: `slack-dm:${index}:${dm.at}`,
-      at: Date.parse(dm.at),
-      text: dm.text,
-      imageIds: [],
-    })),
+    ...(input.detail?.slackDms ?? [])
+      .filter((dm) => input.since === undefined || Date.parse(dm.at) >= input.since)
+      .map((dm) => ({
+        kind: "you" as const,
+        id: `slack-dm:${dm.at}:${(Hash.string(dm.text) >>> 0).toString(36)}`,
+        at: Date.parse(dm.at),
+        text: dm.text,
+        imageIds: [],
+      })),
     ...dmSends.map(({ item, text }) => ({
       kind: "bot" as const,
       id: `slack-send:${item.id}`,
       at: DateTime.toEpochMillis(item.completedAt ?? item.updatedAt),
       text: slackMarkupToMarkdown(text),
     })),
-    ...(input.detail?.workers ?? []).map((worker) => ({
-      kind: "worker" as const,
-      id: `worker:${worker.threadId}`,
-      at: Date.parse(worker.createdAt),
-      threadId: worker.threadId,
-      title: worker.title,
-      status: worker.status,
-    })),
+    ...(input.detail?.workers ?? [])
+      .filter((worker) => input.since === undefined || Date.parse(worker.createdAt) >= input.since)
+      .map((worker) => ({
+        kind: "worker" as const,
+        id: `worker:${worker.threadId}`,
+        at: Date.parse(worker.createdAt),
+        threadId: worker.threadId,
+        title: worker.title,
+        status: worker.status,
+      })),
   ];
   return [...items].filter((item) => Number.isFinite(item.at)).sort((a, b) => a.at - b.at);
 }
