@@ -532,7 +532,7 @@ it.effect(
 );
 
 it.effect.each(["resume", "worker", "startup"] as const)(
-  "recovers tasks lost from pause state through %s without enabling older disabled tasks",
+  "recovers same-millisecond tasks with lost pause ids through %s within the pause interval",
   (operation) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -574,7 +574,6 @@ it.effect.each(["resume", "worker", "startup"] as const)(
             pausedAt: "1970-01-01T00:00:00.000Z",
             pausedScheduleIds: ["remembered"],
           });
-          yield* TestClock.adjust("1 millis");
           const template = (yield* schedules.list()).tasks.find(
             (task) => task.id === "remembered",
           )!;
@@ -599,16 +598,24 @@ it.effect.each(["resume", "worker", "startup"] as const)(
             pausedAt: "1970-01-01T00:00:00.000Z",
             pausedScheduleIds: ["remembered"],
           });
-          if (operation !== "resume") {
-            yield* fs.writeFileString(
-              configPath,
-              toJson({
-                ...config,
-                pausedAt: "1970-01-01T00:00:00.000Z",
-                pausedUntil: "1970-01-01T00:00:01.000Z",
-                pausedScheduleIds: ["remembered"],
-              }),
-            );
+          yield* fs.writeFileString(
+            configPath,
+            toJson({
+              ...config,
+              pausedAt: "1970-01-01T00:00:00.000Z",
+              pausedUntil: "1970-01-01T00:00:01.000Z",
+            }),
+          );
+          yield* TestClock.adjust("1 second");
+          for (const id of ["at-expiry", "after-expiry"]) {
+            const { task } = yield* schedules.upsert({
+              ...template,
+              id: ScheduledTaskId.make(id),
+              enabled: true,
+            });
+            expect(task.enabled).toBe(true);
+            yield* schedules.setEnabled({ id: task.id, enabled: false });
+            yield* TestClock.adjust("1 millis");
           }
           if (operation === "worker") {
             restoring = true;
@@ -647,7 +654,9 @@ it.effect.each(["resume", "worker", "startup"] as const)(
         ),
       ).toEqual({
         "already-off": false,
-        remembered: true,
+        remembered: false,
+        "at-expiry": false,
+        "after-expiry": false,
         "lost-home": true,
         "lost-triage": true,
         "lost-relay": true,
@@ -655,6 +664,119 @@ it.effect.each(["resume", "worker", "startup"] as const)(
       });
       expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual(config);
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect.each([[], ["remembered"]])(
+  "trusts present pause ids %j when a task is deliberately created disabled",
+  (pausedScheduleIds) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-pause-ids-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      const configPath = path.join(botDir, "bot.json");
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        configPath,
+        toJson({
+          name: "Helper",
+          homeThreadId: "home",
+          paused: true,
+          pausedAt: "1970-01-01T00:00:00.000Z",
+          pausedScheduleIds,
+        }),
+      );
+      yield* insertSchedule(sql, {
+        id: "remembered",
+        threadId: "home",
+        enabled: false,
+        createdAt: "1969-01-01T00:00:00.000Z",
+      });
+      yield* withBots(
+        { baseDir },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+          yield* TestClock.adjust("1 millis");
+          const template = (yield* schedules.list()).tasks[0]!;
+          for (const enabled of pausedScheduleIds.length > 0 ? [true, false] : [false]) {
+            yield* schedules.upsert({
+              ...template,
+              id: ScheduledTaskId.make(enabled ? "pause-disabled" : "intentionally-disabled"),
+              enabled,
+            });
+          }
+          yield* bots.setPaused({ botId: "helper", paused: false });
+          expect(
+            Object.fromEntries(
+              (yield* schedules.list()).tasks.map((task) => [task.id, task.enabled]),
+            ),
+          ).toEqual({
+            remembered: pausedScheduleIds.includes("remembered"),
+            ...(pausedScheduleIds.length > 0 ? { "pause-disabled": true } : {}),
+            "intentionally-disabled": false,
+          });
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("starts a fresh pause interval when re-paused after timed expiry", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-repause-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    const configPath = path.join(botDir, "bot.json");
+    const config = { name: "Helper", homeThreadId: "home" };
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      configPath,
+      toJson({
+        ...config,
+        pausedAt: "1970-01-01T00:00:00.000Z",
+        pausedUntil: "1970-01-01T00:00:01.000Z",
+      }),
+    );
+    yield* insertSchedule(sql, {
+      id: "template",
+      threadId: "elsewhere",
+      enabled: false,
+      createdAt: "1969-01-01T00:00:00.000Z",
+    });
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+        yield* TestClock.adjust("1 second");
+        const { task } = yield* schedules.upsert({
+          ...(yield* schedules.list()).tasks[0]!,
+          id: ScheduledTaskId.make("gap-disabled"),
+          threadId: ThreadId.make("home"),
+          enabled: true,
+        });
+        expect(task.enabled).toBe(true);
+        yield* schedules.setEnabled({ id: task.id, enabled: false });
+        yield* TestClock.adjust("1 millis");
+        yield* bots.setPaused({ botId: "helper", paused: true });
+        expect(yield* fromJson(yield* fs.readFileString(configPath))).toMatchObject({
+          pausedAt: "1970-01-01T00:00:01.001Z",
+          pausedScheduleIds: [],
+        });
+        yield* fs.writeFileString(
+          configPath,
+          toJson({ ...config, paused: true, pausedAt: "1970-01-01T00:00:01.001Z" }),
+        );
+        yield* bots.setPaused({ botId: "helper", paused: false });
+        expect(
+          (yield* schedules.list()).tasks.find((task) => task.id === "gap-disabled")?.enabled,
+        ).toBe(false);
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect.each([

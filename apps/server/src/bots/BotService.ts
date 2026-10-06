@@ -411,7 +411,11 @@ export const layer = Layer.effect(
           );
 
         if (input.paused) {
-          const pausedAt = config.pausedAt ?? DateTime.formatIso(yield* DateTime.now);
+          const now = yield* Clock.currentTimeMillis;
+          const pausedAt =
+            isPaused(config, now) && config.pausedAt !== undefined
+              ? config.pausedAt
+              : DateTime.formatIso(DateTime.makeUnsafe(now));
           const botScheduleIds = new Set(yield* scheduleIdsFor(config));
           const { tasks } = yield* scheduledTasks.list();
           const enabledIds = tasks
@@ -452,14 +456,18 @@ export const layer = Layer.effect(
         const rememberedIds = new Set(config.pausedScheduleIds ?? []);
         const botThreadIds = new Set(ownThreadIds(config));
         const pausedAt = config.pausedAt === undefined ? NaN : Date.parse(config.pausedAt);
+        const pausedUntil =
+          config.pausedUntil === undefined ? Infinity : Date.parse(config.pausedUntil);
         const resumeIds = tasks
           .filter(
             (task) =>
               !task.enabled &&
               (rememberedIds.has(task.id) ||
-                (task.threadId !== null &&
+                (config.pausedScheduleIds === undefined &&
+                  task.threadId !== null &&
                   botThreadIds.has(task.threadId) &&
-                  Date.parse(task.createdAt) > pausedAt)),
+                  Date.parse(task.createdAt) >= pausedAt &&
+                  Date.parse(task.createdAt) < pausedUntil)),
           )
           .map((task) => task.id);
         const enabledIds: ScheduledTaskId[] = [];
