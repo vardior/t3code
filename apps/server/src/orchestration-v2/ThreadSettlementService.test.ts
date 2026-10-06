@@ -1856,7 +1856,7 @@ describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
           botHomeThreadIds: kind === "non-bot" ? [] : [parentId],
           ...(kind === "bot-lookup-failed"
             ? {
-                isHomeThread: () => Effect.fail(new BotError({ message: "Unavailable" })),
+                isHomeThread: () => Effect.die(new BotError({ message: "Unavailable" })),
               }
             : {}),
           branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
