@@ -1,6 +1,8 @@
 import {
   ChatAttachmentId,
   MessageId,
+  RuntimeRequestId,
+  NodeId,
   RunId,
   ScheduledTaskId,
   ThreadId,
@@ -11,7 +13,12 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildBotChat, slackMarkupToMarkdown, slackTextFromCommand } from "./botConversation.ts";
+import {
+  botConversationStatus,
+  buildBotChat,
+  slackMarkupToMarkdown,
+  slackTextFromCommand,
+} from "./botConversation.ts";
 
 describe("slackTextFromCommand", () => {
   it("reads the text piped from printf into dm-send", () => {
@@ -105,7 +112,7 @@ const commandItem = (input: {
   completedAt: string;
   exitCode?: number;
   runId?: string;
-}): OrchestrationV2TurnItem => ({
+}): Extract<OrchestrationV2TurnItem, { type: "command_execution" }> => ({
   id: TurnItemId.make(input.id),
   threadId: ThreadId.make("home"),
   runId: RunId.make(input.runId ?? "run-tick"),
@@ -515,5 +522,86 @@ describe("buildBotChat wake rows", () => {
       kind: "wake",
       scheduledTaskId: ScheduledTaskId.make("schedule-triage"),
     });
+  });
+});
+
+describe("botConversationStatus", () => {
+  const run = { id: RunId.make("run"), ordinal: 1, status: "waiting" as const };
+  const request = {
+    id: RuntimeRequestId.make("request"),
+    nodeId: NodeId.make("node"),
+    providerTurnId: null,
+    nativeRequestRef: null,
+    kind: "command" as const,
+    status: "pending" as const,
+    responseCapability: { type: "message" as const },
+    createdAt: at("2026-10-01T00:01:00Z"),
+    resolvedAt: null,
+  };
+
+  it("distinguishes pending approval from an active run", () => {
+    expect(
+      botConversationStatus({ runs: [run], runtimeRequests: [request], turnItems: [] }),
+    ).toEqual({ kind: "needs-attention", request: "approval" });
+    expect(
+      botConversationStatus({
+        runs: [run],
+        runtimeRequests: [{ ...request, status: "resolved" }],
+        turnItems: [],
+      }),
+    ).toEqual({ kind: "working" });
+  });
+
+  it("uses the same pending user input join as the regular chat", () => {
+    const item: OrchestrationV2TurnItem = {
+      ...commandItem({ id: "question", command: "", completedAt: "2026-10-01T00:01:00Z" }),
+      type: "user_input_request",
+      requestId: request.id,
+      questions: [],
+    };
+    expect(
+      botConversationStatus({
+        runs: [run],
+        runtimeRequests: [{ ...request, kind: "user_input" }],
+        turnItems: [item],
+      }),
+    ).toEqual({ kind: "needs-attention", request: "input" });
+  });
+
+  it("reports only the latest failed run and its own error", () => {
+    const item: OrchestrationV2TurnItem = {
+      ...commandItem({
+        id: "error",
+        command: "",
+        completedAt: "2026-10-01T00:01:00Z",
+        runId: "run",
+      }),
+      type: "error",
+      failure: { class: "unknown", message: "Provider stopped", code: null, retryable: false },
+    };
+    expect(
+      botConversationStatus({
+        runs: [{ ...run, status: "failed" }],
+        runtimeRequests: [],
+        turnItems: [item],
+      }),
+    ).toEqual({ kind: "failed", error: "Provider stopped" });
+    expect(
+      botConversationStatus({
+        runs: [
+          { ...run, ordinal: 2, status: "completed" },
+          { ...run, status: "failed" },
+        ],
+        runtimeRequests: [],
+        turnItems: [item],
+      }),
+    ).toEqual({ kind: "idle" });
+    expect(
+      botConversationStatus({
+        runs: [{ ...run, status: "failed" }],
+        runtimeRequests: [],
+        turnItems: [],
+      }),
+    ).toEqual({ kind: "failed", error: null });
   });
 });

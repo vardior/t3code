@@ -39,7 +39,7 @@ import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   buildBotChat,
-  isBotWorking,
+  botConversationStatus,
   rewriteThreadLinks,
   threadIdFromHref,
   type BotChatItem,
@@ -65,7 +65,24 @@ export function BotChat(props: {
       }),
     [props.bot, projection?.messages, projection?.runs, projection?.turnItems],
   );
-  const working = isBotWorking(projection?.runs ?? []);
+  const status = useMemo(
+    () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
+    [projection],
+  );
+  const working = status.kind === "working";
+  const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
+  const [stopping, setStopping] = useState(false);
+  const stop = async () => {
+    setStopping(true);
+    try {
+      await interruptTurn({
+        environmentId: props.environmentId,
+        input: { threadId: props.bot.homeThreadId },
+      });
+    } finally {
+      setStopping(false);
+    }
+  };
   const onRunSettled = useEffectEvent(props.onRunSettled);
   useEffect(() => {
     if (!working) onRunSettled();
@@ -115,7 +132,34 @@ export function BotChat(props: {
           ))}
           {working ? (
             <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-muted-foreground text-sm">
-              Working…
+              <span>Working…</span>
+              <Button size="sm" variant="ghost" disabled={stopping} onClick={() => void stop()}>
+                {stopping ? "Stopping…" : "Stop"}
+              </Button>
+            </div>
+          ) : null}
+          {status.kind === "needs-attention" ? (
+            <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
+              <p>{status.request === "approval" ? "Needs your approval" : "Needs your input"}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openThread(props.bot.homeThreadId)}
+              >
+                {status.request === "approval" ? "Review approval in thread" : "Answer in thread"}
+              </Button>
+            </div>
+          ) : status.kind === "failed" ? (
+            <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
+              <p>Run failed{status.error ? `: ${status.error}` : "."}</p>
+              <p>Send your message again to retry, or open the thread for details.</p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openThread(props.bot.homeThreadId)}
+              >
+                Retry in thread
+              </Button>
             </div>
           ) : null}
           <div key={`${items.length}:${working}`} ref={scrollIntoViewOnMount} />

@@ -5,10 +5,13 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2ThreadProjection,
   type ScheduledTaskId,
 } from "@t3tools/contracts";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
+
+import { derivePendingThreadRequests } from "./threadRequests.ts";
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
 
@@ -70,6 +73,29 @@ type ChatMessage = Pick<
 
 export function isBotWorking(runs: ReadonlyArray<ChatRun>): boolean {
   return runs.some((run) => isActiveRunStatus(run.status));
+}
+
+export function botConversationStatus(
+  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems"> & {
+    readonly runs: ReadonlyArray<ChatRun & Pick<OrchestrationV2Run, "ordinal">>;
+  },
+):
+  | { readonly kind: "idle" | "working" }
+  | { readonly kind: "needs-attention"; readonly request: "approval" | "input" }
+  | { readonly kind: "failed"; readonly error: string | null } {
+  const pending = derivePendingThreadRequests(projection);
+  if (pending.approvals.length > 0) return { kind: "needs-attention", request: "approval" };
+  if (pending.userInputs.length > 0) return { kind: "needs-attention", request: "input" };
+  if (isBotWorking(projection.runs)) return { kind: "working" };
+  const latest = projection.runs.reduce<(ChatRun & Pick<OrchestrationV2Run, "ordinal">) | null>(
+    (current, run) => (current === null || run.ordinal > current.ordinal ? run : current),
+    null,
+  );
+  if (latest?.status !== "failed") return { kind: "idle" };
+  const error = projection.turnItems.findLast(
+    (item) => item.runId === latest.id && item.type === "error",
+  );
+  return { kind: "failed", error: error?.type === "error" ? error.failure.message : null };
 }
 
 export function buildBotChat(input: {
