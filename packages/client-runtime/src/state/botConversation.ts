@@ -9,6 +9,10 @@ import {
   type OrchestrationV2ThreadProjection,
   type ScheduledTaskId,
 } from "@t3tools/contracts";
+import {
+  usageLimitBlockedRun,
+  usageLimitRunPresentedAsLatest,
+} from "@t3tools/shared/orchestrationV2ThreadError";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 import * as Hash from "effect/Hash";
@@ -119,7 +123,12 @@ type ChatMessage = Pick<
   | "createdAt"
 >;
 
-export function isBotWorking(runs: ReadonlyArray<ChatRun>): boolean {
+export function isBotWorking(
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  turnItems: ReadonlyArray<OrchestrationV2TurnItem> = [],
+  sessionError: string | null = null,
+): boolean {
+  if (usageLimitBlockedRun(runs, turnItems, sessionError) !== null) return false;
   const queueHeld = isBotQueueHeld(runs);
   return runs.some(
     (run) => isActiveRunStatus(run.status) && !(run.status === "queued" && queueHeld),
@@ -131,9 +140,7 @@ export function isBotQueueHeld(runs: ReadonlyArray<ChatRun>): boolean {
 }
 
 export function botConversationStatus(
-  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems"> & {
-    readonly runs: ReadonlyArray<ChatRun & Pick<OrchestrationV2Run, "ordinal">>;
-  },
+  projection: OrchestrationV2ThreadProjection,
 ):
   | { readonly kind: "idle" | "working" | "stopped" | "queue-held" }
   | { readonly kind: "needs-attention"; readonly request: "approval" | "input" }
@@ -141,17 +148,28 @@ export function botConversationStatus(
   const pending = derivePendingThreadRequests(projection);
   if (pending.approvals.length > 0) return { kind: "needs-attention", request: "approval" };
   if (pending.userInputs.length > 0) return { kind: "needs-attention", request: "input" };
-  if (isBotWorking(projection.runs)) return { kind: "working" };
-  const queueHeld = isBotQueueHeld(projection.runs);
-  const latest = projection.runs.reduce<(ChatRun & Pick<OrchestrationV2Run, "ordinal">) | null>(
-    (current, run) =>
-      run.status === "queued" && queueHeld
-        ? current
-        : current === null || run.ordinal > current.ordinal
-          ? run
-          : current,
-    null,
+  const sessionError =
+    projection.providerSessions.findLast(
+      (session) => session.providerInstanceId === projection.thread.providerInstanceId,
+    )?.lastError ?? null;
+  const usageLimitRun = usageLimitRunPresentedAsLatest(
+    projection.runs,
+    projection.turnItems,
+    sessionError,
   );
+  if (isBotWorking(projection.runs, projection.turnItems, sessionError)) return { kind: "working" };
+  const queueHeld = isBotQueueHeld(projection.runs);
+  const latest =
+    usageLimitRun ??
+    projection.runs.reduce<(ChatRun & Pick<OrchestrationV2Run, "ordinal">) | null>(
+      (current, run) =>
+        run.status === "queued" && queueHeld
+          ? current
+          : current === null || run.ordinal > current.ordinal
+            ? run
+            : current,
+      null,
+    );
   if (latest?.status === "interrupted") return { kind: "stopped" };
   if (latest?.status !== "failed") return { kind: queueHeld ? "queue-held" : "idle" };
   const error = projection.turnItems.findLast(

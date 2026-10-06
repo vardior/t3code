@@ -10,8 +10,10 @@ import {
   TurnItemId,
   type BotSummary,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2Run,
 } from "@t3tools/contracts";
-import { v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
+import { v2Projection, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
+import { deriveLatestThreadRun } from "./threadExecution.ts";
 import { presentThreadShell } from "./models.ts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
@@ -539,7 +541,23 @@ describe("buildBotChat wake rows", () => {
 });
 
 describe("botConversationStatus", () => {
-  const run = { id: RunId.make("run"), ordinal: 1, status: "waiting" as const };
+  const run: OrchestrationV2Run = {
+    id: RunId.make("run"),
+    threadId: v2ThreadShell.id,
+    ordinal: 1,
+    providerInstanceId: v2ThreadShell.providerInstanceId,
+    modelSelection: v2ThreadShell.modelSelection,
+    providerThreadId: null,
+    userMessageId: MessageId.make("message"),
+    rootNodeId: NodeId.make("node"),
+    activeAttemptId: null,
+    status: "waiting",
+    requestedAt: at("2026-10-01T00:00:00Z"),
+    startedAt: at("2026-10-01T00:00:00Z"),
+    completedAt: null,
+    checkpointId: null,
+    contextHandoffId: null,
+  };
   const request = {
     id: RuntimeRequestId.make("request"),
     nodeId: NodeId.make("node"),
@@ -572,11 +590,19 @@ describe("botConversationStatus", () => {
     };
     expect(isBotWorking([queued])).toBe(false);
     expect(isBotQueueHeld([queued])).toBe(true);
-    expect(botConversationStatus({ runs: [queued], runtimeRequests: [], turnItems: [] })).toEqual({
+    expect(
+      botConversationStatus({
+        ...v2Projection,
+        runs: [queued],
+        runtimeRequests: [],
+        turnItems: [],
+      }),
+    ).toEqual({
       kind: "queue-held",
     });
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [{ ...run, status: "failed" }, queued],
         runtimeRequests: [],
         turnItems: [error],
@@ -584,6 +610,7 @@ describe("botConversationStatus", () => {
     ).toEqual({ kind: "failed", error: "Provider stopped" });
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [{ ...run, status: "interrupted" }, queued],
         runtimeRequests: [],
         turnItems: [],
@@ -594,6 +621,7 @@ describe("botConversationStatus", () => {
     expect(isBotWorking([{ ...queued, queueHeld: false }])).toBe(true);
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [{ ...queued, queueHeld: false }],
         runtimeRequests: [],
         turnItems: [],
@@ -601,12 +629,67 @@ describe("botConversationStatus", () => {
     ).toEqual({ kind: "working" });
   });
 
+  it("shows the usage limit failure instead of working while newer wakes wait", () => {
+    const failed = { ...run, status: "failed" as const, completedAt: run.requestedAt };
+    const queued = {
+      ...run,
+      id: RunId.make("queued"),
+      ordinal: 2,
+      status: "queued" as const,
+      startedAt: null,
+    };
+    const error: OrchestrationV2TurnItem = {
+      ...commandItem({
+        id: "limit",
+        command: "",
+        completedAt: "2026-10-01T00:01:00Z",
+        runId: "run",
+      }),
+      nodeId: failed.rootNodeId,
+      status: "failed",
+      type: "error",
+      failure: {
+        class: "usage_limit",
+        message: "Plan limit reached",
+        code: null,
+        retryable: false,
+      },
+    };
+    const projection = { ...v2Projection, runs: [failed, queued], turnItems: [error] };
+    expect(botConversationStatus(projection)).toEqual({
+      kind: "failed",
+      error: "Plan limit reached",
+    });
+    expect(isBotWorking(projection.runs, projection.turnItems)).toBe(false);
+    expect(
+      botThreadShellStatus({
+        ...presentThreadShell(EnvironmentId.make("env"), v2ThreadShell),
+        latestRun: deriveLatestThreadRun(projection),
+      }),
+    ).toBe("failed");
+    expect(
+      botConversationStatus({
+        ...projection,
+        turnItems: [{ ...error, nodeId: NodeId.make("child") }],
+      }),
+    ).toEqual({ kind: "working" });
+    expect(
+      botConversationStatus({ ...projection, runs: [failed, { ...queued, status: "running" }] }),
+    ).toEqual({ kind: "working" });
+  });
+
   it("distinguishes pending approval from an active run", () => {
     expect(
-      botConversationStatus({ runs: [run], runtimeRequests: [request], turnItems: [] }),
+      botConversationStatus({
+        ...v2Projection,
+        runs: [run],
+        runtimeRequests: [request],
+        turnItems: [],
+      }),
     ).toEqual({ kind: "needs-attention", request: "approval" });
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [run],
         runtimeRequests: [{ ...request, status: "resolved" }],
         turnItems: [],
@@ -623,6 +706,7 @@ describe("botConversationStatus", () => {
     };
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [run],
         runtimeRequests: [{ ...request, kind: "user_input" }],
         turnItems: [item],
@@ -633,6 +717,7 @@ describe("botConversationStatus", () => {
   it("reports stopped only when the latest run was interrupted", () => {
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [
           { ...run, ordinal: 2, status: "interrupted" },
           { ...run, status: "failed" },
@@ -643,6 +728,7 @@ describe("botConversationStatus", () => {
     ).toEqual({ kind: "stopped" });
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [
           { ...run, status: "interrupted" },
           { ...run, ordinal: 2, status: "completed" },
@@ -657,11 +743,15 @@ describe("botConversationStatus", () => {
     "prioritizes attention over working over a latest %s run",
     (status) => {
       const runs = [run, { ...run, id: RunId.make("latest"), ordinal: 2, status }];
-      expect(botConversationStatus({ runs, runtimeRequests: [request], turnItems: [] })).toEqual({
+      expect(
+        botConversationStatus({ ...v2Projection, runs, runtimeRequests: [request], turnItems: [] }),
+      ).toEqual({
         kind: "needs-attention",
         request: "approval",
       });
-      expect(botConversationStatus({ runs, runtimeRequests: [], turnItems: [] })).toEqual({
+      expect(
+        botConversationStatus({ ...v2Projection, runs, runtimeRequests: [], turnItems: [] }),
+      ).toEqual({
         kind: "working",
       });
       const item: OrchestrationV2TurnItem = {
@@ -672,6 +762,7 @@ describe("botConversationStatus", () => {
       };
       expect(
         botConversationStatus({
+          ...v2Projection,
           runs: [runs[1]!],
           runtimeRequests: [{ ...request, kind: "user_input" }],
           turnItems: [item],
@@ -693,6 +784,7 @@ describe("botConversationStatus", () => {
     };
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [{ ...run, status: "failed" }],
         runtimeRequests: [],
         turnItems: [item],
@@ -700,6 +792,7 @@ describe("botConversationStatus", () => {
     ).toEqual({ kind: "failed", error: "Provider stopped" });
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [
           { ...run, ordinal: 2, status: "completed" },
           { ...run, status: "failed" },
@@ -710,6 +803,7 @@ describe("botConversationStatus", () => {
     ).toEqual({ kind: "idle" });
     expect(
       botConversationStatus({
+        ...v2Projection,
         runs: [{ ...run, status: "failed" }],
         runtimeRequests: [],
         turnItems: [],
