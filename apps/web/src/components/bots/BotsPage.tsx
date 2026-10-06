@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon, InfoIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
@@ -101,6 +101,7 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
                     bot={bot}
                     environmentId={environmentId}
                     selected={bot.id === selected?.id}
+                    refresh={botsQuery.refresh}
                     onSelect={() => selectBot(bot.id)}
                   />
                 ) : null,
@@ -141,11 +142,18 @@ function BotListItem(props: {
   readonly environmentId: EnvironmentId;
   readonly selected: boolean;
   readonly onSelect: () => void;
+  readonly refresh: () => void;
 }) {
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
   const working = isActiveRunStatus(shell?.latestRun?.status);
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
   const statusLabel = botStatusLabel({ working, paused: props.bot.paused, lastActivity });
+  const wasWorking = useRef(working);
+  const refresh = props.refresh;
+  useEffect(() => {
+    if (wasWorking.current && !working) refresh();
+    wasWorking.current = working;
+  }, [working, refresh]);
   return (
     <button
       type="button"
@@ -159,7 +167,9 @@ function BotListItem(props: {
       <BotAvatar name={props.bot.name} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium text-sm">{props.bot.name}</span>
-        <span className="truncate text-muted-foreground text-xs">{statusLabel}</span>
+        <span className="truncate text-muted-foreground text-xs">
+          {working || props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel)}
+        </span>
       </span>
     </button>
   );

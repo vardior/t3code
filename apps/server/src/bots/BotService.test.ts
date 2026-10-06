@@ -1,7 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
+import { BotSummary, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -18,6 +18,8 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as BotService from "./BotService.ts";
+
+const decodeBot = Schema.decodeUnknownEffect(BotSummary);
 
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -108,14 +110,24 @@ const insertThread = (
 
 const insertMessage = (
   sql: SqlClient.SqlClient,
-  message: { id: string; threadId: string; createdAt: string; senderThreadId?: string },
+  message: {
+    id: string;
+    threadId: string;
+    createdAt: string;
+    senderThreadId?: string;
+    runId?: string;
+    role?: string;
+    streaming?: boolean;
+    text?: string;
+  },
 ) => sql`
   INSERT INTO orchestration_v2_projection_messages (
     message_id, thread_id, run_id, node_id, role, streaming, created_at, updated_at, payload_json
   ) VALUES (
-    ${message.id}, ${message.threadId}, NULL, NULL, 'user', 0,
+    ${message.id}, ${message.threadId}, ${message.runId ?? null}, NULL,
+    ${message.role ?? "user"}, ${message.streaming ? 1 : 0},
     ${message.createdAt}, ${message.createdAt},
-    ${toJson(message.senderThreadId ? { senderThreadId: message.senderThreadId } : {})}
+    ${toJson({ text: message.text ?? "", createdBy: "user", senderThreadId: message.senderThreadId })}
   )
 `;
 
@@ -245,6 +257,7 @@ it.effect("lists bots with their charter and the worker threads their home threa
             },
           ],
           slackDms: [{ text: "Any news?", at: "2026-10-01T00:08:00Z" }],
+          lastReply: null,
         },
       ],
     });
@@ -386,4 +399,89 @@ it.effect(
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("previews only the latest settled final assistant reply, as bounded plain text", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-preview-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(botDir, "bot.json"),
+      toJson({ name: "Helper", homeThreadId: "home" }),
+    );
+    yield* insertThread(sql, { id: "home", createdAt: "2026-10-01T00:00:00.000Z" });
+    const readReply = listBots({ baseDir }).pipe(Effect.map((result) => result.bots[0]!.lastReply));
+    expect(yield* readReply).toBeNull();
+    yield* insertRun(sql, { id: "settled", threadId: "home", ordinal: 1, status: "completed" });
+    yield* insertMessage(sql, {
+      id: "question",
+      threadId: "home",
+      runId: "settled",
+      createdAt: "2026-10-01T00:01:00.000Z",
+    });
+    yield* insertMessage(sql, {
+      id: "intermediate",
+      threadId: "home",
+      runId: "settled",
+      role: "assistant",
+      text: "I am investigating.",
+      createdAt: "2026-10-01T00:02:00.000Z",
+    });
+    yield* insertMessage(sql, {
+      id: "final",
+      threadId: "home",
+      runId: "settled",
+      role: "assistant",
+      text: "## Done\n\n**Fixed** the [issue](https://example.com) with `code`.\n- Ready to ship.",
+      createdAt: "2026-10-01T00:03:00.000Z",
+    });
+    const finalReply = {
+      text: "Done Fixed the issue with code. Ready to ship.",
+      at: "2026-10-01T00:03:00.000Z",
+    };
+    expect(yield* readReply).toEqual(finalReply);
+    yield* insertRun(sql, { id: "active", threadId: "home", ordinal: 2, status: "running" });
+    yield* insertMessage(sql, {
+      id: "active-question",
+      threadId: "home",
+      runId: "active",
+      createdAt: "2026-10-01T00:04:00.000Z",
+    });
+    yield* insertMessage(sql, {
+      id: "active-intermediate",
+      threadId: "home",
+      runId: "active",
+      role: "assistant",
+      text: "Still investigating.",
+      createdAt: "2026-10-01T00:05:00.000Z",
+    });
+    yield* insertMessage(sql, {
+      id: "streaming",
+      threadId: "home",
+      runId: "settled",
+      role: "assistant",
+      streaming: true,
+      text: "Partial output",
+      createdAt: "2026-10-01T00:06:00.000Z",
+    });
+    expect(yield* readReply).toEqual(finalReply);
+    yield* sql`UPDATE orchestration_v2_projection_runs SET status = 'completed' WHERE run_id = 'active'`;
+    yield* insertMessage(sql, {
+      id: "long-final",
+      threadId: "home",
+      runId: "active",
+      role: "assistant",
+      text: `**${"word ".repeat(60)}**`,
+      createdAt: "2026-10-01T00:07:00.000Z",
+    });
+    const preview = yield* readReply;
+    expect(preview).toEqual({ text: `${"word ".repeat(39)}word…`, at: "2026-10-01T00:07:00.000Z" });
+    expect(preview!.text).toHaveLength(200);
+    const { lastReply: _, ...oldBot } = (yield* listBots({ baseDir })).bots[0]!;
+    expect((yield* decodeBot(oldBot)).lastReply).toBeUndefined();
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

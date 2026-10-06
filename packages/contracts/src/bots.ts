@@ -34,6 +34,9 @@ export const BotSummary = Schema.Struct({
   charter: Schema.NullOr(Schema.String),
   workers: Schema.Array(BotWorker),
   slackDms: Schema.Array(BotSlackDm),
+  lastReply: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ text: Schema.String, at: IsoDateTime })),
+  ),
 });
 export type BotSummary = typeof BotSummary.Type;
 

@@ -26,6 +26,23 @@ import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts"
 
 const MAX_WORKERS_PER_BOT = 50;
 const MAX_SLACK_DMS_PER_BOT = 200;
+const MAX_REPLY_PREVIEW_LENGTH = 200;
+
+const replyPreview = (text: string) => {
+  const plainText = text
+    .replace(/```[^\n]*\n([\s\S]*?)```/g, "$1")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<([^>]+)\|([^>]+)>/g, "$2")
+    .replace(/<(https?:\/\/[^>]+)>/g, "$1")
+    .replace(/<[^>]*>/g, "")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/[`*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plainText.length > MAX_REPLY_PREVIEW_LENGTH
+    ? `${plainText.slice(0, MAX_REPLY_PREVIEW_LENGTH - 1).trimEnd()}…`
+    : plainText;
+};
 
 const BotConfigFile = Schema.Struct({
   name: Schema.String,
@@ -127,6 +144,38 @@ export const layer = Layer.effect(
         ),
       );
 
+    const readLastReply = (homeThreadId: ThreadId) =>
+      sql<{ readonly text: string; readonly at: string }>`
+        SELECT json_extract(m.payload_json, '$.text') AS text, m.created_at AS at
+        FROM orchestration_v2_projection_messages m
+        WHERE m.thread_id = ${homeThreadId}
+          AND m.role = 'assistant' AND m.streaming = 0 AND m.run_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_runs r
+            WHERE r.run_id = m.run_id
+              AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
+          )
+          AND EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_messages incoming
+            WHERE incoming.run_id = m.run_id AND incoming.role = 'user'
+              AND NOT (
+                json_extract(incoming.payload_json, '$.createdBy') IS 'agent'
+                AND (
+                  json_extract(incoming.payload_json, '$.senderThreadId') IS ${homeThreadId}
+                  OR json_extract(incoming.payload_json, '$.creationSource') IS 'server'
+                )
+                AND json_extract(incoming.payload_json, '$.text') IS '/compact'
+              )
+          )
+        ORDER BY m.created_at DESC, m.message_id DESC
+        LIMIT 1
+      `.pipe(
+        Effect.map((rows) => {
+          const reply = rows[0];
+          return reply ? { text: replyPreview(reply.text), at: reply.at } : null;
+        }),
+      );
+
     const scheduleIdsFor = (config: BotConfigFile) =>
       sql<{ readonly task_id: string }>`
         SELECT task_id FROM scheduled_tasks
@@ -174,6 +223,7 @@ export const layer = Layer.effect(
           charter: yield* readCharter(botDir),
           workers: yield* listWorkers(config.homeThreadId, sideThreadIds),
           slackDms: yield* readSlackDms(botDir),
+          lastReply: yield* readLastReply(config.homeThreadId),
         };
         return Option.some(bot);
       }).pipe(

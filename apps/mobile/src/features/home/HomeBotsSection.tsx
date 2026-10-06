@@ -93,7 +93,7 @@ function HomeBotRow(props: {
         </View>
         <Text numberOfLines={1} className="text-sm text-foreground-muted">
           {props.environmentLabel ? `${props.environmentLabel} · ` : ""}
-          {working ? "Working…" : "Open conversation"}
+          {working ? "Working…" : (bot.lastReply?.text ?? "Open conversation")}
         </Text>
       </View>
     </Pressable>
