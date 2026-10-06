@@ -41,6 +41,7 @@ export type T3McpToolSummaryAction =
   | "question-read"
   | "question-respond"
   | "secret-request"
+  | "owner-notify"
   | "worktree-handoff"
   | "worktree-list"
   | "worktree-status"
@@ -160,6 +161,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   delete_scheduled_task: tool(
     ["Delete", "Deleting", "Requested deletion of", "a scheduled task"],
     "schedule-delete",
+  ),
+  notify_owner: tool(
+    ["Notify", "Notifying", "Notification requested for", "the bot owner"],
+    "owner-notify",
   ),
   request_secret: tool(["Ask for", "Asking for", "Asked for", "a secret"], "secret-request"),
   create_threads: tool(["Create", "Creating", "Created", "T3 threads"], "thread-create"),

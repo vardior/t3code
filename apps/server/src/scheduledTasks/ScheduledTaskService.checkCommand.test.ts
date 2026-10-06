@@ -277,7 +277,7 @@ it.effect("an approval-required task fails without executing its check", () =>
       "Check commands require full-access runtime mode.",
     );
     assert.equal(result.task.runCount, 1);
-  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
 const heldCheckSpawner = (entered: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
@@ -372,7 +372,7 @@ it.effect(
           ),
         ),
       );
-    }).pipe(Effect.scoped, Effect.provide(SqlitePersistenceMemory)),
+    }).pipe(Effect.scoped, Effect.provide(SqlitePersistence.layerMemory)),
 );
 
 it.effect("a task paused during its check does not dispatch or record a wake", () =>
@@ -421,5 +421,5 @@ it.effect("a task paused during its check does not dispatch or record a wake", (
         ),
       ),
     );
-  }).pipe(Effect.scoped, Effect.provide(SqlitePersistenceMemory)),
+  }).pipe(Effect.scoped, Effect.provide(SqlitePersistence.layerMemory)),
 );

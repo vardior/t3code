@@ -3,6 +3,7 @@ import {
   BotSlackDm,
   ScheduledTaskId,
   ThreadId,
+  type RunId,
   type BotDetail,
   type BotGetInput,
   type BotListResult,
@@ -10,6 +11,7 @@ import {
   type BotSetPausedResult,
   type BotSummary,
 } from "@t3tools/contracts";
+import { RelayOwnerNotification } from "@t3tools/contracts/relay";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -64,6 +66,7 @@ const replyPreview = (text: string) => {
     : plainText;
 };
 
+const decodeOwnerNotification = Schema.decodeEffect(RelayOwnerNotification);
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
 const isBotError = Schema.is(BotError);
 
@@ -86,6 +89,14 @@ export class BotService extends Context.Service<
     readonly get: (input: BotGetInput) => Effect.Effect<BotDetail, BotError>;
     readonly list: () => Effect.Effect<BotListResult, BotError>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
+    readonly notifyOwner: (
+      threadId: ThreadId | undefined,
+      input: RelayOwnerNotification,
+    ) => Effect.Effect<{ readonly runId: RunId }, BotError>;
+    readonly getOwnerNotification: (
+      threadId: ThreadId,
+      runId: RunId,
+    ) => Effect.Effect<RelayOwnerNotification | undefined>;
     readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
   }
 >()("t3/bots/BotService") {}
@@ -96,6 +107,10 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const changes = yield* PubSub.sliding<{}>(1);
+    const ownerNotifications = new Map<
+      ThreadId,
+      { readonly runId: RunId; readonly notification: RelayOwnerNotification }
+    >();
     const workerLookupLock = yield* Semaphore.make(1);
     const workerIds = new Map<ThreadId, ReadonlyArray<string>>();
     let workerGeneration = 0;
@@ -414,6 +429,37 @@ export const layer = Layer.effect(
         return homeThreadIds.has(threadId);
       }).pipe(homeThreadLookupLock.withPermit);
 
+    const notifyOwner = Effect.fn("BotService.notifyOwner")(function* (
+      threadId: ThreadId | undefined,
+      input: RelayOwnerNotification,
+    ) {
+      if (threadId === undefined || !(yield* isHomeThread(threadId))) {
+        return yield* new BotError({ message: "notify_owner requires a bot home thread." });
+      }
+      const notification = yield* decodeOwnerNotification(input).pipe(
+        Effect.mapError(
+          () => new BotError({ message: "The notification title or body is invalid." }),
+        ),
+      );
+      const shell = yield* orchestrator
+        .getThreadShell(threadId)
+        .pipe(
+          Effect.mapError((cause) => new BotError({ message: "Cannot read the bot run.", cause })),
+        );
+      const runId = shell?.activeRunId;
+      if (runId == null || shell?.archivedAt !== null || shell.deletedAt !== null) {
+        return yield* new BotError({ message: "notify_owner requires an active bot run." });
+      }
+      ownerNotifications.set(threadId, { runId, notification });
+      return { runId };
+    });
+
+    const getOwnerNotification = (threadId: ThreadId, runId: RunId) =>
+      Effect.sync(() => {
+        const request = ownerNotifications.get(threadId);
+        return request?.runId === runId ? request.notification : undefined;
+      });
+
     const setBotScheduleEnabled = (id: ScheduledTaskId, enabled: boolean) =>
       scheduledTasks
         .setEnabled({ id, enabled })
@@ -569,6 +615,7 @@ export const layer = Layer.effect(
     yield* orchestrator.streamDomainEvents.pipe(
       Stream.runForEach((event) =>
         Effect.gen(function* () {
+          if (event.type === "thread.deleted") ownerNotifications.delete(event.threadId);
           if (
             event.type === "thread.created" ||
             event.type === "thread.deleted" ||
@@ -642,6 +689,8 @@ export const layer = Layer.effect(
       get,
       list,
       isHomeThread,
+      notifyOwner,
+      getOwnerNotification,
       setPaused,
       streamChanges: Stream.unwrap(
         Effect.gen(function* () {

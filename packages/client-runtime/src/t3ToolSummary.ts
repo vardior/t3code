@@ -311,6 +311,13 @@ export function summarizeT3ToolCalls(
         quantity(countEntities(entityIds("requestId")), "pending question request"),
       );
       break;
+    case "owner-notify":
+      label = phrase(
+        "Requested",
+        "request",
+        quantity(countEntities(entityIds("runId")), "owner notification"),
+      );
+      break;
     case "secret-request":
       label = phrase("Asked for", "ask for", quantity(selected.length, "secret"));
       break;

@@ -116,11 +116,18 @@ export const RelayDeviceUnregistrationParams = Schema.Struct({
 });
 export type RelayDeviceUnregistrationParams = typeof RelayDeviceUnregistrationParams.Type;
 
+export const RelayOwnerNotification = Schema.Struct({
+  title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(80))),
+  body: TrimmedNonEmptyString.check(Schema.isMaxLength(300)),
+});
+export type RelayOwnerNotification = typeof RelayOwnerNotification.Type;
+
 export const RelayAgentActivityState = Schema.Struct({
   environmentId: EnvironmentId,
   threadId: ThreadId,
   projectTitle: TrimmedNonEmptyString,
   threadTitle: TrimmedNonEmptyString,
+  ownerNotification: Schema.optional(RelayOwnerNotification),
   phase: RelayAgentAwarenessPhase,
   headline: TrimmedNonEmptyString,
   detail: Schema.optional(TrimmedNonEmptyString),
@@ -131,6 +138,7 @@ export const RelayAgentActivityState = Schema.Struct({
 export type RelayAgentActivityState = typeof RelayAgentActivityState.Type;
 
 export const RelayAgentActivityAggregateRow = Schema.Struct({
+  ownerNotification: Schema.optional(RelayOwnerNotification),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   projectTitle: TrimmedNonEmptyString,

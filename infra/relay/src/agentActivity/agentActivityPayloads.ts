@@ -95,7 +95,10 @@ export function sanitizeApnsNotificationPayload(
   return {
     ...notification,
     title: truncateText(notification.title, MAX_SUMMARY_TEXT_LENGTH),
-    body: truncateText(notification.body, MAX_SUMMARY_TEXT_LENGTH),
+    body: truncateText(
+      notification.body,
+      notification.ownerNotification === undefined ? MAX_SUMMARY_TEXT_LENGTH : 300,
+    ),
     deepLink: sanitizeDeepLink(notification.deepLink),
   };
 }
@@ -105,8 +108,11 @@ export function notificationForActivity(
 ): ApnsNotificationPayload {
   const activity = sanitizeAgentActivityAggregateRow(row);
   return sanitizeApnsNotificationPayload({
-    title: activity.threadTitle,
-    body: `${activity.status}: ${activity.projectTitle}`,
+    ...(activity.ownerNotification === undefined
+      ? {}
+      : { ownerNotification: activity.ownerNotification }),
+    title: activity.ownerNotification?.title ?? activity.threadTitle,
+    body: activity.ownerNotification?.body ?? `${activity.status}: ${activity.projectTitle}`,
     environmentId: activity.environmentId,
     threadId: activity.threadId,
     deepLink: activity.deepLink,

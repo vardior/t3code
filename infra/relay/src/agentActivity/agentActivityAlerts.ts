@@ -119,11 +119,16 @@ export function alertForActivityRows(
   const first = rows[0];
   if (!first) return null;
   if (rows.length === 1) {
-    return { title: first.threadTitle, body: `${first.status}: ${first.projectTitle}` };
+    return {
+      title: first.ownerNotification?.title ?? first.threadTitle,
+      body: first.ownerNotification?.body ?? `${first.status}: ${first.projectTitle}`,
+    };
   }
   return {
-    title: `${rows.length} agents ${isAttentionPhase(first.phase) ? "need attention" : "finished"}`,
-    body: rows.map((row) => row.threadTitle).join(", "),
+    title:
+      first.ownerNotification?.title ??
+      `${rows.length} agents ${isAttentionPhase(first.phase) ? "need attention" : "finished"}`,
+    body: rows.map((row) => row.ownerNotification?.body ?? row.threadTitle).join(", "),
   };
 }
 

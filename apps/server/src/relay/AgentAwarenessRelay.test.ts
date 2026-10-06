@@ -12,12 +12,13 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  ScheduledTaskId,
   RuntimeRequestId,
   type ServerSettings,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
-import { RelayAgentActivityState } from "@t3tools/contracts/relay";
+import { type RelayOwnerNotification, RelayAgentActivityState } from "@t3tools/contracts/relay";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -180,6 +181,9 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly homeThread?: boolean;
     readonly autoCompaction?: boolean;
     readonly sourceText?: string;
+    readonly scheduledWake?: boolean;
+    readonly relayedWake?: boolean;
+    readonly ownerNotification?: RelayOwnerNotification;
     readonly catchUpThreads?: ReadonlyArray<OrchestrationV2ThreadShell>;
   } = {},
 ) {
@@ -283,7 +287,10 @@ const makeTestRelay = Effect.fnUntraced(function* (
         messages: [
           {
             id: options.autoCompaction ? "bot-auto-compact:previous-run" : "ordinary-message",
-            createdBy: options.autoCompaction ? "agent" : "user",
+            role: "user",
+            scheduledTaskId: options.scheduledWake ? ScheduledTaskId.make("wake-task") : undefined,
+            senderThreadId: options.relayedWake ? SECOND_THREAD_ID : undefined,
+            createdBy: options.autoCompaction || options.relayedWake ? "agent" : "user",
             creationSource: options.autoCompaction ? "server" : "user",
             text: options.sourceText ?? "/compact",
             attachments: [],
@@ -365,6 +372,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
       setPaused: unused,
       streamChanges: Stream.empty,
       isHomeThread: () => Effect.succeed(options.homeThread ?? false),
+      notifyOwner: unused,
+      getOwnerNotification: () => Effect.succeed(options.ownerNotification),
     }),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
     Effect.provideService(ServerEnvironment.ServerEnvironment, {
@@ -456,6 +465,99 @@ describe("AgentAwarenessRelay", () => {
       yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
       yield* relay.publishThread(THREAD_ID);
       assert.equal(publications.length, input.expected);
+    }),
+  );
+
+  it.effect.each([
+    { homeThread: true, scheduledWake: false, status: "completed", expected: "completed" },
+    { homeThread: true, scheduledWake: true, status: "completed", expected: null },
+    { homeThread: true, relayedWake: true, status: "completed", expected: null },
+    { homeThread: true, scheduledWake: true, status: "failed", expected: "failed" },
+    { homeThread: false, scheduledWake: true, status: "completed", expected: "completed" },
+    { homeThread: false, relayedWake: true, status: "completed", expected: "completed" },
+  ] as const)("applies bot completion policy: %j", (input) =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay(input);
+      yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({ latestRunId: RunId.make("latest-run"), status: input.status }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.deepStrictEqual(
+        publications.map(({ state }) => state?.phase ?? null),
+        ["running", input.expected],
+      );
+    }),
+  );
+
+  it.effect.each(["user_input", "command"] as const)(
+    "preserves %s notifications for wakes",
+    (kind) =>
+      Effect.gen(function* () {
+        const { relay, currentShell, publications } = yield* makeTestRelay({
+          homeThread: true,
+          scheduledWake: true,
+        });
+        yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
+        yield* relay.publishThread(THREAD_ID);
+        yield* Ref.set(
+          currentShell,
+          shell({
+            latestRunId: RunId.make("latest-run"),
+            status: "waiting",
+            pendingRuntimeRequest: {
+              id: RuntimeRequestId.make("wake-input"),
+              kind,
+              createdAt: DateTime.makeUnsafe(NOW),
+            },
+          }),
+        );
+        yield* relay.publishThread(THREAD_ID);
+        assert.equal(
+          publications[1]?.state?.phase,
+          kind === "user_input" ? "waiting_for_input" : "waiting_for_approval",
+        );
+      }),
+  );
+
+  it.effect("uses the requested notification for a wake completion", () =>
+    Effect.gen(function* () {
+      const ownerNotification = {
+        title: "Action needed",
+        body: "Please review the failed deployment.",
+      };
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        homeThread: true,
+        scheduledWake: true,
+        ownerNotification,
+      });
+      yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({ latestRunId: RunId.make("latest-run"), status: "completed" }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications[1]?.state?.phase, "completed");
+      assert.deepStrictEqual(publications[1]?.state?.ownerNotification, ownerNotification);
+    }),
+  );
+
+  it.effect("automatic compaction overrides explicit notification and failure", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        homeThread: true,
+        autoCompaction: true,
+        ownerNotification: { body: "Notify" },
+      });
+      yield* Ref.set(
+        currentShell,
+        shell({ latestRunId: RunId.make("latest-run"), status: "failed" }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, 0);
     }),
   );
 

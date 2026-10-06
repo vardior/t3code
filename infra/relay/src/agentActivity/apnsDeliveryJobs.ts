@@ -1,6 +1,7 @@
 import {
   RelayAgentActivityAggregateState,
   RelayAgentAwarenessPhase,
+  RelayOwnerNotification,
 } from "@t3tools/contracts/relay";
 import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Mac from "effect/crypto/Mac";
@@ -30,6 +31,7 @@ const ApnsDeliveryJobContext = {
 };
 
 export const ApnsNotificationPayload = Schema.Struct({
+  ownerNotification: Schema.optional(RelayOwnerNotification),
   title: Schema.String,
   body: Schema.String,
   environmentId: Schema.String,

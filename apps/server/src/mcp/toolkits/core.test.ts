@@ -1,5 +1,7 @@
 import * as AssetSigner from "../../assets/AssetSigner.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
+import * as OpenItemService from "../../openItems/OpenItemService.ts";
+import * as BotService from "../../bots/BotService.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -669,6 +671,8 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
   }).pipe(
     Effect.provide(
       layerOrchestratorToolkit.pipe(
+        Layer.provide(Layer.mock(BotService.BotService)({})),
+        Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
@@ -714,6 +718,8 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
   }).pipe(
     Effect.provide(
       layerOrchestratorToolkit.pipe(
+        Layer.provide(Layer.mock(BotService.BotService)({})),
+        Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
@@ -880,6 +886,8 @@ it.effect.each(["t3_thread_interrupt", "t3_workflow_stop"])(
             }),
           ),
           Layer.provide(ServerSettings.layerTest()),
+          Layer.provide(Layer.mock(BotService.BotService)({})),
+          Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
           Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
           Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
           Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
@@ -961,6 +969,8 @@ it.effect("discovers workflow stop targets and requires orchestration capability
   }).pipe(
     Effect.provide(
       layerOrchestratorToolkit.pipe(
+        Layer.provide(Layer.mock(BotService.BotService)({})),
+        Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(

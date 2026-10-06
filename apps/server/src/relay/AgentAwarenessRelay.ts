@@ -12,6 +12,7 @@ import {
   RelayApi,
   type RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityState,
+  type RelayOwnerNotification,
 } from "@t3tools/contracts/relay";
 import {
   type SubagentRequestAwareness,
@@ -570,24 +571,43 @@ export const make = Effect.gen(function* () {
     }
     const botHome = threadShell !== null && (yield* bots.isHomeThread(threadId));
     let autoCompaction = false;
+    let ownerStarted = false;
+    let ownerNotification: RelayOwnerNotification | undefined;
     if (botHome && threadShell.latestRunId !== null) {
       const records = yield* threads.getThreadRecords(threadId, ["runs", "messages"], {
         runIds: [threadShell.latestRunId],
         messageRunIds: [threadShell.latestRunId],
       });
       const run = records.runs.find((candidate) => candidate.id === threadShell.latestRunId);
-      autoCompaction = records.messages.some(
-        (message) =>
-          message.id === run?.userMessageId &&
-          message.id.startsWith("bot-auto-compact:") &&
-          message.createdBy === "agent" &&
-          message.creationSource === "server" &&
-          message.text.trim().toLowerCase() === "/compact" &&
-          message.attachments.length === 0,
-      );
+      const message = records.messages.find((message) => message.id === run?.userMessageId);
+      autoCompaction =
+        message !== undefined &&
+        message.id.startsWith("bot-auto-compact:") &&
+        message.createdBy === "agent" &&
+        message.creationSource === "server" &&
+        message.text.trim().toLowerCase() === "/compact" &&
+        message.attachments.length === 0;
+      ownerStarted =
+        message?.role === "user" &&
+        message.createdBy === "user" &&
+        message.scheduledTaskId === undefined &&
+        message.senderThreadId === undefined;
+      ownerNotification = yield* bots.getOwnerNotification(threadId, threadShell.latestRunId);
     }
+    const activityState =
+      !botHome || threadShell === null
+        ? null
+        : projectThreadAwarenessV2({
+            environmentId,
+            project: { title: threadShell.title },
+            thread: threadShell,
+          });
     const notificationsSuppressed =
       autoCompaction ||
+      (botHome &&
+        activityState?.phase === "completed" &&
+        !ownerStarted &&
+        ownerNotification === undefined) ||
       (threadShell !== null && !(yield* settings.getSettings).notifyAgentThreads && !botHome);
     if (notificationsSuppressed && !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)) {
       return;
@@ -599,12 +619,15 @@ export const make = Effect.gen(function* () {
     const project = Option.isSome(thread)
       ? yield* projects.getById(thread.value.projectId)
       : Option.none<Project>();
-    const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
+    let snapshot = resolveAgentAwarenessRelayPublishSnapshot({
       environmentId,
       thread,
       project,
       pendingSubagentRequest: yield* currentSubagentRequestFor(threadId),
     });
+    if (snapshot.state?.phase === "completed" && ownerNotification !== undefined) {
+      snapshot = { ...snapshot, state: { ...snapshot.state, ownerNotification } };
+    }
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state, snapshot.subagentWait);
     const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
     if (

@@ -1,6 +1,8 @@
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import { OrchestratorToolkit } from "./tools.ts";
 import * as Effect from "effect/Effect";
+import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import * as BotService from "../../../bots/BotService.ts";
 
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../../../peer/PeerLinkRequests.ts";
@@ -129,6 +131,28 @@ const handlers = {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.deleteScheduledTask(scope, input);
+    }),
+  ),
+  notify_owner: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireMcpCapability("orchestration").pipe(
+        Effect.mapError(
+          () =>
+            new OrchestratorMcpFailure({
+              code: "capability_denied",
+              message: "Orchestration capability is required.",
+            }),
+        ),
+      );
+      const service = yield* BotService.BotService;
+      return yield* service
+        .notifyOwner(scope.thread?.threadId, input)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+          ),
+        );
     }),
   ),
   request_secret: McpToolAccess.actsAsCaller((input) =>

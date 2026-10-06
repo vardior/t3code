@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
+import { notificationForActivity } from "./agentActivityPayloads.ts";
 import { makeAggregateState } from "./agentActivityAggregate.ts";
 import {
   attentionTransitionRows,
+  alertForActivityRows,
   terminalTransitionRows,
   shouldAlertForActivity,
 } from "./agentActivityAlerts.ts";
@@ -101,5 +103,22 @@ describe("shared agent activity policy", () => {
       }),
     ).toBe(false);
     expect(shouldAlertForActivity({ ...input, nowMs: 180_000 })).toBe(false);
+  });
+});
+
+it("carries explicit owner text to APNs notifications and activity alerts", () => {
+  const ownerNotification = { title: "Action needed", body: "x".repeat(300) };
+  const next = aggregate([{ ...state, phase: "completed", ownerNotification }]);
+  const row = next.activities[0]!;
+  expect(alertForActivityRows([row])).toEqual(ownerNotification);
+  expect(notificationForActivity(row)).toMatchObject(ownerNotification);
+  const bodyOnly = aggregate([
+    { ...state, phase: "completed", ownerNotification: { body: "Review this" } },
+  ]).activities[0]!;
+  expect(alertForActivityRows([bodyOnly])).toEqual({ title: "Thread", body: "Review this" });
+  expect(notificationForActivity(bodyOnly)).toMatchObject({ title: "Thread", body: "Review this" });
+  expect(alertForActivityRows([{ ...row, ownerNotification: undefined }])).toEqual({
+    title: "Thread",
+    body: "Done: Project",
   });
 });
