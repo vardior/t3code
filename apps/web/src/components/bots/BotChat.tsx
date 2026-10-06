@@ -242,7 +242,7 @@ export function BotChat(props: {
                 variant="outline"
                 onClick={() => openThread(props.bot.homeThreadId)}
               >
-                Retry in thread
+                Open thread
               </Button>
             </div>
           ) : null}
