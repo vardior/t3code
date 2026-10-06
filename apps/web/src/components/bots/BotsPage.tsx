@@ -9,9 +9,9 @@ import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
 import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useThreadShell } from "../../state/entities";
-import { usePrimaryEnvironmentId } from "../../state/environments";
-import { useEnvironmentQuery } from "../../state/query";
-import { serverEnvironment } from "../../state/server";
+import { useEnvironments } from "../../state/environments";
+import { resolveBotSelection } from "./botNavigation";
+import { useEnvironmentBots } from "./useEnvironmentBots";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import {
@@ -25,18 +25,36 @@ import { isActiveRunStatus } from "@t3tools/client-runtime/state/bot-conversatio
 import { BotChat } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
 
-export function BotsPage({ botId }: { readonly botId: string | undefined }) {
+export function BotsPage({
+  botId,
+  environmentId: requestedEnvironmentId,
+}: {
+  readonly botId: string | undefined;
+  readonly environmentId: string | undefined;
+}) {
   useEscapeToGoBack();
-  const environmentId = usePrimaryEnvironmentId();
-  const botsQuery = useEnvironmentQuery(
-    environmentId ? serverEnvironment.bots.list({ environmentId, input: {} }) : null,
-  );
+  const { environments } = useEnvironments();
+  const { bots, queries } = useEnvironmentBots();
   const navigate = useNavigate();
   const [infoOpen, setInfoOpen] = useState(false);
-  const bots = botsQuery.data?.bots ?? [];
-  const selected = bots.find((bot) => bot.id === botId) ?? null;
-  const selectBot = (id: string | undefined) =>
-    void navigate({ to: "/bots", search: id === undefined ? {} : { bot: id } });
+  const selection = resolveBotSelection(bots, { bot: botId, env: requestedEnvironmentId });
+  const selected = selection?.bot ?? null;
+  const environmentId = selection?.environmentId;
+  const showEnvironmentLabels = new Set(bots.map((entry) => entry.environmentId)).size > 1;
+  const selectBot = (entry: typeof selection) =>
+    void navigate({
+      to: "/bots",
+      search: entry ? { env: entry.environmentId, bot: entry.bot.id } : {},
+    });
+  useEffect(() => {
+    if (selection && requestedEnvironmentId === undefined) {
+      void navigate({
+        to: "/bots",
+        search: { env: selection.environmentId, bot: selection.bot.id },
+        replace: true,
+      });
+    }
+  }, [navigate, selection, requestedEnvironmentId]);
 
   return (
     <SidebarInset className="isolate h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -49,7 +67,7 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
                 className="md:hidden"
                 size="icon-sm"
                 variant="ghost"
-                onClick={() => selectBot(undefined)}
+                onClick={() => selectBot(null)}
               >
                 <ArrowLeftIcon />
               </Button>
@@ -86,35 +104,38 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
               selected ? "hidden" : "flex",
             )}
           >
-            {botsQuery.error !== null ? (
-              <p className="p-4 text-sm text-destructive">Could not load bots: {botsQuery.error}</p>
-            ) : bots.length === 0 && botsQuery.data !== null ? (
-              <p className="p-4 text-sm text-muted-foreground">
-                No bots yet. Point T3CODE_BOTS_DIR at a folder of bots, one subfolder per bot with a
-                bot.json.
-              </p>
-            ) : (
-              bots.map((bot) =>
-                environmentId ? (
-                  <BotListItem
-                    key={bot.id}
-                    bot={bot}
-                    environmentId={environmentId}
-                    selected={bot.id === selected?.id}
-                    refresh={botsQuery.refresh}
-                    onSelect={() => selectBot(bot.id)}
-                  />
-                ) : null,
-              )
+            {queries.map((query) =>
+              query.error ? (
+                <p key={query.environmentId} className="p-4 text-sm text-destructive">
+                  Could not load bots: {query.error}
+                </p>
+              ) : null,
             )}
+            {bots.map((entry) => (
+              <BotListItem
+                key={`${entry.environmentId}:${entry.bot.id}`}
+                bot={entry.bot}
+                environmentId={entry.environmentId}
+                environmentLabel={
+                  showEnvironmentLabels
+                    ? environments.find(
+                        (environment) => environment.environmentId === entry.environmentId,
+                      )?.label
+                    : undefined
+                }
+                selected={entry === selection}
+                refresh={entry.refresh}
+                onSelect={() => selectBot(entry)}
+              />
+            ))}
           </nav>
 
           {selected && environmentId ? (
             <BotChat
-              key={selected.id}
+              key={`${environmentId}:${selected.id}`}
               bot={selected}
               environmentId={environmentId}
-              onRunSettled={botsQuery.refresh}
+              onRunSettled={selection!.refresh}
             />
           ) : (
             <div className="hidden flex-1 items-center justify-center text-sm text-muted-foreground md:flex">
@@ -130,7 +151,7 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
           environmentId={environmentId}
           open={infoOpen}
           onOpenChange={setInfoOpen}
-          onPausedChange={botsQuery.refresh}
+          onPausedChange={selection!.refresh}
         />
       ) : null}
     </SidebarInset>
@@ -141,6 +162,7 @@ function BotListItem(props: {
   readonly bot: BotSummary;
   readonly environmentId: EnvironmentId;
   readonly selected: boolean;
+  readonly environmentLabel?: string;
   readonly onSelect: () => void;
   readonly refresh: () => void;
 }) {
@@ -167,6 +189,9 @@ function BotListItem(props: {
       <BotAvatar name={props.bot.name} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium text-sm">{props.bot.name}</span>
+        {props.environmentLabel ? (
+          <span className="truncate text-muted-foreground text-xs">{props.environmentLabel}</span>
+        ) : null}
         <span className="truncate text-muted-foreground text-xs">
           {working || props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel)}
         </span>
