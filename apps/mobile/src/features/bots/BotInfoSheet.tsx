@@ -214,7 +214,7 @@ function BotInfo(props: {
       </View>
       <SettingsSection title="Schedule">
         {schedules.error ? (
-          <Text accessibilityRole="alert" className="p-4 text-sm text-destructive">
+          <Text accessibilityRole="alert" className="p-4 text-sm text-danger-foreground">
             Could not load schedules: {schedules.error}
           </Text>
         ) : schedules.data === null ? (
@@ -280,7 +280,7 @@ function BotInfo(props: {
         </Text>
       </Pressable>
       {error ? (
-        <Text accessibilityRole="alert" className="text-sm text-destructive">
+        <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
           {error}
         </Text>
       ) : null}

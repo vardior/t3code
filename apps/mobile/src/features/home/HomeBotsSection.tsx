@@ -43,7 +43,7 @@ export function HomeBotsSection(props: {
       </Text>
       {props.bots.errors.map((entry) => (
         <View key={entry.environmentId} className="flex-row items-center gap-3 py-3">
-          <Text accessibilityRole="alert" className="min-w-0 flex-1 text-sm text-destructive">
+          <Text accessibilityRole="alert" className="min-w-0 flex-1 text-sm text-danger-foreground">
             {props.environmentLabels.size > 1
               ? `${props.environmentLabels.get(entry.environmentId)} · `
               : ""}

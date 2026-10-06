@@ -364,7 +364,7 @@ function BotConversation(props: {
                   </Text>
                 </Pressable>
                 {historyError ? (
-                  <Text className="text-sm text-destructive">{historyError}</Text>
+                  <Text className="text-sm text-danger-foreground">{historyError}</Text>
                 ) : null}
               </View>
             ) : undefined
@@ -401,7 +401,7 @@ function BotConversation(props: {
                   accessibilityRole={status.kind === "failed" ? "alert" : undefined}
                   className={
                     status.kind === "failed"
-                      ? "text-sm text-destructive"
+                      ? "text-sm text-danger-foreground"
                       : "text-sm text-foreground"
                   }
                 >
@@ -448,7 +448,7 @@ function BotConversation(props: {
         >
           {threadLoadFailed ? (
             <View className="flex-row items-center gap-2">
-              <Text accessibilityRole="alert" className="flex-1 text-sm text-destructive">
+              <Text accessibilityRole="alert" className="flex-1 text-sm text-danger-foreground">
                 {unavailableReason}
               </Text>
               <Pressable accessibilityRole="button" onPress={retryThread} className="p-2">
@@ -460,7 +460,7 @@ function BotConversation(props: {
             <Text className="text-sm text-foreground-muted">{unavailableReason}</Text>
           ) : null}
           {error ? (
-            <Text accessibilityRole="alert" className="text-sm text-destructive">
+            <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
               {error}
             </Text>
           ) : null}
