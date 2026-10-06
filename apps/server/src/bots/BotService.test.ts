@@ -258,6 +258,7 @@ it.effect("lists only summaries and gets charter, Slack DMs and spawned workers"
           homeThreadId: "home",
           scheduledTaskIds: ["task-1"],
           paused: false,
+          homeThreadMissing: false,
           lastReply: null,
         },
       ],
@@ -347,7 +348,7 @@ it.effect("lists only summaries and gets charter, Slack DMs and spawned workers"
     );
     expect(bytesRead).toBeGreaterThan(0);
     expect(bytesRead).toBeLessThan(Buffer.byteLength(dms.map((dm) => toJson(dm)).join("\n")));
-    expect(Buffer.byteLength(toJson(summary))).toBe(126);
+    expect(Buffer.byteLength(toJson(summary))).toBe(152);
     expect(Buffer.byteLength(toJson({ bots: [{ ...summary.bots[0], ...tail }] }))).toBeGreaterThan(
       100_000,
     );
@@ -651,6 +652,39 @@ it.effect("previews only the latest settled final assistant reply, as bounded pl
     expect(preview!.text).toHaveLength(200);
     const { lastReply: _, ...oldBot } = (yield* listBots({ baseDir })).bots[0]!;
     expect((yield* decodeBot(oldBot)).lastReply).toBeUndefined();
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("flags bots whose home thread is deleted or absent but not archived", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-home-" });
+    const root = path.join(baseDir, "bots");
+    for (const id of ["active", "archived", "deleted", "absent"]) {
+      yield* fs.makeDirectory(path.join(root, id), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, id, "bot.json"),
+        toJson({ name: id, homeThreadId: `${id}-home` }),
+      );
+    }
+    yield* insertThread(sql, { id: "active-home", createdAt: "2026-10-01T00:00:00.000Z" });
+    yield* insertThread(sql, { id: "archived-home", createdAt: "2026-10-01T00:00:00.000Z" });
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = '2026-10-01T00:01:00.000Z' WHERE thread_id = 'archived-home'`;
+    yield* insertThread(sql, {
+      id: "deleted-home",
+      createdAt: "2026-10-01T00:00:00.000Z",
+      deletedAt: "2026-10-01T00:01:00.000Z",
+    });
+
+    const { bots } = yield* listBots({ baseDir });
+    expect(Object.fromEntries(bots.map((bot) => [bot.id, bot.homeThreadMissing]))).toEqual({
+      absent: true,
+      active: false,
+      archived: false,
+      deleted: true,
+    });
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

@@ -12,10 +12,8 @@ import {
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 import * as Hash from "effect/Hash";
-import * as Option from "effect/Option";
 
 import type { EnvironmentThreadShell } from "./models.ts";
-import type { EnvironmentShellState } from "./shell.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
@@ -58,16 +56,6 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
 
 export function isActiveRunStatus(status: string | null | undefined): boolean {
   return status != null && ACTIVE_RUN_STATUSES.has(status);
-}
-
-export function isBotHomeThreadMissing(shellState: EnvironmentShellState, threadId: ThreadId) {
-  if (shellState.status !== "live") return false;
-  return Option.match(shellState.snapshot, {
-    onNone: () => false,
-    onSome: (snapshot) =>
-      !snapshot.threads.some((thread) => thread.id === threadId) &&
-      !snapshot.archivedThreads.some((thread) => thread.id === threadId),
-  });
 }
 
 export function botThreadShellStatus(

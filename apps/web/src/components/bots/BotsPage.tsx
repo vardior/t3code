@@ -1,10 +1,8 @@
-import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
 import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon, InfoIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
@@ -12,7 +10,6 @@ import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
-import { environmentShell } from "../../state/shell";
 import { resolveBotSelection } from "./botNavigation";
 import { refreshEnvironmentBots, useEnvironmentBots } from "./useEnvironmentBots";
 import { Button } from "../ui/button";
@@ -28,7 +25,6 @@ import { BotAvatar } from "./BotAvatar";
 import {
   botThreadShellStatus,
   botThreadShellStatusLabel,
-  isBotHomeThreadMissing,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import { BotChat } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
@@ -270,16 +266,8 @@ function BotListItem(props: {
   readonly onSelect: () => void;
   readonly refresh: () => void;
 }) {
-  const homeThreadId = props.bot.homeThreadId;
-  const shell = useThreadShell(scopeThreadRef(props.environmentId, homeThreadId));
-  const homeThreadMissing = useAtomValue(
-    environmentShell.stateValueAtom(props.environmentId),
-    useCallback(
-      (state: EnvironmentShellState) => isBotHomeThreadMissing(state, homeThreadId),
-      [homeThreadId],
-    ),
-  );
-  const status = botThreadShellStatus(shell, homeThreadMissing);
+  const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
+  const status = botThreadShellStatus(shell, props.bot.homeThreadMissing);
   const working = status === "working";
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
   const attentionLabel = botThreadShellStatusLabel(status);

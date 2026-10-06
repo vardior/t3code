@@ -14,7 +14,6 @@ import {
 import { v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { presentThreadShell } from "./models.ts";
 import * as DateTime from "effect/DateTime";
-import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -22,7 +21,6 @@ import {
   botThreadShellStatus,
   botWakeSenderLabel,
   buildBotChat,
-  isBotHomeThreadMissing,
   slackMarkupToMarkdown,
   slackTextFromCommand,
 } from "./botConversation.ts";
@@ -756,32 +754,6 @@ describe("botThreadShellStatus", () => {
         }),
       ).toBe("needs-input");
     }
-  });
-});
-
-describe("isBotHomeThreadMissing", () => {
-  const snapshot = {
-    schemaVersion: 1,
-    snapshotSequence: 1,
-    projects: [],
-    threads: [v2ThreadShell],
-    archivedThreads: [{ ...v2ThreadShell, id: ThreadId.make("archived") }],
-  };
-  const shellState = (status: "synchronizing" | "live") => ({
-    snapshot: Option.some(snapshot),
-    status,
-    error: Option.none(),
-  });
-
-  it("reports a missing home thread only once the shell is live", () => {
-    const missing = ThreadId.make("missing");
-    expect(isBotHomeThreadMissing(shellState("synchronizing"), missing)).toBe(false);
-    expect(isBotHomeThreadMissing(shellState("live"), missing)).toBe(true);
-  });
-
-  it("treats active and archived home threads as present", () => {
-    expect(isBotHomeThreadMissing(shellState("live"), v2ThreadShell.id)).toBe(false);
-    expect(isBotHomeThreadMissing(shellState("live"), ThreadId.make("archived"))).toBe(false);
   });
 });
 

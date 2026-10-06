@@ -242,6 +242,12 @@ export const layer = Layer.effect(
         }),
       );
 
+    const isThreadMissing = (threadId: ThreadId) =>
+      sql<{ readonly found: number }>`
+        SELECT 1 AS found FROM orchestration_v2_projection_threads
+        WHERE thread_id = ${threadId} AND deleted_at IS NULL
+      `.pipe(Effect.map((rows) => rows.length === 0));
+
     const scheduleIdsFor = (config: BotConfigFile) =>
       sql<{ readonly task_id: string }>`
         SELECT task_id FROM scheduled_tasks
@@ -337,6 +343,7 @@ export const layer = Layer.effect(
           homeThreadId: config.homeThreadId,
           scheduledTaskIds: yield* scheduleIdsFor(config),
           paused: isPaused(config, yield* Clock.currentTimeMillis),
+          homeThreadMissing: yield* isThreadMissing(config.homeThreadId),
           lastReply: yield* readLastReply(config.homeThreadId),
         };
         return Option.some(bot);
