@@ -155,6 +155,10 @@
       "types": "./src/contextWindowTokens.ts",
       "default": "./src/contextWindowTokens.ts"
     },
+    "./state/bot-chat-rows": {
+      "types": "./src/state/botChatRows.ts",
+      "default": "./src/state/botChatRows.ts"
+    },
     "./state/bot-conversation": {
       "types": "./src/state/botConversation.ts",
       "default": "./src/state/botConversation.ts"

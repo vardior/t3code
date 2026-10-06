@@ -49,7 +49,7 @@ import {
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
 import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
-import { createBotChatProjector } from "./botChatRows";
+import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import ChatMarkdown from "../ChatMarkdown";
 import { readFileAsDataUrl } from "../ChatView.logic";
 import { Button } from "../ui/button";

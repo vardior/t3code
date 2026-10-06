@@ -1,7 +1,7 @@
 import { ChatAttachmentId, MessageId, RunId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
-import { botChatItemsEqual, createBotChatProjector } from "./botChatRows";
+import { botChatItemsEqual, createBotChatProjector } from "./botChatRows.ts";
 
 const bot = {
   id: "bot",
@@ -52,6 +52,31 @@ describe("bot chat row projection", () => {
     expect(settled).toHaveLength(2);
     expect(settled[0]).toBe(initial[0]);
     expect(settled[1]).toMatchObject({ kind: "bot", text: "Done" });
+  });
+
+  it("preserves every unchanged row when only the streaming last message changes", () => {
+    const project = createBotChatProjector();
+    const assistant = {
+      ...message,
+      id: MessageId.make("streaming"),
+      role: "assistant" as const,
+      streaming: true,
+      text: "First",
+    };
+    const input = {
+      bot,
+      runs: [{ id: RunId.make("run"), status: "running" as const }],
+      messages: [message, { ...message, id: MessageId.make("second"), text: "Second" }, assistant],
+      turnItems: [],
+    };
+    const initial = project(input);
+    const streamed = project({
+      ...input,
+      messages: [...input.messages.slice(0, -1), { ...assistant, text: "First second" }],
+    });
+    expect(streamed).toHaveLength(2);
+    expect(streamed).toBe(initial);
+    for (const [index, row] of streamed.entries()) expect(row).toBe(initial[index]);
   });
 
   it("updates only a changed row and removes deleted rows", () => {

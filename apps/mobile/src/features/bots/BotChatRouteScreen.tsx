@@ -2,10 +2,10 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
+import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
   botChatHistoryStart,
   botConversationStatus,
-  buildBotChat,
   isBotWorking,
   isBotQueueHeld,
 } from "@t3tools/client-runtime/state/bot-conversation";
@@ -13,7 +13,13 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  MessageId,
+  type BotSummary,
+  type ScheduledTask,
+  type ThreadId,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
@@ -48,6 +54,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
 import { botChatScrollReducer, botComposerReducer, initialBotComposer } from "./botChat.logic";
 import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
+
+const EMPTY_SCHEDULES: ReadonlyArray<ScheduledTask> = [];
 
 type BotChatRouteProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -131,9 +139,10 @@ function BotConversation(props: {
   const schedules = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
+  const projectChat = useMemo(() => createBotChatProjector(), []);
   const items = useMemo(
     () =>
-      buildBotChat({
+      projectChat({
         bot,
         detail: detail.data,
         since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
@@ -141,7 +150,7 @@ function BotConversation(props: {
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [bot, detail.data, projection, thread.history.hasMoreHistory],
+    [projectChat, bot, detail.data, projection, thread.history.hasMoreHistory],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
@@ -169,10 +178,22 @@ function BotConversation(props: {
   const composerOverlayRef = useRef<ViewInstance>(null);
   const followingEnd = useRef(true);
   const [togglingDisclosureKey, setTogglingDisclosureKey] = useState<string | null>(null);
+  const lastItem = items.at(-1);
+  const previousEnd = useRef({ length: 0, lastItem });
   useLayoutEffect(() => {
-    if (items.length === 0) return;
-    if (followingEnd.current) void listRef.current?.scrollToEnd({ animated: false });
-  }, [items]);
+    const endChanged =
+      items.length > previousEnd.current.length || lastItem !== previousEnd.current.lastItem;
+    previousEnd.current = { length: items.length, lastItem };
+    if (items.length > 0 && endChanged && followingEnd.current)
+      void listRef.current?.scrollToEnd({ animated: false });
+  }, [items.length, lastItem]);
+  const onDisclosureToggle = useCallback((itemId: string) => {
+    setTogglingDisclosureKey(itemId);
+    followingEnd.current = botChatScrollReducer(followingEnd.current, {
+      type: "disclosure",
+      atEnd: listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
+    });
+  }, []);
   const initialComposerHeight = 88 + Math.max(insets.bottom, 12) - nativeInsetOvercount;
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
@@ -252,10 +273,13 @@ function BotConversation(props: {
   usePreventRemove(busy, () =>
     Alert.alert("Command pending", "Wait for the bot command to finish before leaving."),
   );
-  const openThread = (threadId: ThreadId, targetEnvironmentId = environmentId) => {
-    if (!pending.current)
-      navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
-  };
+  const openThread = useCallback(
+    (threadId: ThreadId, targetEnvironmentId = environmentId) => {
+      if (!pending.current)
+        navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
+    },
+    [navigation, environmentId],
+  );
   const send = async () => {
     if (!canSend || projection === null || pending.current) return;
     pending.current = true;
@@ -335,16 +359,10 @@ function BotConversation(props: {
               item={item}
               botName={bot.name}
               environmentId={environmentId}
-              schedules={schedules.data?.tasks ?? []}
+              schedules={schedules.data?.tasks ?? EMPTY_SCHEDULES}
               onOpenThread={openThread}
               onPreview={setPreview}
-              onDisclosureToggle={() => {
-                setTogglingDisclosureKey(item.id);
-                followingEnd.current = botChatScrollReducer(followingEnd.current, {
-                  type: "disclosure",
-                  atEnd: listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
-                });
-              }}
+              onDisclosureToggle={onDisclosureToggle}
             />
           )}
           style={{ flex: 1 }}

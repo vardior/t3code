@@ -5,7 +5,7 @@ import {
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import type { EnvironmentId, ScheduledTask, ThreadId } from "@t3tools/contracts";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Pressable, Text as NativeText, View } from "react-native";
 import { Markdown } from "react-native-nitro-markdown";
 
@@ -22,14 +22,14 @@ import { useThreadShell } from "../../state/entities";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 import { ThreadMarkdownImage } from "../threads/ThreadMarkdownImage";
 
-export function BotChatRow(props: {
+export const BotChatRow = memo(function BotChatRow(props: {
   readonly item: BotChatItem;
   readonly botName: string;
   readonly environmentId: EnvironmentId;
   readonly schedules: ReadonlyArray<ScheduledTask>;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
-  readonly onDisclosureToggle: () => void;
+  readonly onDisclosureToggle: (itemId: string) => void;
 }) {
   const { item } = props;
   if (item.kind === "worker")
@@ -71,7 +71,7 @@ export function BotChatRow(props: {
       ) : null}
     </View>
   );
-}
+});
 
 function WorkerRow(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
@@ -97,7 +97,7 @@ function WorkerRow(props: {
 }
 
 function WakeRow(props: {
-  readonly onDisclosureToggle: () => void;
+  readonly onDisclosureToggle: (itemId: string) => void;
   readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
   readonly botName: string;
   readonly environmentId: EnvironmentId;
@@ -128,7 +128,7 @@ function WakeRow(props: {
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         onPress={() => {
-          props.onDisclosureToggle();
+          props.onDisclosureToggle(props.item.id);
           setExpanded(!expanded);
         }}
         className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70"
@@ -161,7 +161,7 @@ function WakeRow(props: {
   );
 }
 
-export function BotMarkdown(props: {
+export const BotMarkdown = memo(function BotMarkdown(props: {
   readonly text: string;
   readonly environmentId: EnvironmentId;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
@@ -207,4 +207,4 @@ export function BotMarkdown(props: {
       {markdown}
     </Markdown>
   );
-}
+});

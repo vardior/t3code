@@ -1,4 +1,4 @@
-import { buildBotChat, type BotChatItem } from "@t3tools/client-runtime/state/bot-conversation";
+import { buildBotChat, type BotChatItem } from "./botConversation.ts";
 
 export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolean {
   if (left.kind !== right.kind) return false;
