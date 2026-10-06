@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
@@ -355,6 +356,13 @@ it.effect(
           expect((yield* helper)?.paused).toBe(false);
 
           yield* bots.setPaused({ botId: "helper", paused: true });
+          yield* schedules.setEnabled({ id: ScheduledTaskId.make("listed"), enabled: true });
+          yield* insertSchedule(sql, {
+            id: "new-bound",
+            threadId: "home",
+            enabled: true,
+            createdAt: "2026-10-01T00:04:00.000Z",
+          });
           yield* bots.setPaused({ botId: "helper", paused: true });
           expect((yield* helper)?.paused).toBe(true);
           expect(yield* enabledById).toEqual({
@@ -362,11 +370,12 @@ it.effect(
             bound: false,
             "already-off": false,
             unrelated: true,
+            "new-bound": false,
           });
           expect(yield* readConfig).toMatchObject({
             intervalMs: 900_000,
             paused: true,
-            pausedScheduleIds: ["listed", "bound"],
+            pausedScheduleIds: ["listed", "bound", "new-bound"],
           });
 
           yield* bots.setPaused({ botId: "helper", paused: false });
@@ -376,6 +385,7 @@ it.effect(
             bound: true,
             "already-off": false,
             unrelated: true,
+            "new-bound": true,
           });
           expect(yield* readConfig).toEqual({
             name: "Helper",
@@ -411,6 +421,66 @@ it.effect(
           expect(escaped.message).toBe("Unknown bot ../helper");
         }),
       );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect.each([true, false])(
+  "restores schedules and preserves bot.json when the pause write fails, initially paused=%s",
+  (paused) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-pause-write-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      const configPath = path.join(botDir, "bot.json");
+      const config = {
+        name: "Helper",
+        homeThreadId: "home",
+        ...(paused ? { paused: true, pausedScheduleIds: ["already-off"] } : {}),
+      };
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(configPath, toJson(config));
+      for (const [id, enabled] of [
+        ["enabled", true],
+        ["already-off", false],
+      ] as const) {
+        yield* insertSchedule(sql, {
+          id,
+          threadId: "home",
+          enabled,
+          createdAt: "2026-10-01T00:00:00.000Z",
+        });
+      }
+      const writeError = new PlatformError.PlatformError(
+        new PlatformError.SystemError({
+          _tag: "PermissionDenied",
+          module: "FileSystem",
+          method: "rename",
+        }),
+      );
+      const failingFs = FileSystem.FileSystem.of({
+        ...fs,
+        rename: (source, target) =>
+          target === configPath ? Effect.fail(writeError) : fs.rename(source, target),
+      });
+      yield* withBots(
+        { baseDir },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+          const error = yield* bots.setPaused({ botId: "helper", paused: true }).pipe(Effect.flip);
+          expect(error.message).toBe("Cannot pause bot helper");
+          expect(error.cause).toBe(writeError);
+          expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual(config);
+          expect(
+            (yield* schedules.list()).tasks.map((task) => ({ id: task.id, enabled: task.enabled })),
+          ).toEqual([
+            { id: "already-off", enabled: false },
+            { id: "enabled", enabled: true },
+          ]);
+        }),
+      ).pipe(Effect.provideService(FileSystem.FileSystem, failingFs));
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

@@ -344,18 +344,31 @@ export const layer = Layer.effect(
           });
 
         if (input.paused) {
-          if (config.paused === true) return {};
           const botScheduleIds = new Set(yield* scheduleIdsFor(config));
           const { tasks } = yield* scheduledTasks.list();
           const enabledIds = tasks
             .filter((task) => task.enabled && botScheduleIds.has(task.id))
             .map((task) => task.id);
-          yield* writePauseFields({
-            paused: true,
-            pausedReason: "Paused from the Bots view",
-            pausedScheduleIds: enabledIds,
-          });
-          yield* setScheduleIdsEnabled(enabledIds, false);
+          const disabledIds: ScheduledTaskId[] = [];
+          yield* Effect.gen(function* () {
+            for (const id of enabledIds) {
+              yield* scheduledTasks.setEnabled({ id, enabled: false });
+              disabledIds.push(id);
+            }
+            yield* writePauseFields({
+              paused: true,
+              pausedReason: "Paused from the Bots view",
+              pausedScheduleIds: [
+                ...new Set([...(config.pausedScheduleIds ?? []), ...disabledIds]),
+              ],
+            });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              setScheduleIdsEnabled(disabledIds, true).pipe(
+                Effect.flatMap(() => Effect.failCause(cause)),
+              ),
+            ),
+          );
           return {};
         }
 
