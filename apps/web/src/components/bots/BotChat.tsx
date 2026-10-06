@@ -15,7 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import { ArrowUpIcon, BotIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, BotIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
   useEffect,
   useEffectEvent,
@@ -23,7 +23,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ClipboardEvent,
   type MouseEvent,
 } from "react";
 
@@ -455,12 +454,10 @@ function BotComposer(props: {
   const ready = props.runtimeMode !== null && props.interactionMode !== null;
   const canSend = ready && !sending && (text.trim() !== "" || images.length > 0);
 
-  const pasteImages = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files).filter((file) =>
-      file.type.startsWith("image/"),
-    );
-    if (files.length === 0) return;
-    event.preventDefault();
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageFiles = (files: Iterable<File>) =>
+    Array.from(files).filter((file) => file.type.startsWith("image/"));
+  const addImages = (files: ReadonlyArray<File>) => {
     const fitting = files.filter((file) => file.size <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
     if (fitting.length < files.length) {
       toastManager.add({
@@ -485,7 +482,7 @@ function BotComposer(props: {
       (error: unknown) =>
         toastManager.add({
           type: "error",
-          title: "Could not read the pasted image",
+          title: "Could not read the image",
           description: error instanceof Error ? error.message : String(error),
         }),
     );
@@ -537,7 +534,38 @@ function BotComposer(props: {
         event.preventDefault();
         void send();
       }}
+      onDragOver={(event) => {
+        if (ready && event.dataTransfer.types.includes("Files")) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        const files = imageFiles(event.dataTransfer.files);
+        if (!ready || files.length === 0) return;
+        event.preventDefault();
+        addImages(files);
+      }}
     >
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = imageFiles(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          addImages(files);
+        }}
+      />
+      <Button
+        aria-label="Attach images"
+        disabled={!ready}
+        size="icon"
+        type="button"
+        variant="ghost"
+        onClick={() => imageInputRef.current?.click()}
+      >
+        <PaperclipIcon />
+      </Button>
       <div className="flex flex-1 flex-col gap-2">
         {images.length > 0 ? (
           <div className="flex flex-wrap gap-2">
@@ -570,7 +598,12 @@ function BotComposer(props: {
           value={text}
           disabled={!ready}
           onChange={(event) => setText(event.target.value)}
-          onPaste={pasteImages}
+          onPaste={(event) => {
+            const files = imageFiles(event.clipboardData.files);
+            if (files.length === 0) return;
+            event.preventDefault();
+            addImages(files);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
