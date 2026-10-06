@@ -6,15 +6,15 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerConfig } from "../config.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as BotService from "./BotService.ts";
 
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const testLayer = Layer.mergeAll(SqlitePersistenceMemory, NodeServices.layer);
+const testLayer = Layer.mergeAll(SqlitePersistence.layerMemory, NodeServices.layer);
 
 const listBots = (input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv }) =>
   Effect.gen(function* () {

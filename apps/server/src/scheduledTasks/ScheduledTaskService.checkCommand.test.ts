@@ -8,11 +8,12 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 
@@ -87,6 +88,7 @@ it.effect(
                     ),
                 }),
                 Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+                Layer.mock(SecretRequests.SecretRequests)({}),
                 NodeCrypto.layer,
                 Scheduler.layer,
               ),
@@ -116,7 +118,7 @@ it.effect(
       assert.equal(broken?.last_run_status, "failed");
       assert.equal(broken?.run_count, 1);
       assert.isTrue(broken?.last_run_error?.includes("exited 3: cannot reach slack") === true);
-    }).pipe(Effect.provide(SqlitePersistenceMemory)),
+    }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
 it.effect("an edit that omits the check command keeps it, and null removes it", () =>
@@ -160,11 +162,12 @@ it.effect("an edit that omits the check command keeps it, and null removes it", 
             Scheduler.layer,
             Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
             Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+            Layer.mock(SecretRequests.SecretRequests)({}),
           ),
         ),
       ),
     ),
-    Effect.provide(SqlitePersistenceMemory),
+    Effect.provide(SqlitePersistence.layerMemory),
   ),
 );
 
@@ -198,11 +201,12 @@ it.effect("Run now starts the turn even when the check is quiet", () =>
                   ]).pipe(Effect.andThen(Effect.die(new Error("launch recorded")))),
               }),
               Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+              Layer.mock(SecretRequests.SecretRequests)({}),
             ),
           ),
         ),
       ),
     );
     assert.deepEqual(yield* Ref.get(launchedPrompts), ["Act on the poll output."]);
-  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

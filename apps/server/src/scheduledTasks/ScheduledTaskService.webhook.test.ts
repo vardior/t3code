@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as NodePlatformCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   type ManagedPolicyDocument,
@@ -182,6 +183,7 @@ const withService = <A, E>(
     const launches = yield* Queue.unbounded<LaunchInput>();
     const secretsByRef = new Map<string, string>();
     const layerDependencies = Layer.mergeAll(
+      NodeServices.layer,
       NodePlatformCrypto.layerDigest,
       NodePlatformCrypto.layerMac,
       options.frameGate === undefined && options.onFrame === undefined
