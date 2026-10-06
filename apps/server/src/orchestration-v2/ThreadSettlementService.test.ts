@@ -2,6 +2,7 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import {
+  BotError,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   EventId,
@@ -38,6 +39,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
+import * as BotService from "../bots/BotService.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -561,6 +563,8 @@ function makeBranchPullRequest(state: "open" | "closed" | "merged") {
 interface HarnessOptions {
   readonly snapshot: SettlementSnapshot;
   readonly settings?: ContractServerSettings;
+  readonly botHomeThreadIds?: ReadonlyArray<ThreadId>;
+  readonly isHomeThread?: BotService.BotService["Service"]["isHomeThread"];
   readonly branchPullRequest?: GitManager.GitManager["Service"]["branchPullRequest"];
   readonly pullRequestSummary?: PullRequestService.PullRequestService["Service"]["summary"];
   readonly existingWorktreePaths?: ReadonlyArray<string>;
@@ -663,19 +667,28 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   });
 
   const layerDependencies = Layer.mergeAll(
+    Layer.mock(BotService.BotService)({
+      isHomeThread:
+        options.isHomeThread ??
+        ((threadId) => Effect.succeed(options.botHomeThreadIds?.includes(threadId) ?? false)),
+    }),
     Layer.mock(ProjectStore.ProjectStoreV2)({
       listShells: () => Ref.get(snapshots).pipe(Effect.map((snapshot) => snapshot.projects)),
     }),
     Layer.mock(ProjectionStore.ProjectionStoreV2)({
-      getSettlementCandidates: (threadId) =>
+      getSettlementCandidates: (threadId, readOptions) =>
         Ref.update(candidateReads, (reads) => [...reads, threadId]).pipe(
           Effect.andThen(Ref.updateAndGet(snapshotReadCount, (count) => count + 1)),
           Effect.tap((count) => Queue.offer(snapshotReads, count)),
           Effect.andThen(Ref.get(snapshots)),
           Effect.map((snapshot) =>
-            threadId === undefined
-              ? snapshot.threads
-              : snapshot.threads.filter((thread) => thread.id === threadId),
+            snapshot.threads.filter(
+              (thread) =>
+                (threadId === undefined || thread.id === threadId) &&
+                (!readOptions?.subagentOnly ||
+                  (thread.lineage.relationshipToParent === "subagent" &&
+                    thread.lineage.parentThreadId !== null)),
+            ),
           ),
         ),
       getThread: (threadId) => {
@@ -1638,7 +1651,7 @@ describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
   it.effect.each([
     ["provider-native", "thread:native-child", true],
     ["delegated", "thread:delegated-task:child", false],
-  ] as const)("settles a finished %s child from its terminal event", ([, id, native]) =>
+  ] as const)("settles a finished %s bot child from its terminal event", ([, id, native]) =>
     Effect.scoped(
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse(NOW));
@@ -1646,6 +1659,7 @@ describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([]),
           settings: disabledSettings,
+          botHomeThreadIds: [parentId],
         });
         yield* Effect.gen(function* () {
           const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
@@ -1709,6 +1723,7 @@ describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
             child,
           ]),
           settings: disabledSettings,
+          botHomeThreadIds: [parentId],
         });
         yield* Effect.gen(function* () {
           const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
@@ -1778,11 +1793,132 @@ describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
             },
           ]),
           settings: disabledSettings,
+          botHomeThreadIds: [parentId],
         });
         yield* Effect.gen(function* () {
           const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
           yield* startHarness(service, fixture.activation, fixture.snapshotReads);
           assert.deepEqual(yield* Ref.get(fixture.commands), []);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect.each([
+    "non-bot",
+    "failed",
+    "native-failed",
+    "open-link",
+    "open-branch",
+    "bot-lookup-failed",
+  ] as const)("keeps a %s child unsettled with auto-settle disabled", (kind) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const finished = finishedChild(kind, kind === "native-failed");
+        const child = {
+          ...finished,
+          ...(kind === "failed" ? { status: "failed" as const } : {}),
+          ...(kind === "native-failed"
+            ? {
+                latestRunlessRootNode: { ...rootNode(finished.id), status: "failed" as const },
+              }
+            : {}),
+          ...(kind === "open-branch" ? { branch: "feature" } : {}),
+          ...(kind === "open-link"
+            ? {
+                pullRequests: [
+                  {
+                    host: "example.test",
+                    repository: "owner/repository",
+                    number: 42,
+                    url: "https://example.test/owner/repository/pull/42",
+                    source: "manual" as const,
+                    linkedAt: NOW,
+                    stack: null,
+                    snapshot: {
+                      state: "open" as const,
+                      title: "Pull request",
+                      headBranch: "feature",
+                      baseBranch: "main",
+                      isDraft: false,
+                      updatedAt: NOW,
+                      syncedAt: NOW,
+                    },
+                  },
+                ],
+              }
+            : {}),
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([child], [makeProject()]),
+          settings: disabledSettings,
+          botHomeThreadIds: kind === "non-bot" ? [] : [parentId],
+          ...(kind === "bot-lookup-failed"
+            ? {
+                isHomeThread: () => Effect.fail(new BotError({ message: "Unavailable" })),
+              }
+            : {}),
+          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          assert.deepEqual(yield* Ref.get(fixture.commands), []);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("applies the configured inactivity period to non-bot children", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const recent = finishedChild("recent-non-bot", false);
+        const old = {
+          ...finishedChild("inactive-non-bot", false),
+          latestUserMessageAt: DateTime.makeUnsafe("2026-08-20T00:00:00.000Z"),
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-08-20T00:00:00.000Z"),
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([recent, old]),
+          settings: { ...disabledSettings, sidebarAutoSettleAfterDays: 3 },
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          assert.deepEqual(
+            (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
+            [old.id],
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("does not evaluate ordinary threads when auto-settle is disabled", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const ordinary = makeThread("ordinary");
+        Object.defineProperty(ordinary, "pendingRuntimeRequest", {
+          get: () => {
+            throw new Error("Ordinary thread evaluated");
+          },
+        });
+        const child = finishedChild("bot-child", false);
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([ordinary, child]),
+          settings: disabledSettings,
+          botHomeThreadIds: [parentId],
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          assert.deepEqual(
+            (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
+            [child.id],
+          );
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

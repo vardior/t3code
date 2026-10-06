@@ -26,6 +26,7 @@ import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import * as BotService from "../bots/BotService.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -215,16 +216,10 @@ export function resolveAutoSettlementAt(input: {
   readonly autoSettleAfterDays: number | null;
   readonly autoSettleOnMerge: boolean;
   readonly autoSettleKeepPullRequests?: boolean;
+  readonly isBotChild?: boolean;
 }): DateTime.Utc | null {
   const { thread } = input;
   if (!isAutoSettlementCandidate(thread, input.nowMs)) return null;
-  if (isSubagentChild(thread)) {
-    const rootNode = thread.latestRunlessRootNode;
-    const status = thread.latestRunId === null ? rootNode?.status : thread.status;
-    return status !== undefined && workHasEnded(status)
-      ? (thread.latestRunCompletedAt ?? rootNode?.completedAt ?? thread.updatedAt)
-      : null;
-  }
   let pullRequest = input.pullRequest;
   const links = settlementPullRequestLinks(thread.pullRequests ?? []);
   if (links.some((link) => link.snapshot === null)) return null;
@@ -245,6 +240,14 @@ export function resolveAutoSettlementAt(input: {
             mergedAt: latest.snapshot.mergedAt ?? null,
             closedAt: latest.snapshot.closedAt ?? null,
           };
+  }
+  if (input.isBotChild) {
+    const rootNode = thread.latestRunlessRootNode;
+    const status = thread.latestRunId === null ? rootNode?.status : thread.status;
+    if (status === "failed" || hasOpenLink || pullRequest?.state === "open") return null;
+    return status !== undefined && workHasEnded(status)
+      ? (thread.latestRunCompletedAt ?? rootNode?.completedAt ?? thread.updatedAt)
+      : null;
   }
   const activityAtMs =
     latestMillis([
@@ -336,6 +339,7 @@ export const make = Effect.gen(function* () {
   const projectScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   // Repeated thread.settled retains settledAt; run the action only once per settlement.
   const settleActionRunAt = new Map<ThreadId, number>();
+  const bots = yield* BotService.BotService;
 
   const sweep = Effect.fn("ThreadSettlementServiceV2.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
@@ -343,19 +347,56 @@ export const make = Effect.gen(function* () {
   ) {
     const settings = yield* settingsService.getSettings;
     const configured = autoSettlementConfigured(settings);
-    const threads = yield* projections.getSettlementCandidates(threadId);
+    const threads = yield* projections.getSettlementCandidates(threadId, {
+      subagentOnly: !configured,
+    });
     if (threads.length === 0) return;
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
     // Merge events resweep all candidates because unlinked threads settle through branch lookup.
-    const candidates = threads.filter(
-      (thread) =>
-        (configured || isSubagentChild(thread)) && isAutoSettlementCandidate(thread, nowMs),
+    const botParents = new Set<ThreadId>();
+    const parentIds = [
+      ...new Set(
+        threads.flatMap((thread) =>
+          isSubagentChild(thread) ? [thread.lineage.parentThreadId!] : [],
+        ),
+      ),
+    ];
+    yield* Effect.forEach(
+      parentIds,
+      (parentId) =>
+        bots.isHomeThread(parentId).pipe(
+          Effect.catchCause(() => Effect.succeed(false)),
+          Effect.tap((isHome) =>
+            Effect.sync(() => {
+              if (isHome) botParents.add(parentId);
+            }),
+          ),
+        ),
+      { concurrency: 8, discard: true },
     );
+    const isBotChild = (thread: ProjectionStore.ProjectionSettlementCandidate) =>
+      isSubagentChild(thread) && botParents.has(thread.lineage.parentThreadId!);
+    const candidates = threads.filter(
+      (thread) => (configured || isBotChild(thread)) && isAutoSettlementCandidate(thread, nowMs),
+    );
+    if (!configured && candidates.length === 0) return;
 
-    // Runs per candidate thread, thousands per sweep on busy servers; the sweep owns the span.
     const settleThread = Effect.fnUntraced(
-      function* (thread: (typeof candidates)[number], pullRequest: SettlementPullRequest | null) {
-        // thread.auto-settle does not recheck settings, so read them per decision; reads are cached.
+      function* (
+        thread: (typeof candidates)[number],
+        pullRequest: SettlementPullRequest | null,
+        sourceControlChecked = false,
+      ) {
+        if (
+          isBotChild(thread) &&
+          !sourceControlChecked &&
+          visibleThreadPullRequests(thread.pullRequests ?? []).length === 0 &&
+          (thread.branch !== null ||
+            thread.linkedPullRequest != null ||
+            thread.branchPullRequest != null)
+        ) {
+          return thread;
+        }
         const currentSettings = resolveProjectSettings(
           yield* settingsService.getSettings,
           thread.projectId,
@@ -368,6 +409,7 @@ export const make = Effect.gen(function* () {
           autoSettleAfterDays: currentSettings.sidebarAutoSettleAfterDays,
           autoSettleOnMerge: currentSettings.sidebarAutoSettleOnMerge,
           autoSettleKeepPullRequests: currentSettings.sidebarAutoSettleKeepPullRequests,
+          isBotChild: isBotChild(thread),
         });
         if (settledAt === null) return thread;
         const uuid = yield* random.uuidV4();
@@ -405,13 +447,13 @@ export const make = Effect.gen(function* () {
           autoSettleAfterDays: projectSettings.sidebarAutoSettleAfterDays,
           autoSettleOnMerge: projectSettings.sidebarAutoSettleOnMerge,
           autoSettleKeepPullRequests: projectSettings.sidebarAutoSettleKeepPullRequests,
+          isBotChild: isBotChild(thread),
         });
         return settledAt === null ? Effect.succeed(thread) : settleThread(thread, null);
       },
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
-      .filter((thread) => !isSubagentChild(thread))
       .filter((thread) => visibleThreadPullRequests(thread.pullRequests ?? []).length === 0)
       .filter(
         (thread) =>
@@ -488,6 +530,7 @@ export const make = Effect.gen(function* () {
             autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
             autoSettleOnMerge: settings.sidebarAutoSettleOnMerge,
             autoSettleKeepPullRequests: settings.sidebarAutoSettleKeepPullRequests,
+            isBotChild: isBotChild(thread),
           }) !== null
         );
       });
@@ -560,7 +603,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const pullRequest = yield* pullRequestFor(group);
           if (pullRequest === undefined) return;
-          yield* Effect.forEach(group, (thread) => settleThread(thread, pullRequest), {
+          yield* Effect.forEach(group, (thread) => settleThread(thread, pullRequest, true), {
             discard: true,
           });
         }).pipe(
