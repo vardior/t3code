@@ -25,6 +25,8 @@ import {
   type MouseEvent,
 } from "react";
 
+import { useComposerDraftStore } from "../../composerDraftStore";
+
 import { useAssetUrls } from "../../assets/assetUrls";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { useThreadShell } from "../../state/entities";
@@ -328,7 +330,13 @@ function BotComposer(props: {
   readonly runtimeMode: RuntimeMode | null;
   readonly interactionMode: ProviderInteractionMode | null;
 }) {
-  const [text, setText] = useState("");
+  const draftTarget = useMemo(
+    () => scopeThreadRef(props.environmentId, props.bot.homeThreadId),
+    [props.environmentId, props.bot.homeThreadId],
+  );
+  const text = useComposerDraftStore((store) => store.getComposerDraft(draftTarget)?.prompt ?? "");
+  const setPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setText = (value: string) => setPrompt(draftTarget, value);
   const [images, setImages] = useState<
     ReadonlyArray<{ readonly key: string; readonly upload: UploadChatImageAttachment }>
   >([]);
@@ -376,6 +384,8 @@ function BotComposer(props: {
   const send = async () => {
     const message = text.trim();
     if (!canSend || props.runtimeMode === null || props.interactionMode === null) return;
+    const sentText = text;
+    const sentImageKeys = new Set(images.map((image) => image.key));
     setSending(true);
     const result = await startTurn({
       environmentId: props.environmentId,
@@ -394,8 +404,10 @@ function BotComposer(props: {
     });
     setSending(false);
     if (result._tag === "Success") {
-      setText("");
-      setImages([]);
+      if (useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt === sentText) {
+        setPrompt(draftTarget, "");
+      }
+      setImages((current) => current.filter((image) => !sentImageKeys.has(image.key)));
     } else if (!isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       toastManager.add(
