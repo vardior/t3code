@@ -513,19 +513,14 @@ export const layer = Layer.effect(
                 .pipe(Effect.catchCause(() => Effect.succeed(false))))
             )
               return;
-            const config = yield* fileSystem
-              .readFileString(configPath)
-              .pipe(
-                Effect.flatMap((raw) =>
-                  decodeBotConfig(raw).pipe(
-                    Effect.catch((cause) =>
-                      Effect.logDebug("Skipping malformed bot pause state", { botId, cause }).pipe(
-                        Effect.as(null),
-                      ),
-                    ),
-                  ),
+            const raw = yield* fileSystem.readFileString(configPath);
+            const config = yield* decodeBotConfig(raw).pipe(
+              Effect.catch((cause) =>
+                Effect.logDebug("Skipping malformed bot pause state", { botId, cause }).pipe(
+                  Effect.as(null),
                 ),
-              );
+              ),
+            );
             if (config === null) return;
             if (isPauseExpired(config, yield* Clock.currentTimeMillis)) {
               yield* setPaused({ botId, paused: false }, true);

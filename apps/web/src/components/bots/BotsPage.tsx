@@ -267,7 +267,7 @@ function BotListItem(props: {
   readonly refresh: () => void;
 }) {
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
-  const status = botThreadShellStatus(shell, props.bot.homeThreadMissing, props.bot);
+  const status = botThreadShellStatus(shell, props.bot);
   const working = status === "working";
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
   const attentionLabel = botThreadShellStatusLabel(status);

@@ -2,7 +2,6 @@ import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
@@ -59,7 +58,6 @@ export const writeBotPauseFields = Effect.fn("writeBotPauseFields")(function* (
   fields: Record<string, unknown> | null,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const document = yield* decodeJsonObject(yield* fileSystem.readFileString(configPath));
   const next =
     fields === null
@@ -68,8 +66,5 @@ export const writeBotPauseFields = Effect.fn("writeBotPauseFields")(function* (
   yield* writeFileStringAtomically({
     filePath: configPath,
     contents: `${yield* encodeJsonObject(next)}\n`,
-  }).pipe(
-    Effect.provideService(FileSystem.FileSystem, fileSystem),
-    Effect.provideService(Path.Path, path),
-  );
+  });
 });

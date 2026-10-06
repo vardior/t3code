@@ -885,8 +885,10 @@ describe("botThreadShellStatus", () => {
       },
     });
     expect(botThreadShellStatus(shell)).toBe("archived");
-    expect(botThreadShellStatus(undefined, false, { homeThreadArchived: true })).toBe("archived");
-    expect(botThreadShellStatus(shell, true, { homeThreadArchived: true })).toBe("missing");
+    expect(botThreadShellStatus(undefined, { homeThreadArchived: true })).toBe("archived");
+    expect(botThreadShellStatus(shell, { homeThreadMissing: true, homeThreadArchived: true })).toBe(
+      "missing",
+    );
     expect(botThreadShellStatus({ ...shell, archivedAt: null })).toBe("needs-approval");
     expect(botThreadShellStatusLabel("archived")).toBe("Home thread archived");
   });
@@ -896,18 +898,16 @@ describe("botThreadShellStatus", () => {
       latestRunId: RunId.make("run"),
       status: "interrupted",
     });
-    expect(botThreadShellStatus(shell, false, { homeThreadQueueHeld: true })).toBe("queue-held");
+    expect(botThreadShellStatus(shell, { homeThreadQueueHeld: true })).toBe("queue-held");
     expect(
       botThreadShellStatus(
         { ...shell, latestRun: { ...shell.latestRun!, status: "failed" } },
-        false,
         { homeThreadQueueHeld: true },
       ),
     ).toBe("failed");
     expect(
       botThreadShellStatus(
         { ...shell, latestRun: { ...shell.latestRun!, status: "running" } },
-        false,
         { homeThreadQueueHeld: true },
       ),
     ).toBe("working");

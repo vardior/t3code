@@ -1,8 +1,8 @@
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
+import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
   botChatHistoryStart,

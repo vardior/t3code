@@ -28,21 +28,8 @@ import {
   scheduledTaskThreadMode,
   managedRuntimeModeDenial,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
-import * as Clock from "effect/Clock";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
-import { ServerConfig } from "../config.ts";
-import {
-  BOT_ID,
-  BotSchedulePauseTransition,
-  decodeBotConfig,
-  isPaused,
-  listedScheduleIds,
-  ownThreadIds,
-  writeBotPauseFields,
-} from "../bots/BotConfig.ts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
 import * as Mac from "effect/crypto/Mac";
@@ -52,9 +39,11 @@ import * as Effect from "effect/Effect";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Exit from "effect/Exit";
 import * as Duration from "effect/Duration";
+import * as FileSystem from "effect/FileSystem";
 import * as Metric from "effect/Metric";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
@@ -64,7 +53,17 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  BOT_ID,
+  BotSchedulePauseTransition,
+  decodeBotConfig,
+  isPaused,
+  listedScheduleIds,
+  ownThreadIds,
+  writeBotPauseFields,
+} from "../bots/BotConfig.ts";
+import { ServerConfig } from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -512,10 +511,11 @@ export const layer = Layer.effect(
         : task;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const config = yield* Effect.serviceOption(ServerConfig);
+    const serverConfig = yield* Effect.serviceOption(ServerConfig);
     const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim();
     const botsDir =
-      configuredBotsDir || (Option.isSome(config) ? path.join(config.value.baseDir, "bots") : null);
+      configuredBotsDir ||
+      (Option.isSome(serverConfig) ? path.join(serverConfig.value.baseDir, "bots") : null);
     const pauseLock = yield* Semaphore.make(1);
     const withBotPauseLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.gen(function* () {
@@ -525,12 +525,12 @@ export const layer = Layer.effect(
     const pausedBotsForSchedule = (id: ScheduledTaskId, threadId: ThreadId | null) =>
       Effect.gen(function* () {
         if (botsDir === null) return [];
-        const ids = yield* fileSystem
+        const entries = yield* fileSystem
           .readDirectory(botsDir)
           .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])));
         const now = yield* Clock.currentTimeMillis;
         const bots = yield* Effect.forEach(
-          ids.filter((id) => BOT_ID.test(id)),
+          entries.filter((entry) => BOT_ID.test(entry)),
           (botId) =>
             Effect.gen(function* () {
               const configPath = path.join(botsDir, botId, "bot.json");
@@ -1512,11 +1512,10 @@ ${checkOutput}` : basePrompt;
           ? managedRuntimeModeDenial(managedPolicy.summary, input.runtimeMode)
           : undefined;
       if (modeDenial !== undefined) return yield* taskError(modeDenial, { taskId: id });
+      const creating = existingTask === null && !input.requireExisting;
       const pausedBots =
-        input.enabled && existingTask === null && !input.requireExisting
-          ? yield* pausedBotsForSchedule(id, input.threadId ?? null)
-          : [];
-      if (input.enabled && (existingTask !== null || input.requireExisting)) {
+        input.enabled && creating ? yield* pausedBotsForSchedule(id, input.threadId ?? null) : [];
+      if (input.enabled && !creating) {
         yield* assertBotScheduleCanEnable(id, input.threadId ?? null);
         if (existingTask !== null) yield* assertBotScheduleCanEnable(id, existingTask.threadId);
       }

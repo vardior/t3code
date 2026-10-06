@@ -64,8 +64,7 @@ export function isActiveRunStatus(status: string | null | undefined): boolean {
 
 export function botThreadShellStatus(
   shell: EnvironmentThreadShell | null | undefined,
-  homeThreadMissing = false,
-  homeThreadState: Pick<BotSummary, "homeThreadQueueHeld" | "homeThreadArchived"> = {},
+  bot: Pick<BotSummary, "homeThreadMissing" | "homeThreadArchived" | "homeThreadQueueHeld"> = {},
 ):
   | "idle"
   | "working"
@@ -76,17 +75,17 @@ export function botThreadShellStatus(
   | "missing"
   | "archived"
   | "queue-held" {
-  if (homeThreadMissing) return "missing";
-  if (homeThreadState.homeThreadArchived || shell?.archivedAt != null) return "archived";
+  if (bot.homeThreadMissing) return "missing";
+  if (bot.homeThreadArchived || shell?.archivedAt != null) return "archived";
   const request = shell?.source.pendingRuntimeRequest?.kind;
   if (request === "user_input") return "needs-input";
   if (request && request !== "auth_refresh" && request !== "dynamic_tool_call")
     return "needs-approval";
   const status = shell?.latestRun?.status;
-  if (isActiveRunStatus(status) && !(status === "queued" && homeThreadState.homeThreadQueueHeld))
+  if (isActiveRunStatus(status) && !(status === "queued" && bot.homeThreadQueueHeld))
     return "working";
   if (status === "failed") return "failed";
-  if (homeThreadState.homeThreadQueueHeld) return "queue-held";
+  if (bot.homeThreadQueueHeld) return "queue-held";
   if (status === "interrupted") return "stopped";
   return "idle";
 }
@@ -161,15 +160,10 @@ export function botConversationStatus(
   const queueHeld = isBotQueueHeld(projection.runs);
   const latest =
     usageLimitRun ??
-    projection.runs.reduce<(ChatRun & Pick<OrchestrationV2Run, "ordinal">) | null>(
-      (current, run) =>
-        run.status === "queued" && queueHeld
-          ? current
-          : current === null || run.ordinal > current.ordinal
-            ? run
-            : current,
-      null,
-    );
+    projection.runs.reduce<OrchestrationV2Run | null>((current, run) => {
+      if (queueHeld && run.status === "queued") return current;
+      return current === null || run.ordinal > current.ordinal ? run : current;
+    }, null);
   if (latest?.status === "interrupted") return { kind: "stopped" };
   if (latest?.status !== "failed") return { kind: queueHeld ? "queue-held" : "idle" };
   const error = projection.turnItems.findLast(
