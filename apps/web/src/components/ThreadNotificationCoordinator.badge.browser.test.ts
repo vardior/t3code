@@ -2,7 +2,7 @@ import type { AnyRouter } from "@tanstack/react-router";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
 import { stubGlobal } from "../../test/render";
@@ -68,6 +68,17 @@ vi.mock(import("../hooks/useSettings"), async (original) => ({
     inAppNotificationsEnabled: state.inApp,
   })) as never,
 }));
+vi.mock(import("../state/server"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    serverEnvironment: {
+      ...actual.serverEnvironment,
+      bots: { list: () => botsAtom },
+      settingsValueAtom: () => settingsAtom,
+    } as never,
+  };
+});
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
   playNotificationSound: state.sound,
@@ -82,6 +93,8 @@ const shellAtom = Atom.family((_id: string) => Atom.make<unknown>(null));
 const environmentIdsAtom = Atom.make<ReadonlyArray<string>>([]);
 const noRequestsAtom = Atom.make(new Map());
 const noDelegatedAtom = Atom.make<ReadonlySet<string>>(new Set<string>());
+const botsAtom = Atom.make(AsyncResult.success({ bots: [] }));
+const settingsAtom = Atom.make(null);
 state.shells = { set: (id, value) => registry.set(shellAtom(id), value) };
 
 class TestNotification extends EventTarget {
@@ -205,7 +218,7 @@ function setup() {
       .mockImplementation(() => visibility as DocumentVisibilityState),
   );
   const router = {
-    state: { matches: [{ params: {} }] },
+    state: { matches: [{ params: {} }], location: { pathname: "/", search: {} } },
     navigate: state.navigate,
   } as unknown as AnyRouter;
   return {

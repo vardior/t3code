@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 
 export function parseBotsSearch(raw: Record<string, unknown>): { env?: string; bot?: string } {
   return {
@@ -12,7 +12,10 @@ export function resolveBotSelection<
     readonly environmentId: EnvironmentId;
     readonly bot: { readonly id: string };
   },
->(bots: ReadonlyArray<T>, search: { readonly env?: string; readonly bot?: string }): T | null {
+>(
+  bots: ReadonlyArray<T>,
+  search: { readonly env?: string | undefined; readonly bot?: string | undefined },
+): T | null {
   if (!search.bot) return null;
   return (
     bots.find(
@@ -20,5 +23,31 @@ export function resolveBotSelection<
         entry.bot.id === search.bot &&
         (search.env === undefined || entry.environmentId === search.env),
     ) ?? null
+  );
+}
+
+export function resolveThreadDestination(
+  threadRef: ScopedThreadRef,
+  bots: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly bot: { readonly id: string; readonly homeThreadId: string };
+  }>,
+) {
+  const entry = bots.find(
+    ({ environmentId, bot }) =>
+      environmentId === threadRef.environmentId && bot.homeThreadId === threadRef.threadId,
+  );
+  return entry
+    ? { to: "/bots" as const, search: { env: entry.environmentId, bot: entry.bot.id } }
+    : { to: "/$environmentId/$threadId" as const, params: threadRef };
+}
+
+export function shouldSuppressThreadNotification(
+  notifyAgentThreads: boolean,
+  bots: ReadonlyArray<{ readonly homeThreadId: string }> | undefined,
+  threadId: string,
+) {
+  return (
+    !notifyAgentThreads && bots !== undefined && !bots.some((bot) => bot.homeThreadId === threadId)
   );
 }

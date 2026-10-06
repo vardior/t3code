@@ -11,7 +11,7 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { resolveBotSelection } from "./botNavigation";
-import { useEnvironmentBots } from "./useEnvironmentBots";
+import { refreshEnvironmentBots, useEnvironmentBots } from "./useEnvironmentBots";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import {
@@ -35,6 +35,11 @@ export function BotsPage({
   useEscapeToGoBack();
   const { environments, isReady } = useEnvironments();
   const { bots, queries } = useEnvironmentBots();
+  useEffect(() => {
+    refreshEnvironmentBots();
+    window.addEventListener("focus", refreshEnvironmentBots);
+    return () => window.removeEventListener("focus", refreshEnvironmentBots);
+  }, []);
   const navigate = useNavigate();
   const [infoOpen, setInfoOpen] = useState(false);
   const selection = resolveBotSelection(bots, { bot: botId, env: requestedEnvironmentId });
@@ -135,7 +140,7 @@ export function BotsPage({
             aria-label="Bots"
             className={cn(
               "min-h-0 w-full shrink-0 flex-col overflow-y-auto border-border/60 md:flex md:w-72 md:border-r",
-              selected || botId || bots.length === 0 ? "hidden" : "flex",
+              bots.length === 0 ? "hidden md:hidden" : selected || botId ? "hidden" : "flex",
             )}
           >
             {queries.map((query) =>

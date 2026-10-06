@@ -33,11 +33,11 @@ import { useThreadSearch } from "../state/queries";
 import { primaryServerProvidersAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
-import { buildThreadRouteParams } from "../threadRoutes";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { buildThreadActionItems, ITEM_ICON_CLASS } from "./CommandPalette.logic";
 import { useEnvironmentLookups, useProjectLookups } from "./CommandPaletteLookups";
 import { ThreadCommandSubtitle } from "./ThreadCommandSubtitle";
+import { useThreadDestination } from "./bots/useThreadDestination";
 import {
   ThreadRowLeadingStatus,
   ThreadRowTrailingStatus,
@@ -99,6 +99,7 @@ export function useCommandPaletteThreadItems(input: {
 }) {
   const { activeThread, threadSearchQuery } = input;
   const navigate = useNavigate();
+  const threadDestination = useThreadDestination();
   const threads = useVisibleThreadShells();
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
   const providerEntryByEnvironmentAndInstanceId = useProviderEntryByEnvironmentAndInstanceId();
@@ -183,10 +184,7 @@ export function useCommandPaletteThreadItems(input: {
           },
         });
       }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-      });
+      await navigate(threadDestination(scopeThreadRef(thread.environmentId, thread.id)));
     },
   });
 

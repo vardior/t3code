@@ -1,4 +1,8 @@
 import { attachSidebarTree } from "../lib/sidebarTree";
+import { threadsWithoutBotHomes } from "@t3tools/client-runtime/state/bot-conversation";
+import { useBotsData } from "./bots/BotsDataProvider";
+import { useOpenBots } from "./bots/useOpenBots";
+import { useThreadDestination } from "./bots/useThreadDestination";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
@@ -62,6 +66,7 @@ import {
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 
 import {
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   FolderIcon,
@@ -432,12 +437,14 @@ function useSidebarThreads(input: {
     serverConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
-    threads,
+    threads: allSidebarThreads,
     delegatedUnderParent,
     routeRowThreadKey,
     folderGroups,
     keepEmptyFolders: keepEmpty,
   } = input;
+  const { bots } = useBotsData();
+  const threads = threadsWithoutBotHomes(allSidebarThreads, bots);
   // Folders already separate the work, so boring mode has no Working shelf.
   const workingShelfEnabled =
     useClientSettings((s) => s.sidebarWorkingShelfEnabled) && folderGroups === null;
@@ -563,6 +570,7 @@ function useSidebarThreads(input: {
   }
   return {
     ...partition,
+    botsHoldThreads: threads.length < allSidebarThreads.length,
     threads,
     workingShelfEnabled,
     searchableThreads: [
@@ -996,6 +1004,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
+  const openBots = useOpenBots();
+  const openBotsFromSidebar = () => {
+    if (isMobile) setOpenMobile(false);
+    void openBots();
+  };
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -1294,6 +1307,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
 
   const {
+    botsHoldThreads,
     workingShelfEnabled,
     pinnedThreads,
     draggableThreadKeys,
@@ -1438,7 +1452,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return mapping;
   })();
 
-  const navigateToThread = (threadRef: ScopedThreadRef) => {
+  const threadDestination = useThreadDestination();
+  const navigateToThread = (
+    threadRef: ScopedThreadRef,
+    destination = threadDestination(threadRef),
+  ) => {
     if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
       clearSelection();
     }
@@ -1446,10 +1464,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) {
       setOpenMobile(false);
     }
-    return router.navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(threadRef),
-    });
+    return router.navigate(destination);
   };
 
   const handleThreadFileDrop = async (threadRef: ScopedThreadRef, files: File[]) => {
@@ -1462,7 +1477,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (landedBefore) return;
 
     try {
-      await navigateToThread(threadRef);
+      await navigateToThread(threadRef, {
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(threadRef),
+      });
       const landed =
         router.buildLocation({
           to: "/$environmentId/$threadId",
@@ -3307,6 +3325,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 {threadSearch.isPending ? "Searching thread messages…" : "No threads found"}
               </p>
             )
+          ) : null}
+          {!isSearchingThreads &&
+          botsHoldThreads &&
+          !scopedProjectGroup &&
+          settledThreads.length > 0 &&
+          visibleDraftSessionCount === 0 &&
+          pinnedThreads.length +
+            activeThreads.length +
+            workingThreads.length +
+            snoozedThreads.length ===
+            0 ? (
+            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+              <span>Open work is running in your bots</span>
+              <button
+                type="button"
+                onClick={openBotsFromSidebar}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+              >
+                <BotIcon className="-mx-0.5 size-3" />
+                Open Bots
+              </button>
+            </div>
           ) : null}
           {!isSearchingThreads ? (
             <TooltipProvider

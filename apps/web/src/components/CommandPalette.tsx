@@ -1,3 +1,6 @@
+import { useOpenBots } from "./bots/useOpenBots";
+import { useThreadDestination } from "./bots/useThreadDestination";
+import { useBotRouteThreadRef } from "./bots/useBotRouteThreadRef";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -55,6 +58,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  BotIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -66,6 +70,7 @@ import {
   FolderPlusIcon,
   MessageSquareDashedIcon,
   LinkIcon,
+  ListTodoIcon,
   MessageSquareIcon,
   PaletteIcon,
   RotateCcwIcon,
@@ -135,6 +140,7 @@ import {
   useAnyEnvironmentHiding,
   useHiddenThreadKeys,
   useEnvironmentThreadRefs,
+  useThreadShell,
   useProjects,
   useServerConfigs,
   useVisibleThreadShells,
@@ -171,7 +177,6 @@ import {
   isWindowsPlatform,
   newProjectId,
 } from "../lib/utils";
-import { buildThreadRouteParams } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import {
   applyWslEnvironmentConfiguration,
@@ -401,6 +406,8 @@ function OpenCommandPaletteDialog(props: {
   readonly initialContext: CommandPaletteReturnContext | undefined;
 }) {
   const navigate = useNavigate();
+  const openBots = useOpenBots();
+  const threadDestination = useThreadDestination();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { openChildSearch, setOpen } = props;
   // Keyed by palette session: the intent and restored search only seed this
@@ -470,6 +477,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
+  const botHomeThread = useThreadShell(useBotRouteThreadRef());
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -801,10 +809,9 @@ function OpenCommandPaletteDialog(props: {
           clientSettings.sidebarThreadSortOrder,
         );
     if (latestThread) {
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(latestThread.environmentId, latestThread.id)),
-      });
+      await navigate(
+        threadDestination(scopeThreadRef(latestThread.environmentId, latestThread.id)),
+      );
       return;
     }
 
@@ -1448,6 +1455,21 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  const openItemsThread = activeThread ?? botHomeThread;
+  if (openItemsThread !== null) {
+    const threadRef = scopeThreadRef(openItemsThread.environmentId, openItemsThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:open-thread-open-items",
+      searchTerms: ["open items", "questions", "waiting", "decisions", "todo"],
+      title: "Show open items",
+      icon: <ListTodoIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore.getState().open(threadRef, "open-items");
+      },
+    });
+  }
+
   if (activeThread !== null) {
     const thread = activeThread;
     actionItems.push({
@@ -1634,6 +1656,16 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:bots",
+    searchTerms: ["bots", "agents", "home", "schedules"],
+    title: "Open Bots",
+    icon: <BotIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "bots.open",
+    run: openBots,
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:usage",
     searchTerms: ["usage", "use", "tokens", "cost", "spend", "limits", "stats", "analytics"],
     title: "Open usage",
@@ -1805,10 +1837,7 @@ function OpenCommandPaletteDialog(props: {
             query: linkedThreadSearch.query,
             icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
             runThread: async (thread) => {
-              await navigate({
-                to: "/$environmentId/$threadId",
-                params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-              });
+              await navigate(threadDestination(scopeThreadRef(thread.environmentId, thread.id)));
             },
           })
         : allThreadItems,
@@ -1880,12 +1909,9 @@ function OpenCommandPaletteDialog(props: {
         clientSettings.sidebarThreadSortOrder,
       );
       if (latestThread && latestThread.settledOverride !== "settled") {
-        await navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(
-            scopeThreadRef(latestThread.environmentId, latestThread.id),
-          ),
-        });
+        await navigate(
+          threadDestination(scopeThreadRef(latestThread.environmentId, latestThread.id)),
+        );
       } else {
         const navigationResult = await settlePromise(() =>
           handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),

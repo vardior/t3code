@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   type EnvironmentThreadShell,
   type PendingSubagentRequest,
@@ -7,9 +8,9 @@ import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
-import type { ClientSettings } from "@t3tools/contracts/settings";
+import { DEFAULT_SERVER_SETTINGS, type ClientSettings } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
-import type { AtomRegistry } from "effect/reactivity";
+import { AsyncResult, type AtomRegistry } from "effect/reactivity";
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -20,6 +21,7 @@ import {
 import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings";
 import { isWindowsPlatform } from "../lib/utils";
 import { environmentSummaries } from "../state/presentation";
+import { serverEnvironment } from "../state/server";
 import { environmentShell } from "../state/shell";
 import { environmentThreadShells } from "../state/threads";
 import {
@@ -36,6 +38,12 @@ import {
   type ThreadNotificationKind,
   type ThreadNotificationObservation,
 } from "./ThreadNotificationCoordinator.logic";
+import {
+  parseBotsSearch,
+  resolveBotSelection,
+  resolveThreadDestination,
+  shouldSuppressThreadNotification,
+} from "./bots/botNavigation";
 import { toastManager } from "./ui/toast";
 
 interface NotificationState extends ThreadNotificationObservation {
@@ -123,6 +131,29 @@ export function startThreadNotifications(
         .has(threadKey({ environmentId, threadId: thread.id }))
     )
       return;
+    const botsResult = registry.get(serverEnvironment.bots.list({ environmentId, input: {} }));
+    const bots = Option.getOrNull(AsyncResult.value(botsResult))?.bots ?? [];
+    const notifyAgentThreads =
+      registry.get(serverEnvironment.settingsValueAtom(environmentId))?.notifyAgentThreads ??
+      DEFAULT_SERVER_SETTINGS.notifyAgentThreads;
+    if (
+      shouldSuppressThreadNotification(
+        notifyAgentThreads,
+        AsyncResult.isSuccess(botsResult) ? bots : undefined,
+        thread.id,
+      )
+    )
+      return;
+    const botEntries = bots.map((bot) => ({ environmentId, bot }));
+    const location = router.state.location;
+    const activeBot =
+      location.pathname === "/bots"
+        ? resolveBotSelection(botEntries, parseBotsSearch(location.search))
+        : null;
+    const destination = resolveThreadDestination(
+      scopeThreadRef(environmentId, thread.id),
+      botEntries,
+    );
     const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
     const active = (router.state.matches.at(-1)?.params ?? {}) as {
       environmentId?: string;
@@ -149,7 +180,8 @@ export function startThreadNotifications(
       inAppNotificationsEnabled &&
       document.visibilityState === "visible" &&
       document.hasFocus() &&
-      (active.environmentId !== environmentId || active.threadId !== thread.id)
+      (active.environmentId !== environmentId || active.threadId !== thread.id) &&
+      activeBot?.bot.homeThreadId !== thread.id
     ) {
       const toastKey = threadKey({ environmentId, threadId: thread.id });
       const toastId: ToastId = toastManager.add({
@@ -173,13 +205,10 @@ export function startThreadNotifications(
             ),
         },
         actionProps: {
-          children: "Open thread",
+          children: destination.to === "/bots" ? "Open bot" : "Open thread",
           onClick: () => {
             toastManager.close(toastId);
-            void router.navigate({
-              to: "/$environmentId/$threadId",
-              params: { environmentId, threadId: thread.id },
-            });
+            void router.navigate(destination);
           },
         },
       });
@@ -206,10 +235,7 @@ export function startThreadNotifications(
         notification.close();
         window.focus();
         void window.desktopBridge?.revealWindow().catch(() => undefined);
-        void router.navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId: thread.id },
-        });
+        void router.navigate(destination);
       });
     } catch {
       // Some browsers expose Notification but reject desktop presentation.
@@ -296,6 +322,11 @@ export function startThreadNotifications(
       }),
     };
     let threads: ReadonlyArray<OrchestrationV2ThreadShell> | null = null;
+    const unsubscribeBots = registry.subscribe(
+      serverEnvironment.bots.list({ environmentId, input: {} }),
+      () => {},
+      { immediate: true },
+    );
     const unsubscribeShell = registry.subscribe(
       environmentShell.stateValueAtom(environmentId),
       (shell) => {
@@ -326,6 +357,7 @@ export function startThreadNotifications(
       unsubscribeShell();
       unsubscribeRequests();
       unsubscribeDelegated();
+      unsubscribeBots();
       entry.gate.clear();
     };
     return entry;
