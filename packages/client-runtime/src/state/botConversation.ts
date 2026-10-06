@@ -10,7 +10,7 @@ import {
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 
-import { formatContextWindowTokens } from "../../lib/contextWindow";
+import { formatContextWindowTokens } from "../contextWindowTokens.ts";
 
 export type BotChatItem =
   | {
@@ -188,7 +188,7 @@ export function buildBotChat(input: {
       status: worker.status,
     })),
   ];
-  return items.filter((item) => Number.isFinite(item.at)).toSorted((a, b) => a.at - b.at);
+  return [...items].filter((item) => Number.isFinite(item.at)).sort((a, b) => a.at - b.at);
 }
 
 function withoutInlineImages(text: string): string {

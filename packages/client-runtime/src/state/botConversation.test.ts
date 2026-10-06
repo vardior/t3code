@@ -11,7 +11,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildBotChat, slackMarkupToMarkdown, slackTextFromCommand } from "./botConversation";
+import { buildBotChat, slackMarkupToMarkdown, slackTextFromCommand } from "./botConversation.ts";
 
 describe("slackTextFromCommand", () => {
   it("reads the text piped from printf into dm-send", () => {

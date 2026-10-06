@@ -151,6 +151,14 @@
       "types": "./src/relay/index.ts",
       "default": "./src/relay/index.ts"
     },
+    "./context-window-tokens": {
+      "types": "./src/contextWindowTokens.ts",
+      "default": "./src/contextWindowTokens.ts"
+    },
+    "./state/bot-conversation": {
+      "types": "./src/state/botConversation.ts",
+      "default": "./src/state/botConversation.ts"
+    },
     "./state/auth": {
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"

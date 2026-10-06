@@ -21,7 +21,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { BotAvatar } from "./BotAvatar";
-import { isActiveRunStatus } from "./botConversation";
+import { isActiveRunStatus } from "@t3tools/client-runtime/state/bot-conversation";
 import { BotChat } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
 

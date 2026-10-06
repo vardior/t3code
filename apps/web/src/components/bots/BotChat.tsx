@@ -43,7 +43,7 @@ import {
   rewriteThreadLinks,
   threadIdFromHref,
   type BotChatItem,
-} from "./botConversation";
+} from "@t3tools/client-runtime/state/bot-conversation";
 
 export function BotChat(props: {
   readonly bot: BotSummary;

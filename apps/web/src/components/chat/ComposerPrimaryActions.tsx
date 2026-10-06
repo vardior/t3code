@@ -3,7 +3,7 @@ import { CheckIcon, ChevronLeftIcon, Minimize2Icon, PlayIcon } from "lucide-reac
 import { CornerUpRight, ListPlus } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
-import { formatContextWindowTokens } from "~/lib/contextWindow";
+import { formatContextWindowTokens } from "@t3tools/client-runtime/context-window-tokens";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { useShortcutModifierState } from "../../shortcutModifierState";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
