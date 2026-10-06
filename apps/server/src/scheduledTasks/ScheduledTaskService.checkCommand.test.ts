@@ -5,6 +5,9 @@ import { ScheduledTaskId, ScheduledTaskUpsertInput } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/process";
+import * as Fiber from "effect/Fiber";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -71,7 +74,7 @@ it.effect(
       yield* TestClock.setTime(Date.parse(now) + 1_000);
 
       const launchedPrompts = yield* Ref.make<ReadonlyArray<string>>([]);
-      const newsLaunched = yield* Deferred.make<void>();
+      let dueWork = Effect.void;
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Layer.build(
@@ -83,20 +86,22 @@ it.effect(
                     Ref.update(launchedPrompts, (prompts) => [
                       ...prompts,
                       input.initialMessage?.text ?? "",
-                    ]).pipe(
-                      Effect.andThen(Deferred.succeed(newsLaunched, undefined)),
-                      Effect.andThen(Effect.die(new Error("launch recorded"))),
-                    ),
+                    ]).pipe(Effect.andThen(Effect.die(new Error("launch recorded")))),
                 }),
                 Layer.mock(ThreadManagementService.ThreadManagementService)({}),
                 Layer.mock(SecretRequests.SecretRequests)({}),
                 NodeCrypto.layer,
-                Scheduler.layer,
+                Layer.mock(Scheduler.Scheduler)({
+                  register: <E, R>(_: string, work: Effect.Effect<void, E, R>) =>
+                    Effect.gen(function* () {
+                      const context = yield* Effect.context<R>();
+                      dueWork = work.pipe(Effect.provideContext(context), Effect.orDie);
+                    }),
+                }),
               ),
             ),
           );
-          yield* TestClock.adjust("6 seconds");
-          yield* Deferred.await(newsLaunched);
+          yield* dueWork;
         }),
       );
 
@@ -253,4 +258,97 @@ it.effect("an approval-required task fails without executing its check", () =>
     );
     assert.equal(result.task.runCount, 1);
   }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
+
+const heldCheckSpawner = (entered: Deferred.Deferred<void>, release: Deferred.Deferred<void>) =>
+  ChildProcessSpawner.make(() =>
+    Deferred.succeed(entered, undefined).pipe(
+      Effect.as(
+        ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Deferred.await(release).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+          isRunning: Effect.succeed(true),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.encodeText(Stream.make("news")),
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        }),
+      ),
+    ),
+  );
+
+it.effect(
+  "due tasks dispatch independently while a check is held, without overlapping the held task",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-09-09T12:00:00.000Z";
+      yield* TestClock.setTime(Date.parse(now));
+      yield* insertCheckedTask(sql, { id: "slow", next: now, checkCommand: "check" });
+      yield* insertCheckedTask(sql, {
+        id: "fast",
+        next: "2026-09-09T12:00:00.001Z",
+        checkCommand: "check",
+      });
+      yield* sql`UPDATE scheduled_tasks SET schedule_json = '{"type":"interval","everyMs":60000}' WHERE task_id = 'fast'`;
+      yield* TestClock.setTime(Date.parse(now) + 1_000);
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const fastDispatched = yield* Deferred.make<void>();
+      const launched = yield* Ref.make<ReadonlyArray<string>>([]);
+      let dueWork = Effect.void;
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        const due = yield* Effect.forkChild(dueWork);
+        yield* Deferred.await(entered);
+        yield* Deferred.await(fastDispatched);
+        assert.deepEqual(yield* Ref.get(launched), ["fast"]);
+        const overlap = yield* service
+          .runNow({ id: ScheduledTaskId.make("slow") })
+          .pipe(Effect.flip);
+        assert.include(String(overlap.cause), "already running");
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(due);
+        assert.deepEqual(yield* Ref.get(launched), ["fast", "slow"]);
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                NodeServices.layer,
+                NodeCrypto.layer,
+                Layer.mock(Scheduler.Scheduler)({
+                  register: <E, R>(_: string, work: Effect.Effect<void, E, R>) =>
+                    Effect.gen(function* () {
+                      const context = yield* Effect.context<R>();
+                      dueWork = work.pipe(Effect.provideContext(context), Effect.orDie);
+                    }),
+                }),
+                Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                  launch: (input) =>
+                    Ref.update(launched, (ids) => [...ids, input.title]).pipe(
+                      Effect.andThen(
+                        input.title === "fast"
+                          ? Deferred.succeed(fastDispatched, undefined)
+                          : Effect.void,
+                      ),
+                      Effect.andThen(Effect.die("launch recorded")),
+                    ),
+                }),
+                Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+                Layer.mock(SecretRequests.SecretRequests)({}),
+                Layer.succeed(
+                  ChildProcessSpawner.ChildProcessSpawner,
+                  heldCheckSpawner(entered, release),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(SqlitePersistenceMemory)),
 );

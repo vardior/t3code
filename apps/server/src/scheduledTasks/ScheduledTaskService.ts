@@ -1263,7 +1263,7 @@ ${checkOutput}` : basePrompt;
               Effect.logWarning("Scheduled task run failed", { taskId: task.id, cause }),
             ),
           ),
-        { concurrency: 1, discard: true },
+        { concurrency: "unbounded", discard: true },
       );
     });
 
