@@ -154,7 +154,7 @@ function WakeRow(props: {
   );
 }
 
-function BotMarkdown(props: {
+export function BotMarkdown(props: {
   readonly text: string;
   readonly environmentId: EnvironmentId;
   readonly onOpenThread: (threadId: ThreadId) => void;

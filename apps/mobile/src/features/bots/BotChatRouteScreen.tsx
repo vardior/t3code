@@ -121,14 +121,11 @@ function BotConversation(props: {
     JSON.stringify([environmentId, bot.id]),
     initialBotComposer,
   );
-  const [pausePending, setPausePending] = useState(false);
-  const [pauseError, setPauseError] = useState<string | null>(null);
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
   const pending = useRef(false);
   const sending = composer.pendingRequestId !== null;
-  const busy = sending || pausePending;
+  const busy = sending;
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
-  const setPaused = useAtomCommand(serverEnvironment.bots.setPaused, { reportFailure: false });
   const loadEarlier = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
@@ -173,26 +170,9 @@ function BotConversation(props: {
       error: failure === null ? null : failure instanceof Error ? failure.message : String(failure),
     });
   };
-  const togglePaused = async () => {
-    if (pending.current) return;
-    pending.current = true;
-    setPausePending(true);
-    setPauseError(null);
-    const result = await setPaused({
-      environmentId,
-      input: { botId: bot.id, paused: !bot.paused },
-    });
-    pending.current = false;
-    setPausePending(false);
-    props.refresh();
-    if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
-      const failure = squashAtomCommandFailure(result);
-      setPauseError(failure instanceof Error ? failure.message : String(failure));
-    }
-  };
   const history = thread.history;
   const historyError = history.error;
-  const error = composer.error ?? pauseError ?? Option.getOrNull(thread.error);
+  const error = composer.error ?? Option.getOrNull(thread.error);
   return (
     <View className="flex-1 bg-screen">
       <ScreenHeader
@@ -202,16 +182,10 @@ function BotConversation(props: {
         onBack={() => navigation.goBack()}
         actions={[
           {
-            accessibilityLabel: "Open raw thread",
-            icon: "text.bubble",
+            accessibilityLabel: `About ${bot.name}`,
+            icon: "info.circle",
             disabled: busy,
-            onPress: () => openThread(bot.homeThreadId),
-          },
-          {
-            accessibilityLabel: bot.paused ? "Resume bot" : "Pause bot",
-            icon: bot.paused ? "play" : "stop.fill",
-            disabled: busy,
-            onPress: () => void togglePaused(),
+            onPress: () => navigation.navigate("BotInfo", { environmentId, botId: bot.id }),
           },
         ]}
       />
