@@ -12,8 +12,10 @@ import {
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 import * as Hash from "effect/Hash";
+import * as Option from "effect/Option";
 
 import type { EnvironmentThreadShell } from "./models.ts";
+import type { EnvironmentShellState } from "./shell.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
@@ -58,9 +60,21 @@ export function isActiveRunStatus(status: string | null | undefined): boolean {
   return status != null && ACTIVE_RUN_STATUSES.has(status);
 }
 
+export function isBotHomeThreadMissing(shellState: EnvironmentShellState, threadId: ThreadId) {
+  if (shellState.status !== "live") return false;
+  return Option.match(shellState.snapshot, {
+    onNone: () => false,
+    onSome: (snapshot) =>
+      !snapshot.threads.some((thread) => thread.id === threadId) &&
+      !snapshot.archivedThreads.some((thread) => thread.id === threadId),
+  });
+}
+
 export function botThreadShellStatus(
   shell: EnvironmentThreadShell | null | undefined,
-): "idle" | "working" | "needs-approval" | "needs-input" | "failed" | "stopped" {
+  homeThreadMissing = false,
+): "idle" | "working" | "needs-approval" | "needs-input" | "failed" | "stopped" | "missing" {
+  if (homeThreadMissing) return "missing";
   const request = shell?.source.pendingRuntimeRequest?.kind;
   if (request === "user_input") return "needs-input";
   if (request && request !== "auth_refresh" && request !== "dynamic_tool_call")
@@ -79,6 +93,7 @@ const BOT_THREAD_STATUS_LABELS = {
   "needs-input": "Needs your input",
   failed: "Failed",
   stopped: null,
+  missing: "Home thread missing",
 } as const;
 
 export function botThreadShellStatusLabel(status: ReturnType<typeof botThreadShellStatus>) {

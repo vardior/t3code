@@ -1,14 +1,20 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
   botThreadShellStatus,
   botThreadShellStatusLabel,
+  isBotHomeThreadMissing,
 } from "@t3tools/client-runtime/state/bot-conversation";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type {
+  EnvironmentShellState,
+  EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { environmentShell } from "../../state/shell";
 import { botStatusLabel } from "../bots/botChat.logic";
 import { useBotRunSettlement } from "../bots/useBots";
 import type { useHomeBots } from "./useHomeBots";
@@ -80,7 +86,14 @@ function HomeBotRow(props: {
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
   const { bot, environmentId, refresh } = props.entry;
-  const status = botThreadShellStatus(props.shell);
+  const homeThreadMissing = useAtomValue(
+    environmentShell.stateValueAtom(environmentId),
+    useCallback(
+      (state: EnvironmentShellState) => isBotHomeThreadMissing(state, bot.homeThreadId),
+      [bot.homeThreadId],
+    ),
+  );
+  const status = botThreadShellStatus(props.shell, homeThreadMissing);
   const working = status === "working";
   const statusText = botThreadShellStatusLabel(status);
   useBotRunSettlement(working, refresh);
