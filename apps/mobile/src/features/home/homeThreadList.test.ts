@@ -54,9 +54,6 @@ describe("home bot threads", () => {
     homeThreadId,
     scheduledTaskIds: [],
     paused: false,
-    charter: null,
-    workers: [],
-    slackDms: [],
   };
   const home = makeThread({
     environmentId,

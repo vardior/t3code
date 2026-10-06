@@ -8,7 +8,19 @@ import { serverEnvironment } from "../../state/server";
 
 export function useBots(environmentId: EnvironmentId) {
   const query = useEnvironmentQuery(serverEnvironment.bots.list({ environmentId, input: {} }));
-  const refresh = query.refresh;
+  useBotQueryRefresh(query.refresh);
+  return query;
+}
+
+export function useBotDetail(environmentId: EnvironmentId, botId: string) {
+  const query = useEnvironmentQuery(
+    serverEnvironment.bots.get({ environmentId, input: { botId } }),
+  );
+  useBotQueryRefresh(query.refresh);
+  return query;
+}
+
+function useBotQueryRefresh(refresh: () => void) {
   useFocusEffect(
     useCallback(() => {
       refresh();
@@ -18,7 +30,6 @@ export function useBots(environmentId: EnvironmentId) {
       return () => subscription.remove();
     }, [refresh]),
   );
-  return query;
 }
 
 export function useBotRunSettlement(working: boolean, refresh: () => void) {

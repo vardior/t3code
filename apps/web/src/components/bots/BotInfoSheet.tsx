@@ -32,6 +32,14 @@ export function BotInfoSheet(props: {
       ? serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} })
       : null,
   );
+  const detail = useEnvironmentQuery(
+    props.open
+      ? serverEnvironment.bots.get({
+          environmentId: props.environmentId,
+          input: { botId: props.bot.id },
+        })
+      : null,
+  );
   const schedules = (tasksQuery.data?.tasks ?? []).filter((task) =>
     props.bot.scheduledTaskIds.includes(task.id),
   );
@@ -81,22 +89,26 @@ export function BotInfoSheet(props: {
           </InfoSection>
 
           <InfoSection title="Charter">
-            {props.bot.charter ? (
+            {detail.data?.charter ? (
               <ChatMarkdown
                 cwd={undefined}
                 environmentId={props.environmentId}
-                text={props.bot.charter}
+                text={detail.data?.charter}
               />
             ) : (
-              <p className="text-muted-foreground">No charter.md.</p>
+              <p className="text-muted-foreground">
+                {detail.error ?? (detail.data === null ? "Loading…" : "No charter.md.")}
+              </p>
             )}
           </InfoSection>
 
           <InfoSection title="Workers">
-            {props.bot.workers.length === 0 ? (
-              <p className="text-muted-foreground">No workers yet.</p>
+            {(detail.data?.workers.length ?? 0) === 0 ? (
+              <p className="text-muted-foreground">
+                {detail.error ?? (detail.data === null ? "Loading…" : "No workers yet.")}
+              </p>
             ) : (
-              props.bot.workers.toReversed().map((worker) => (
+              (detail.data?.workers ?? []).toReversed().map((worker) => (
                 <button
                   key={worker.threadId}
                   type="button"

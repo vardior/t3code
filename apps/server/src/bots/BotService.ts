@@ -3,6 +3,8 @@ import {
   BotSlackDm,
   ScheduledTaskId,
   ThreadId,
+  type BotDetail,
+  type BotGetInput,
   type BotListResult,
   type BotSetPausedInput,
   type BotSetPausedResult,
@@ -92,6 +94,7 @@ interface WorkerRow {
 export class BotService extends Context.Service<
   BotService,
   {
+    readonly get: (input: BotGetInput) => Effect.Effect<BotDetail, BotError>;
     readonly list: () => Effect.Effect<BotListResult, BotError>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
@@ -243,32 +246,74 @@ export const layer = Layer.effect(
       );
 
     const readSlackDms = (botDir: string) =>
-      fileSystem.readFileString(path.join(botDir, "dm-log.jsonl")).pipe(
-        Effect.map((text) =>
-          text
-            .split("\n")
-            .flatMap((line) => Option.toArray(decodeSlackDmLine(line)))
-            .slice(-MAX_SLACK_DMS_PER_BOT),
-        ),
+      Effect.gen(function* () {
+        const file = yield* fileSystem.open(path.join(botDir, "dm-log.jsonl"));
+        let position = Number((yield* file.stat).size);
+        let bytes = new Uint8Array(0);
+        while (position > 0) {
+          const start = Math.max(0, position - 64 * 1024);
+          yield* file.seek(BigInt(start), "start");
+          const chunk = new Uint8Array(position - start);
+          let read = 0;
+          while (read < chunk.length) {
+            const count = yield* file.read(chunk.subarray(read));
+            if (count === 0) break;
+            read += count;
+          }
+          const combined = new Uint8Array(read + bytes.length);
+          combined.set(chunk.subarray(0, read));
+          combined.set(bytes, read);
+          bytes = combined;
+          position = start;
+          const lines = new TextDecoder().decode(bytes).split("\n");
+          const dms = (position > 0 ? lines.slice(1) : lines).flatMap((line) =>
+            Option.toArray(decodeSlackDmLine(line)),
+          );
+          if (dms.length >= MAX_SLACK_DMS_PER_BOT || position === 0) {
+            return dms.slice(-MAX_SLACK_DMS_PER_BOT);
+          }
+        }
+        return [];
+      }).pipe(
+        Effect.scoped,
         Effect.catchCause(() => Effect.succeed([])),
+      );
+
+    const get = (input: BotGetInput) =>
+      Effect.gen(function* () {
+        if (!BOT_ID.test(input.botId)) {
+          return yield* new BotError({ message: `Unknown bot ${input.botId}` });
+        }
+        const botDir = path.join(botsDir, input.botId);
+        const config = yield* fileSystem
+          .readFileString(path.join(botDir, "bot.json"))
+          .pipe(Effect.flatMap(decodeBotConfig));
+        const sideThreadIds = new Set(
+          [config.triageThreadId, config.dmRelayThreadId].filter((value) => value !== undefined),
+        );
+        return {
+          charter: yield* readCharter(botDir),
+          workers: yield* listWorkers(config.homeThreadId, sideThreadIds),
+          slackDms: yield* readSlackDms(botDir),
+        };
+      }).pipe(
+        Effect.mapError((cause) =>
+          isBotError(cause)
+            ? cause
+            : new BotError({ message: `Cannot read bot ${input.botId}`, cause }),
+        ),
       );
 
     const readBot = (id: string, botDir: string) =>
       Effect.gen(function* () {
         const raw = yield* fileSystem.readFileString(path.join(botDir, "bot.json"));
         const config = yield* decodeBotConfig(raw);
-        const sideThreadIds = new Set(
-          [config.triageThreadId, config.dmRelayThreadId].filter((value) => value !== undefined),
-        );
         const bot: BotSummary = {
           id,
           name: config.name,
           homeThreadId: config.homeThreadId,
           scheduledTaskIds: yield* scheduleIdsFor(config),
           paused: isPaused(config, yield* Clock.currentTimeMillis),
-          charter: yield* readCharter(botDir),
-          workers: yield* listWorkers(config.homeThreadId, sideThreadIds),
-          slackDms: yield* readSlackDms(botDir),
           lastReply: yield* readLastReply(config.homeThreadId),
         };
         return Option.some(bot);
@@ -393,6 +438,6 @@ export const layer = Layer.effect(
         ),
       );
 
-    return BotService.of({ list, isHomeThread, setPaused });
+    return BotService.of({ get, list, isHomeThread, setPaused });
   }),
 );

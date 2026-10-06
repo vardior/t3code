@@ -31,14 +31,21 @@ export const BotSummary = Schema.Struct({
   homeThreadId: ThreadId,
   scheduledTaskIds: Schema.Array(ScheduledTaskId),
   paused: Schema.Boolean,
-  charter: Schema.NullOr(Schema.String),
-  workers: Schema.Array(BotWorker),
-  slackDms: Schema.Array(BotSlackDm),
   lastReply: Schema.optionalKey(
     Schema.NullOr(Schema.Struct({ text: Schema.String, at: IsoDateTime })),
   ),
 });
 export type BotSummary = typeof BotSummary.Type;
+
+export const BotDetail = Schema.Struct({
+  charter: Schema.NullOr(Schema.String),
+  workers: Schema.Array(BotWorker),
+  slackDms: Schema.Array(BotSlackDm),
+});
+export type BotDetail = typeof BotDetail.Type;
+
+export const BotGetInput = Schema.Struct({ botId: Schema.String });
+export type BotGetInput = typeof BotGetInput.Type;
 
 export const BotListInput = Schema.Struct({});
 export type BotListInput = typeof BotListInput.Type;
@@ -64,10 +71,16 @@ export class BotError extends Schema.TaggedError<BotError>()("BotError", {
 
 export const BOT_WS_METHODS = {
   botsList: "bots.list",
+  botsGet: "bots.get",
   botsSetPaused: "bots.setPaused",
 } as const;
 
 export const BotsRpcGroup = RpcGroup.make(
+  Rpc.make(BOT_WS_METHODS.botsGet, {
+    payload: BotGetInput,
+    success: BotDetail,
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+  }),
   Rpc.make(BOT_WS_METHODS.botsList, {
     payload: BotListInput,
     success: BotListResult,
@@ -82,5 +95,6 @@ export const BotsRpcGroup = RpcGroup.make(
 
 export const BOT_RPC_REQUIRED_SCOPES = {
   [BOT_WS_METHODS.botsList]: AuthOrchestrationReadScope,
+  [BOT_WS_METHODS.botsGet]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
 } satisfies Record<RpcGroup.Rpcs<typeof BotsRpcGroup>["_tag"], AuthEnvironmentScope>;

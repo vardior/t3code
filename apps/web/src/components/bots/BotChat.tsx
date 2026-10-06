@@ -54,6 +54,12 @@ export function BotChat(props: {
   readonly environmentId: EnvironmentId;
   readonly onRunSettled: () => void;
 }) {
+  const detail = useEnvironmentQuery(
+    serverEnvironment.bots.get({
+      environmentId: props.environmentId,
+      input: { botId: props.bot.id },
+    }),
+  );
   const thread = useEnvironmentThread(props.environmentId, props.bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
@@ -79,11 +85,12 @@ export function BotChat(props: {
     () =>
       buildBotChat({
         bot: props.bot,
+        detail: detail.data,
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [props.bot, projection?.messages, projection?.runs, projection?.turnItems],
+    [props.bot, detail.data, projection?.messages, projection?.runs, projection?.turnItems],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
@@ -139,7 +146,10 @@ export function BotChat(props: {
           : status.kind === "stopped"
             ? "Stopped."
             : `${props.bot.name} is ready.`;
-  const onRunSettled = useEffectEvent(props.onRunSettled);
+  const onRunSettled = useEffectEvent(() => {
+    props.onRunSettled();
+    detail.refresh();
+  });
   useEffect(() => {
     if (!working) onRunSettled();
   }, [working]);

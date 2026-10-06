@@ -23,9 +23,6 @@ describe("home bots query state", () => {
       homeThreadId: ThreadId.make("thread-a"),
       scheduledTaskIds: [],
       paused: false,
-      charter: null,
-      workers: [],
-      slackDms: [],
     });
     const otherEnvironmentId = EnvironmentId.make("environment-b");
     const state = homeBotsState([

@@ -39,7 +39,7 @@ import { editDraft } from "../settings/scheduledTaskDraft";
 import { formatNextScheduledTaskRun } from "../settings/scheduledTaskPresentation";
 import { describeSchedule } from "../settings/SettingsScheduledTasksRouteScreen";
 import { BotMarkdown } from "./BotChatRow";
-import { useBots } from "./useBots";
+import { useBots, useBotDetail } from "./useBots";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 
@@ -124,6 +124,7 @@ function BotInfo(props: {
   readonly refresh: () => void;
 }) {
   const { bot, environmentId } = props;
+  const detail = useBotDetail(environmentId, bot.id);
   const navigation = useNavigation();
   const shell = useThreadShell(scopeThreadRef(environmentId, bot.homeThreadId));
   const { environments } = useEnvironments();
@@ -265,22 +266,26 @@ function BotInfo(props: {
       ) : null}
       <SettingsSection title="Charter">
         <View className="p-4">
-          {bot.charter ? (
+          {detail.data?.charter ? (
             <BotMarkdown
-              text={bot.charter}
+              text={detail.data?.charter}
               environmentId={environmentId}
               onOpenThread={openThread}
             />
           ) : (
-            <Text className="text-sm text-foreground-muted">No charter.md.</Text>
+            <Text className="text-sm text-foreground-muted">
+              {detail.error ?? (detail.data === null ? "Loading…" : "No charter.md.")}
+            </Text>
           )}
         </View>
       </SettingsSection>
       <SettingsSection title="Workers">
-        {bot.workers.length === 0 ? (
-          <Text className="p-4 text-sm text-foreground-muted">No workers yet.</Text>
+        {(detail.data?.workers.length ?? 0) === 0 ? (
+          <Text className="p-4 text-sm text-foreground-muted">
+            {detail.error ?? (detail.data === null ? "Loading…" : "No workers yet.")}
+          </Text>
         ) : (
-          Arr.reverse(bot.workers).map((worker) => (
+          Arr.reverse(detail.data?.workers ?? []).map((worker) => (
             <Pressable
               key={worker.threadId}
               accessibilityRole="button"

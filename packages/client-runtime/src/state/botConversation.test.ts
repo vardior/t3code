@@ -168,6 +168,9 @@ describe("buildBotChat", () => {
       homeThreadId: ThreadId.make("home"),
       scheduledTaskIds: [],
       paused: false,
+    };
+
+    const detail = {
       charter: null,
       workers: [
         {
@@ -179,9 +182,9 @@ describe("buildBotChat", () => {
       ],
       slackDms: [{ text: "From Slack", at: "2026-10-01T00:06:00Z" }],
     };
-
-    const items = buildBotChat({
+    const input = {
       bot,
+      detail,
       messages: [
         message({
           id: "owner-ask",
@@ -270,7 +273,11 @@ describe("buildBotChat", () => {
           exitCode: 1,
         }),
       ],
-    });
+    } satisfies Parameters<typeof buildBotChat>[0];
+    const items = buildBotChat(input);
+    expect(buildBotChat({ ...input, detail: null })).toEqual(
+      items.filter((item) => item.kind !== "worker" && !item.id.startsWith("slack-dm:")),
+    );
 
     expect(
       items.map((item) => [
@@ -297,9 +304,6 @@ const botWithoutHistory: BotSummary = {
   homeThreadId: ThreadId.make("home"),
   scheduledTaskIds: [],
   paused: false,
-  charter: null,
-  workers: [],
-  slackDms: [],
 };
 
 describe("buildBotChat compaction rows", () => {

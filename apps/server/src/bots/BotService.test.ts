@@ -168,7 +168,7 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect("lists bots with their charter and the worker threads their home thread spawned", () =>
+it.effect("lists only summaries and gets charter, Slack DMs and spawned workers", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const fs = yield* FileSystem.FileSystem;
@@ -255,26 +255,100 @@ it.effect("lists bots with their charter and the worker threads their home threa
           homeThreadId: "home",
           scheduledTaskIds: ["task-1"],
           paused: false,
-          charter: "Be helpful.",
-          workers: [
-            {
-              threadId: "subagent",
-              title: "Title subagent",
-              createdAt: "2026-10-01T00:02:00.000Z",
-              status: null,
-            },
-            {
-              threadId: "launched",
-              title: "Title launched",
-              createdAt: "2026-10-01T00:03:00.000Z",
-              status: "running",
-            },
-          ],
-          slackDms: [{ text: "Any news?", at: "2026-10-01T00:08:00Z" }],
           lastReply: null,
         },
       ],
     });
+    const detail = yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        for (const botId of ["missing", "broken", "../helper", "", "Release Bot"]) {
+          expect((yield* bots.get({ botId }).pipe(Effect.flip))._tag).toBe("BotError");
+        }
+        return yield* bots.get({ botId: "helper" });
+      }),
+    );
+    expect(detail).toEqual({
+      charter: "Be helpful.",
+      workers: [
+        {
+          threadId: "subagent",
+          title: "Title subagent",
+          createdAt: "2026-10-01T00:02:00.000Z",
+          status: null,
+        },
+        {
+          threadId: "launched",
+          title: "Title launched",
+          createdAt: "2026-10-01T00:03:00.000Z",
+          status: "running",
+        },
+      ],
+      slackDms: [{ text: "Any news?", at: "2026-10-01T00:08:00Z" }],
+    });
+    const listReads: string[] = [];
+    const summary = yield* listBots({ baseDir }).pipe(
+      Effect.provideService(FileSystem.FileSystem, {
+        ...fs,
+        readFileString: (filePath, encoding) => {
+          listReads.push(filePath);
+          return fs.readFileString(filePath, encoding);
+        },
+        open: (filePath, options) => {
+          listReads.push(filePath);
+          return fs.open(filePath, options);
+        },
+      }),
+    );
+    expect(listReads).toContain(path.join(root, "helper", "bot.json"));
+    expect(listReads.every((filePath) => path.basename(filePath) === "bot.json")).toBe(true);
+    const dms = Array.from({ length: 450 }, (_, index) => ({
+      text: `${index}: ${"שלום 🌍 ".repeat(100)}`,
+      at: "2026-10-01T00:08:00Z",
+    }));
+    yield* fs.writeFileString(
+      path.join(root, "helper", "dm-log.jsonl"),
+      dms.map((dm) => toJson(dm)).join("\n"),
+    );
+    let bytesRead = 0;
+    const tail = yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        return yield* bots.get({ botId: "helper" });
+      }),
+    ).pipe(
+      Effect.provideService(FileSystem.FileSystem, {
+        ...fs,
+        open: (filePath, options) =>
+          fs.open(filePath, options).pipe(
+            Effect.map(
+              (file) =>
+                new Proxy(file, {
+                  get: (target, property) =>
+                    property === "read"
+                      ? (buffer: Uint8Array) =>
+                          target.read(buffer).pipe(
+                            Effect.tap((count) =>
+                              Effect.sync(() => {
+                                bytesRead += count;
+                              }),
+                            ),
+                          )
+                      : Reflect.get(target, property, target),
+                }),
+            ),
+          ),
+      }),
+    );
+    expect(bytesRead).toBeGreaterThan(0);
+    expect(bytesRead).toBeLessThan(Buffer.byteLength(dms.map((dm) => toJson(dm)).join("\n")));
+    expect(Buffer.byteLength(toJson(summary))).toBe(126);
+    expect(Buffer.byteLength(toJson({ bots: [{ ...summary.bots[0], ...tail }] }))).toBeGreaterThan(
+      100_000,
+    );
+    expect(tail.slackDms).toEqual(dms.slice(-200));
     const homeMatches = yield* withBots(
       { baseDir },
       Effect.gen(function* () {

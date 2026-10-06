@@ -15,6 +15,11 @@ export function createBotsEnvironmentAtoms<R, E>(
   configConcurrency: AtomCommandConcurrency<{ readonly environmentId: EnvironmentId }>,
 ) {
   return {
+    get: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:bot",
+      tag: WS_METHODS.botsGet,
+      staleTimeMs: 10_000,
+    }),
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:bots",
       tag: WS_METHODS.botsList,

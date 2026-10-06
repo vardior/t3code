@@ -40,7 +40,7 @@ import { useEnvironmentThread, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
 import { botChatScrollReducer, botComposerReducer, initialBotComposer } from "./botChat.logic";
-import { useBots, useBotRunSettlement } from "./useBots";
+import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
 
 type BotChatRouteProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -92,6 +92,7 @@ function BotConversation(props: {
   readonly refresh: () => void;
 }) {
   const { bot, environmentId } = props;
+  const detail = useBotDetail(environmentId, bot.id);
   const thread = useEnvironmentThread(environmentId, bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
   const schedules = useEnvironmentQuery(
@@ -101,18 +102,25 @@ function BotConversation(props: {
     () =>
       buildBotChat({
         bot,
+        detail: detail.data,
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [bot, projection],
+    [bot, detail.data, projection],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
     [projection],
   );
   const working = isBotWorking(projection?.runs ?? []);
-  useBotRunSettlement(working, props.refresh);
+  const refreshBots = props.refresh;
+  const refreshDetail = detail.refresh;
+  const refresh = useCallback(() => {
+    refreshBots();
+    refreshDetail();
+  }, [refreshBots, refreshDetail]);
+  useBotRunSettlement(working, refresh);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);

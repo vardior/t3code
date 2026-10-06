@@ -1,5 +1,6 @@
 import {
   ThreadId,
+  type BotDetail,
   type BotSummary,
   type ChatAttachmentId,
   type OrchestrationV2ConversationMessage,
@@ -117,6 +118,7 @@ export function botWakeSenderLabel(input: {
 
 export function buildBotChat(input: {
   readonly bot: BotSummary;
+  readonly detail?: BotDetail | null;
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly runs: ReadonlyArray<ChatRun>;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
@@ -209,7 +211,7 @@ export function buildBotChat(input: {
         },
       ];
     }),
-    ...input.bot.slackDms.map((dm, index) => ({
+    ...(input.detail?.slackDms ?? []).map((dm, index) => ({
       kind: "you" as const,
       id: `slack-dm:${index}:${dm.at}`,
       at: Date.parse(dm.at),
@@ -222,7 +224,7 @@ export function buildBotChat(input: {
       at: DateTime.toEpochMillis(item.completedAt ?? item.updatedAt),
       text: slackMarkupToMarkdown(text),
     })),
-    ...input.bot.workers.map((worker) => ({
+    ...(input.detail?.workers ?? []).map((worker) => ({
       kind: "worker" as const,
       id: `worker:${worker.threadId}`,
       at: Date.parse(worker.createdAt),
