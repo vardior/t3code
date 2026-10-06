@@ -250,7 +250,7 @@ export const layer = Layer.effect(
             ),
           );
         const bots = yield* Effect.forEach(
-          entries.toSorted(),
+          entries.filter((id) => BOT_ID.test(id)).toSorted(),
           (id) => {
             const botDir = path.join(botsDir, id);
             return fileSystem.exists(path.join(botDir, "bot.json")).pipe(

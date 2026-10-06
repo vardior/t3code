@@ -191,6 +191,11 @@ it.effect("lists bots with their charter and the worker threads their home threa
     yield* fs.makeDirectory(path.join(root, "broken"));
     yield* fs.writeFileString(path.join(root, "broken", "bot.json"), "{");
     yield* fs.makeDirectory(path.join(root, "notes"));
+    yield* fs.makeDirectory(path.join(root, "Release Bot"));
+    yield* fs.writeFileString(
+      path.join(root, "Release Bot", "bot.json"),
+      toJson({ name: "Release Bot", homeThreadId: "release-home" }),
+    );
 
     yield* insertThread(sql, { id: "home", createdAt: "2026-10-01T00:00:00.000Z" });
     yield* insertThread(sql, { id: "triage", createdAt: "2026-10-01T00:01:00.000Z" });
