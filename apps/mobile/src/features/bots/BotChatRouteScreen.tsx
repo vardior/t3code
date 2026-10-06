@@ -149,11 +149,11 @@ function BotConversation(props: {
   const nativeInsetOvercount = Platform.OS === "ios" ? insets.bottom : 0;
   const listRef = useRef<LegendListRef>(null);
   const composerOverlayRef = useRef<ViewInstance>(null);
-  const followEndAfterDisclosure = useRef(false);
+  const followingEnd = useRef(true);
   const [togglingDisclosureKey, setTogglingDisclosureKey] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (items.length === 0) return;
-    if (followEndAfterDisclosure.current) void listRef.current?.scrollToEnd({ animated: false });
+    if (followingEnd.current) void listRef.current?.scrollToEnd({ animated: false });
   }, [items]);
   const initialComposerHeight = 88 + Math.max(insets.bottom, 12) - nativeInsetOvercount;
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
@@ -309,14 +309,10 @@ function BotConversation(props: {
               onPreview={setPreview}
               onDisclosureToggle={() => {
                 setTogglingDisclosureKey(item.id);
-                followEndAfterDisclosure.current = botChatScrollReducer(
-                  followEndAfterDisclosure.current,
-                  {
-                    type: "disclosure",
-                    atEnd:
-                      listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
-                  },
-                );
+                followingEnd.current = botChatScrollReducer(followingEnd.current, {
+                  type: "disclosure",
+                  atEnd: listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
+                });
               }}
             />
           )}
@@ -332,10 +328,7 @@ function BotConversation(props: {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onScrollBeginDrag={() => {
-            followEndAfterDisclosure.current = botChatScrollReducer(
-              followEndAfterDisclosure.current,
-              { type: "drag" },
-            );
+            followingEnd.current = botChatScrollReducer(followingEnd.current, { type: "drag" });
           }}
           initialScrollAtEnd
           alignItemsAtEnd
