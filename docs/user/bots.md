@@ -19,7 +19,9 @@ Add an optional `charter.md` describing the bot's job. Schedules that target the
 
 ## Talk to a bot
 
-Open **Bots** in the sidebar, or the **Bots** section on the mobile Home screen. Messages you send go to the home thread. Activity from schedules and other threads collapses into a summary you can expand. Tap a worker to open its thread.
+Open **Bots** from the sidebar, the command palette, or **View → Open Bots** on desktop. On mobile, use the **Bots** section of the Home screen. Messages and images you send go to the home thread. Activity from schedules and other threads collapses into a summary you can expand. Tap a worker to open its thread.
+
+When a bot is waiting on an approval or an answer, its chat says so and links to the home thread, where you respond. **Stop** ends the bot's current turn.
 
 **About** shows the bot's model, schedules, charter and workers, and opens the full home thread when you need every tool call.
 
