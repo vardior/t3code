@@ -97,6 +97,7 @@ function BotConversation(props: {
   const insets = useSafeAreaInsets();
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [composerContentHeight, setComposerContentHeight] = useState(40);
   const composerBottomInset = (Platform.OS === "android" ? isKeyboardVisible : composerFocused)
     ? 0
     : Math.max(insets.bottom, 12);
@@ -288,8 +289,9 @@ function BotConversation(props: {
                 placeholder={`Message ${bot.name}`}
                 readOnly={!ready || busy}
                 multiline
-                scrollEnabled
-                style={{ minHeight: 40, maxHeight: 160 }}
+                onContentHeightChange={setComposerContentHeight}
+                scrollEnabled={composerContentHeight >= 160}
+                style={{ height: Math.max(40, Math.min(160, composerContentHeight)) }}
                 onSubmit={() => void send()}
                 submitTitle={`Send to ${bot.name}`}
               />
