@@ -352,3 +352,52 @@ it.effect(
       );
     }).pipe(Effect.scoped, Effect.provide(SqlitePersistenceMemory)),
 );
+
+it.effect("a task paused during its check does not dispatch or record a wake", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const now = "2026-09-09T12:00:00.000Z";
+    yield* TestClock.setTime(Date.parse(now));
+    yield* insertCheckedTask(sql, { id: "paused", next: now, checkCommand: "check" });
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const run = yield* Effect.forkChild(service.runNow({ id: ScheduledTaskId.make("paused") }));
+      yield* Deferred.await(entered);
+      yield* service.setEnabled({ id: ScheduledTaskId.make("paused"), enabled: false });
+      yield* Deferred.succeed(release, undefined);
+      const result = yield* Fiber.join(run);
+      assert.isFalse(result.task.enabled);
+      assert.equal(result.task.lastRunStatus, "never");
+      assert.equal(result.task.runCount, 0);
+      assert.isNull(result.task.lastRunAt);
+      const persisted = (yield* service.list()).tasks[0];
+      assert.isFalse(persisted?.enabled);
+      assert.equal(persisted?.runCount, 0);
+    }).pipe(
+      Effect.provide(
+        ScheduledTaskService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
+              Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                launch: () => Effect.die("Unexpected dispatch"),
+              }),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({
+                sendToThread: () => Effect.die("Unexpected dispatch"),
+              }),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.succeed(
+                ChildProcessSpawner.ChildProcessSpawner,
+                heldCheckSpawner(entered, release),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }).pipe(Effect.scoped, Effect.provide(SqlitePersistenceMemory)),
+);

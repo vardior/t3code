@@ -970,6 +970,17 @@ export const layer = Layer.effect(
           active.checkCommand === undefined
             ? undefined
             : yield* Effect.result(runCheckCommand(active, active.checkCommand));
+        if (checked !== undefined) {
+          const current = yield* findTask(active.id);
+          if (current !== null && !current.enabled) {
+            if (webhook !== undefined) {
+              return yield* new WebhookDeliverySkipped({
+                reason: "The task was paused while its check command ran.",
+              });
+            }
+            return current;
+          }
+        }
         const checkOutput =
           checked !== undefined && Result.isSuccess(checked) ? checked.success : undefined;
         if (trigger === "scheduled" && checkOutput === "") {
