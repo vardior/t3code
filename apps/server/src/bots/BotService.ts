@@ -85,6 +85,11 @@ const isPaused = (config: BotConfigFile, nowMs: number) =>
   config.paused === true ||
   (config.pausedUntil !== undefined && Date.parse(config.pausedUntil) > nowMs);
 
+const isPauseExpired = (config: BotConfigFile, nowMs: number) =>
+  config.paused !== true &&
+  config.pausedUntil !== undefined &&
+  Date.parse(config.pausedUntil) <= nowMs;
+
 interface WorkerRow {
   readonly thread_id: string;
   readonly title: string;
@@ -348,8 +353,16 @@ export const layer = Layer.effect(
 
     const readBot = (id: string, botDir: string) =>
       Effect.gen(function* () {
-        const raw = yield* fileSystem.readFileString(path.join(botDir, "bot.json"));
-        const config = yield* decodeBotConfig(raw);
+        const configPath = path.join(botDir, "bot.json");
+        let config = yield* fileSystem
+          .readFileString(configPath)
+          .pipe(Effect.flatMap(decodeBotConfig));
+        if (isPauseExpired(config, yield* Clock.currentTimeMillis)) {
+          yield* setPaused({ botId: id, paused: false }, true);
+          config = yield* fileSystem
+            .readFileString(configPath)
+            .pipe(Effect.flatMap(decodeBotConfig));
+        }
         const bot: BotSummary = {
           id,
           name: config.name,
@@ -405,7 +418,7 @@ export const layer = Layer.effect(
     const setScheduleIdsEnabled = (ids: ReadonlyArray<ScheduledTaskId>, enabled: boolean) =>
       Effect.forEach(ids, (id) => scheduledTasks.setEnabled({ id, enabled }), { discard: true });
 
-    const setPaused = (input: BotSetPausedInput) =>
+    const setPaused = (input: BotSetPausedInput, onlyIfExpired = false) =>
       Effect.gen(function* () {
         if (!BOT_ID.test(input.botId)) {
           return yield* new BotError({ message: `Unknown bot ${input.botId}` });
@@ -413,6 +426,7 @@ export const layer = Layer.effect(
         const configPath = path.join(botsDir, input.botId, "bot.json");
         const raw = yield* fileSystem.readFileString(configPath);
         const config = yield* decodeBotConfig(raw);
+        if (onlyIfExpired && !isPauseExpired(config, yield* Clock.currentTimeMillis)) return {};
         const writePauseFields = (fields: Record<string, unknown> | null) =>
           Effect.gen(function* () {
             const freshRaw = yield* fileSystem.readFileString(configPath);
@@ -461,7 +475,12 @@ export const layer = Layer.effect(
           return {};
         }
 
-        if (!isPaused(config, yield* Clock.currentTimeMillis)) return {};
+        if (
+          !isPaused(config, yield* Clock.currentTimeMillis) &&
+          config.pausedUntil === undefined &&
+          config.pausedScheduleIds === undefined
+        )
+          return {};
         const { tasks } = yield* scheduledTasks.list();
         const disabledIds = new Set(tasks.filter((task) => !task.enabled).map((task) => task.id));
         const resumeIds = (config.pausedScheduleIds ?? listedScheduleIds(config)).filter((id) =>

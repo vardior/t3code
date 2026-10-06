@@ -879,31 +879,96 @@ it.effect.each([true, false])("preserves intervening bot.json edits when paused=
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect.each([{ paused: true }, { pausedUntil: "2999-01-01T00:00:00Z" }])(
-  "resumes only disabled listed schedules for bot pause fields %j",
-  (pauseFields) =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-resume-" });
-      const botDir = path.join(baseDir, "bots", "helper");
-      yield* fs.makeDirectory(botDir, { recursive: true });
-      yield* fs.writeFileString(
-        path.join(botDir, "bot.json"),
-        toJson({
+it.effect.each([
+  { paused: true },
+  { pausedUntil: "2999-01-01T00:00:00Z" },
+  { pausedUntil: "1969-01-01T00:00:00Z" },
+])("resumes only disabled listed schedules for bot pause fields %j", (pauseFields) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-resume-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(botDir, "bot.json"),
+      toJson({
+        name: "Helper",
+        homeThreadId: "home",
+        scheduledTaskId: "listed-disabled",
+        dmRelayScheduledTaskId: "listed-enabled",
+        ...pauseFields,
+      }),
+    );
+    for (const schedule of [
+      { id: "listed-disabled", enabled: false },
+      { id: "listed-enabled", enabled: true },
+      { id: "discovered-disabled", enabled: false },
+      { id: "discovered-enabled", enabled: true },
+    ]) {
+      yield* insertSchedule(sql, {
+        ...schedule,
+        threadId: "home",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+    }
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+        const before = (yield* schedules.list()).tasks.find((task) => task.id === "listed-enabled");
+        yield* bots.setPaused({ botId: "helper", paused: false });
+        const { tasks } = yield* schedules.list();
+        expect(Object.fromEntries(tasks.map((task) => [task.id, task.enabled]))).toEqual({
+          "listed-disabled": true,
+          "listed-enabled": true,
+          "discovered-disabled": false,
+          "discovered-enabled": true,
+        });
+        expect(tasks.find((task) => task.id === "listed-enabled")).toEqual(before);
+        expect(yield* fromJson(yield* fs.readFileString(path.join(botDir, "bot.json")))).toEqual({
           name: "Helper",
           homeThreadId: "home",
           scheduledTaskId: "listed-disabled",
           dmRelayScheduledTaskId: "listed-enabled",
-          ...pauseFields,
+        });
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect.each(["list", "resume"] as const)(
+  "restores remembered schedules after pause expiry through %s",
+  (operation) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-expiry-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      const configPath = path.join(botDir, "bot.json");
+      const config = {
+        name: "Helper",
+        homeThreadId: "home",
+        scheduledTaskId: "manually-off",
+        agentState: { cursor: "kept" },
+      };
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        configPath,
+        toJson({
+          ...config,
+          pausedUntil: "1970-01-01T00:00:01.000Z",
+          pausedReason: "Timed pause",
+          pausedScheduleIds: ["remembered", "already-on", "removed"],
         }),
       );
       for (const schedule of [
-        { id: "listed-disabled", enabled: false },
-        { id: "listed-enabled", enabled: true },
-        { id: "discovered-disabled", enabled: false },
-        { id: "discovered-enabled", enabled: true },
+        { id: "remembered", enabled: false },
+        { id: "already-on", enabled: true },
+        { id: "manually-off", enabled: false },
       ]) {
         yield* insertSchedule(sql, {
           ...schedule,
@@ -916,27 +981,96 @@ it.effect.each([{ paused: true }, { pausedUntil: "2999-01-01T00:00:00Z" }])(
         Effect.gen(function* () {
           const bots = yield* BotService.BotService;
           const schedules = yield* ScheduledTaskService.ScheduledTaskService;
-          const before = (yield* schedules.list()).tasks.find(
-            (task) => task.id === "listed-enabled",
-          );
+          const readEnabled = schedules
+            .list()
+            .pipe(
+              Effect.map(({ tasks }) =>
+                Object.fromEntries(tasks.map((task) => [task.id, task.enabled])),
+              ),
+            );
+          expect((yield* bots.list()).bots[0]!.paused).toBe(true);
+          expect(yield* readEnabled).toEqual({
+            remembered: false,
+            "already-on": true,
+            "manually-off": false,
+          });
+          yield* TestClock.adjust("1 second");
+          if (operation === "resume") {
+            yield* bots.setPaused({ botId: "helper", paused: false });
+            expect((yield* readEnabled).remembered).toBe(true);
+          }
+          expect((yield* bots.list()).bots[0]!.paused).toBe(false);
+          expect(yield* readEnabled).toEqual({
+            remembered: true,
+            "already-on": true,
+            "manually-off": false,
+          });
+          expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual(config);
+          yield* schedules.setEnabled({ id: ScheduledTaskId.make("remembered"), enabled: false });
           yield* bots.setPaused({ botId: "helper", paused: false });
-          const { tasks } = yield* schedules.list();
-          expect(Object.fromEntries(tasks.map((task) => [task.id, task.enabled]))).toEqual({
-            "listed-disabled": true,
-            "listed-enabled": true,
-            "discovered-disabled": false,
-            "discovered-enabled": true,
-          });
-          expect(tasks.find((task) => task.id === "listed-enabled")).toEqual(before);
-          expect(yield* fromJson(yield* fs.readFileString(path.join(botDir, "bot.json")))).toEqual({
-            name: "Helper",
-            homeThreadId: "home",
-            scheduledTaskId: "listed-disabled",
-            dmRelayScheduledTaskId: "listed-enabled",
-          });
+          yield* bots.list();
+          expect((yield* readEnabled).remembered).toBe(false);
+          yield* fs.writeFileString(
+            configPath,
+            toJson({
+              ...config,
+              paused: true,
+              pausedUntil: "1970-01-01T00:00:01.000Z",
+              pausedScheduleIds: ["remembered"],
+            }),
+          );
+          expect((yield* bots.list()).bots[0]!.paused).toBe(true);
+          expect((yield* readEnabled).remembered).toBe(false);
         }),
       );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("does not expire a pause renewed while listing the bot", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-renew-pause-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    const configPath = path.join(botDir, "bot.json");
+    const config = { name: "Helper", homeThreadId: "home", pausedScheduleIds: ["remembered"] };
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      configPath,
+      toJson({ ...config, pausedUntil: "1969-01-01T00:00:00Z" }),
+    );
+    yield* insertSchedule(sql, {
+      id: "remembered",
+      threadId: "home",
+      enabled: false,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    });
+    let reads = 0;
+    const renewingFs = FileSystem.FileSystem.of({
+      ...fs,
+      readFileString: (...args) =>
+        Effect.gen(function* () {
+          if (args[0] === configPath && ++reads === 2) {
+            yield* fs.writeFileString(configPath, toJson({ ...config, paused: true }));
+          }
+          return yield* fs.readFileString(...args);
+        }),
+    });
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+        expect((yield* bots.list()).bots[0]!.paused).toBe(true);
+        expect((yield* schedules.list()).tasks[0]!.enabled).toBe(false);
+        expect(yield* fromJson(yield* fs.readFileString(configPath))).toEqual({
+          ...config,
+          paused: true,
+        });
+      }),
+    ).pipe(Effect.provideService(FileSystem.FileSystem, renewingFs));
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect("finishes an interrupted pause before a concurrent resume reads its state", () =>
