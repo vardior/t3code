@@ -1,4 +1,7 @@
-import { botThreadShellStatus } from "@t3tools/client-runtime/state/bot-conversation";
+import {
+  botThreadShellStatus,
+  botThreadShellStatusLabel,
+} from "@t3tools/client-runtime/state/bot-conversation";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
@@ -79,14 +82,7 @@ function HomeBotRow(props: {
   const { bot, environmentId, refresh } = props.entry;
   const status = botThreadShellStatus(props.shell);
   const working = status === "working";
-  const statusText = {
-    idle: null,
-    working: "Working…",
-    "needs-approval": "Needs your approval",
-    "needs-input": "Needs your input",
-    failed: "Failed",
-    stopped: "Stopped",
-  }[status];
+  const statusText = botThreadShellStatusLabel(status);
   useBotRunSettlement(working, refresh);
   const lastActivity = props.shell?.latestRun?.completedAt ?? props.shell?.updatedAt ?? null;
   const time = botStatusLabel({ working: false, paused: false, lastActivity }, props.now);

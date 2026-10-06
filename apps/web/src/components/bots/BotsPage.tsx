@@ -22,7 +22,10 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { BotAvatar } from "./BotAvatar";
-import { isActiveRunStatus } from "@t3tools/client-runtime/state/bot-conversation";
+import {
+  botThreadShellStatus,
+  botThreadShellStatusLabel,
+} from "@t3tools/client-runtime/state/bot-conversation";
 import { BotChat } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
 
@@ -259,9 +262,11 @@ function BotListItem(props: {
   readonly refresh: () => void;
 }) {
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
-  const working = isActiveRunStatus(shell?.latestRun?.status);
+  const status = botThreadShellStatus(shell);
+  const working = status === "working";
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
-  const statusLabel = botStatusLabel({ working, paused: props.bot.paused, lastActivity });
+  const attentionLabel = botThreadShellStatusLabel(status);
+  const statusLabel = botStatusLabel({ paused: props.bot.paused, lastActivity });
   const wasWorking = useRef(working);
   const refresh = props.refresh;
   useEffect(() => {
@@ -285,7 +290,8 @@ function BotListItem(props: {
           <span className="truncate text-muted-foreground text-xs">{props.environmentLabel}</span>
         ) : null}
         <span className="truncate text-muted-foreground text-xs">
-          {working || props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel)}
+          {attentionLabel ??
+            (props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel))}
         </span>
       </span>
     </button>
@@ -293,11 +299,9 @@ function BotListItem(props: {
 }
 
 function botStatusLabel(status: {
-  readonly working: boolean;
   readonly paused: boolean;
   readonly lastActivity: string | null;
 }) {
-  if (status.working) return "Working…";
   if (status.paused) return "Paused";
   if (status.lastActivity) return formatRelativeTimeLabel(status.lastActivity);
   return "Idle";

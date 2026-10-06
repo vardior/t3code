@@ -72,6 +72,19 @@ export function botThreadShellStatus(
   return "idle";
 }
 
+const BOT_THREAD_STATUS_LABELS = {
+  idle: null,
+  working: "Working…",
+  "needs-approval": "Needs your approval",
+  "needs-input": "Needs your input",
+  failed: "Failed",
+  stopped: "Stopped",
+} as const;
+
+export function botThreadShellStatusLabel(status: ReturnType<typeof botThreadShellStatus>) {
+  return BOT_THREAD_STATUS_LABELS[status];
+}
+
 type ChatRun = Pick<OrchestrationV2Run, "id" | "status">;
 type ChatMessage = Pick<
   OrchestrationV2ConversationMessage,

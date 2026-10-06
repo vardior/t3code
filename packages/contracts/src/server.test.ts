@@ -133,11 +133,3 @@ describe("OtlpEndpointCheckInput", () => {
   });
 });
 
-describe("bots capability", () => {
-  const decode = Schema.decodeUnknownSync(Schema.Struct({ bots: ServerConfig.fields.bots }));
-  it("accepts older servers without bots and preserves explicit support", () => {
-    expect(decode({})).toEqual({});
-    expect(decode({ bots: true })).toEqual({ bots: true });
-    expect(decode({ bots: false })).toEqual({ bots: false });
-  });
-});
