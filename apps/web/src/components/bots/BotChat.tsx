@@ -10,7 +10,6 @@ import {
   type EnvironmentId,
   type ProviderInteractionMode,
   type RuntimeMode,
-  type ScheduledTask,
   type ThreadId,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -65,7 +64,6 @@ import {
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
 
-const EMPTY_SCHEDULES: ReadonlyArray<ScheduledTask> = [];
 const EMPTY_IMAGES: ReadonlyArray<ComposerImageAttachment> = [];
 
 export function BotChat(props: {
@@ -335,8 +333,11 @@ export function BotChat(props: {
               item={item}
               environmentId={props.environmentId}
               onOpenThread={openThread}
-              schedules={
-                item.kind === "wake" ? (tasksQuery.data?.tasks ?? EMPTY_SCHEDULES) : EMPTY_SCHEDULES
+              scheduleTitle={
+                item.kind === "wake"
+                  ? (tasksQuery.data?.tasks.find((task) => task.id === item.scheduledTaskId)
+                      ?.title ?? null)
+                  : null
               }
               botName={props.bot.name}
             />
@@ -411,7 +412,7 @@ const ChatRow = memo(function ChatRow(props: {
   readonly item: BotChatItem;
   readonly environmentId: EnvironmentId;
   readonly onOpenThread: (threadId: ThreadId) => void;
-  readonly schedules: ReadonlyArray<ScheduledTask>;
+  readonly scheduleTitle: string | null;
   readonly botName: string;
 }) {
   const { item } = props;
@@ -429,7 +430,7 @@ const ChatRow = memo(function ChatRow(props: {
       <WakeRow
         item={item}
         environmentId={props.environmentId}
-        schedules={props.schedules}
+        scheduleTitle={props.scheduleTitle}
         botName={props.botName}
       />
     );
@@ -497,20 +498,20 @@ function YourMessage(props: {
   );
 }
 
-function WakeRow(props: {
+const WakeRow = memo(function WakeRow(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
   readonly environmentId: EnvironmentId;
-  readonly schedules: ReadonlyArray<ScheduledTask>;
+  readonly scheduleTitle: string | null;
   readonly botName: string;
 }) {
   const { item } = props;
+  const [expanded, setExpanded] = useState(false);
   const sender = useThreadShell(
     item.senderThreadId ? scopeThreadRef(props.environmentId, item.senderThreadId) : null,
   );
-  const scheduleTitle = props.schedules.find((task) => task.id === item.scheduledTaskId)?.title;
   const from = botWakeSenderLabel({
     senderTitle: sender?.title ?? null,
-    scheduleTitle: scheduleTitle ?? null,
+    scheduleTitle: props.scheduleTitle,
     botName: props.botName,
     scheduled: item.scheduledTaskId !== null,
   });
@@ -520,7 +521,10 @@ function WakeRow(props: {
       .find((line) => line.trim())
       ?.replace(/[*`#>]/g, "") ?? "no reply yet";
   return (
-    <details className="group min-w-0 max-w-[85%] self-start text-muted-foreground text-xs">
+    <details
+      className="group min-w-0 max-w-[85%] self-start text-muted-foreground text-xs"
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full border border-border/70 px-3 py-1.5 hover:bg-accent/60 hover:text-foreground">
         <span className="flex min-w-0 items-center gap-1">
           <span className="shrink-0">From</span>
@@ -528,19 +532,21 @@ function WakeRow(props: {
         </span>
         <span className="truncate opacity-70">· {replyPreview}</span>
       </summary>
-      <div className="mt-2 flex flex-col gap-2">
-        <div className="rounded-2xl border border-border/70 px-3.5 py-2">
-          <BotMarkdown text={item.text} environmentId={props.environmentId} />
-        </div>
-        {item.reply ? (
-          <div className="rounded-2xl bg-muted px-3.5 py-2 text-foreground text-sm">
-            <BotMarkdown text={item.reply} environmentId={props.environmentId} />
+      {expanded ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="rounded-2xl border border-border/70 px-3.5 py-2">
+            <BotMarkdown text={item.text} environmentId={props.environmentId} />
           </div>
-        ) : null}
-      </div>
+          {item.reply ? (
+            <div className="rounded-2xl bg-muted px-3.5 py-2 text-foreground text-sm">
+              <BotMarkdown text={item.reply} environmentId={props.environmentId} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </details>
   );
-}
+});
 
 function WorkerChip(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
