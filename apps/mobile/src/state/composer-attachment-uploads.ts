@@ -4,6 +4,7 @@ import { AuthOrchestrationOperateScope, type EnvironmentId } from "@t3tools/cont
 import * as Schema from "effect/Schema";
 import { Atom, AsyncResult } from "effect/reactivity";
 
+import { environmentCatalog } from "../connection/catalog";
 import { prepareTurnAttachments } from "../lib/attachmentUpload";
 import { retainComposerAttachmentFileForPreview } from "../lib/composerAttachmentPreviewRetention";
 import {

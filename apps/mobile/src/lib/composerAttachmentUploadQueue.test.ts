@@ -305,6 +305,29 @@ describe("draft upload scope and offline submission", () => {
     );
   });
 
+  it("resolves colon-containing thread ids from known environments", () => {
+    expect(
+      composerDraftEnvironmentId("environment-1:mcp:abc", [environmentId], []),
+    ).toBe(environmentId);
+    const remoteEnvironmentId = EnvironmentId.make("remote:server");
+    expect(
+      composerDraftEnvironmentId("remote:server:thread:delegated-task:x", [remoteEnvironmentId], []),
+    ).toBe(remoteEnvironmentId);
+  });
+
+  it("chooses the longest matching known environment prefix", () => {
+    const remoteEnvironmentId = EnvironmentId.make("remote:server");
+    for (const environments of [
+      [EnvironmentId.make("remote"), remoteEnvironmentId],
+      [remoteEnvironmentId, EnvironmentId.make("remote")],
+    ]) {
+      expect(composerDraftEnvironmentId("remote:server:mcp:abc", environments, [])).toBe(
+        remoteEnvironmentId,
+      );
+    }
+  });
+
+
   it("reads an id-keyed new-task draft's environment from its project stamp", () => {
     const stamped = {
       project: {

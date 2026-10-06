@@ -620,6 +620,51 @@ describe("mobile composer drafts", () => {
     ]);
   });
 
+  it.each([
+    "new-task:draft-1",
+    "pending-task:queued-1",
+    "environment-1:mcp:abc",
+    "environment-1:thread:delegated-task:x~queued-edit~run-1",
+  ])("finds draft-only local clipboard files in %s", (key) => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const file = {
+      type: "file" as const,
+      id: "local-file",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 4,
+      fileUri: "file:///notes.txt",
+    };
+    appAtomRegistry.set(composerDraftsAtom, {
+      [key]: {
+        text: "",
+        attachments: [file],
+        project: {
+          environmentId,
+          projectId: ProjectId.make("project-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
+    appAtomRegistry.set(threadOutboxManager.queuedMessagesByThreadKeyAtom, {
+      queued: [
+        {
+          environmentId,
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("queued-1"),
+          commandId: CommandId.make("command-1"),
+          text: "Queued",
+          attachments: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(findLocalComposerClipboardAttachment(environmentId, file.id)).toEqual(file);
+    expect(
+      findLocalComposerClipboardAttachment(EnvironmentId.make("different-environment"), file.id),
+    ).toBeUndefined();
+  });
+
   it("keeps over-limit recovery context reloadable without losing other drafts", () => {
     const key = "environment-1:recovery";
     const merged = mergeComposerDraftContentState(
@@ -1253,7 +1298,7 @@ describe("mobile composer drafts", () => {
       onTestFinished(() => load.mockRestore());
       await waitForComposerDraftsLoaded();
       const environmentId = EnvironmentId.make("cloud-environment");
-      const key = `${environmentId}:thread-1`;
+      const key = `${environmentId}:mcp:thread-1`;
       const name = type === "image" ? "notes.png" : "notes.pdf";
       const metadata = {
         id: "local-notes",
