@@ -1,3 +1,6 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { NotificationResponse } from "expo-notifications";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => {
@@ -99,6 +102,143 @@ vi.mock("react-native", () => ({
 }));
 
 import { loadPreferences, savePreferencesPatch } from "../persistence/imperative";
+import {
+  loadPreferences,
+  loadBotHomeThreads,
+  savePreferencesPatch,
+  saveBotHomeThreads,
+} from "../persistence/imperative";
+import {
+  loadNotificationBotsForEnvironment,
+  persistNotificationBots,
+} from "../features/agent-awareness/notificationBotCache";
+import {
+  agentNotificationUrlForBots,
+  routeAgentNotificationResponseOnce,
+} from "../features/agent-awareness/notificationPayload";
+import { consumeLastAgentNotificationResponse } from "../features/agent-awareness/notificationResponseConsumer";
+
+describe("mobile notification bot cache", () => {
+  const bots = [{ id: "bot/1", homeThreadId: ThreadId.make("home/1") }];
+
+  beforeEach(() => {
+    mocks.clear();
+    vi.clearAllMocks();
+  });
+
+  it("persists a bots.list result when the query finishes loading", async () => {
+    const registry = AtomRegistry.make();
+    const source = Atom.make<AsyncResult.AsyncResult<{ bots: typeof bots }>>(AsyncResult.initial());
+    const cached = persistNotificationBots("env 1", source);
+    const unmount = registry.mount(cached);
+    expect(mocks.setItemAsync).not.toHaveBeenCalled();
+    const setItem = mocks.setItemAsync.getMockImplementation()!;
+    const written = new Promise<void>((resolve) => {
+      mocks.setItemAsync.mockImplementationOnce((key, value) => {
+        void setItem(key, value);
+        resolve();
+        return Promise.resolve();
+      });
+    });
+    registry.set(source, AsyncResult.success({ bots }));
+    registry.get(cached);
+    await written;
+    expect(mocks.setItemAsync).toHaveBeenCalledWith(
+      "t3code.bot-home-threads",
+      JSON.stringify({ "env 1": { "home/1": "bot/1" } }),
+    );
+    unmount();
+    registry.dispose();
+  });
+
+  it("resolves a cold initial URL with one local read and no live list", async () => {
+    await saveBotHomeThreads("env 1", bots);
+    mocks.getItemAsync.mockClear();
+    const lookup = await loadNotificationBotsForEnvironment(() => null);
+    expect(agentNotificationUrlForBots("t3code-dev://threads/env%201/home%2F1", lookup)).toBe(
+      "t3code-dev://bots/env%201/bot%2F1",
+    );
+    expect(mocks.getItemAsync).toHaveBeenCalledExactlyOnceWith("t3code.bot-home-threads");
+  });
+
+  it("routes a cold notification response from the persisted map before clearing it", async () => {
+    await saveBotHomeThreads("env 1", bots);
+    const navigate = vi.fn();
+    await consumeLastAgentNotificationResponse({
+      getLastResponse: () =>
+        Promise.resolve({
+          notification: {
+            request: {
+              identifier: "cold",
+              content: {
+                data: {
+                  environmentId: "env 1",
+                  threadId: "home/1",
+                },
+              },
+            },
+          },
+        } as unknown as NotificationResponse),
+      clearLastResponse: async () => {
+        expect(navigate).toHaveBeenCalledExactlyOnceWith("/bots/env%201/bot%2F1");
+      },
+      handleResponse: async (response) => {
+        routeAgentNotificationResponseOnce({
+          handledResponseIds: new Set(),
+          response,
+          navigate,
+          botsForEnvironment: await loadNotificationBotsForEnvironment(() => null),
+        });
+      },
+    });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/bots/env%201/bot%2F1");
+  });
+
+  it("overwrites only the refreshed environment and removes deleted bots", async () => {
+    await Promise.all([saveBotHomeThreads("env 1", bots), saveBotHomeThreads("other", bots)]);
+    await saveBotHomeThreads("env 1", []);
+    expect(await loadBotHomeThreads()).toEqual({ "env 1": {}, other: { "home/1": "bot/1" } });
+    const lookup = await loadNotificationBotsForEnvironment(() => null);
+    expect(agentNotificationUrlForBots("t3code-dev://threads/env%201/home%2F1", lookup)).toBe(
+      "t3code-dev://threads/env%201/home%2F1",
+    );
+    expect(agentNotificationUrlForBots("t3code-dev://threads/other/home%2F1", lookup)).toBe(
+      "t3code-dev://bots/other/bot%2F1",
+    );
+  });
+
+  it("prefers a loaded live list, including an empty list, over cached bots", async () => {
+    await saveBotHomeThreads("env 1", bots);
+    const emptyLookup = await loadNotificationBotsForEnvironment(() => []);
+    expect(agentNotificationUrlForBots("t3code://threads/env%201/home%2F1", emptyLookup)).toBe(
+      "t3code://threads/env%201/home%2F1",
+    );
+    const liveLookup = await loadNotificationBotsForEnvironment(() => [{ ...bots[0]!, id: "new" }]);
+    expect(agentNotificationUrlForBots("t3code://threads/env%201/home%2F1", liveLookup)).toBe(
+      "t3code://bots/env%201/new",
+    );
+  });
+
+  it("keeps thread routes when the cache or thread mapping is missing", async () => {
+    const lookup = await loadNotificationBotsForEnvironment(() => null);
+    expect(agentNotificationUrlForBots("t3code://threads/env/home", lookup)).toBe(
+      "t3code://threads/env/home",
+    );
+    await saveBotHomeThreads("env 1", bots);
+    const populatedLookup = await loadNotificationBotsForEnvironment(() => null);
+    expect(agentNotificationUrlForBots("t3code://threads/env%201/ordinary", populatedLookup)).toBe(
+      "t3code://threads/env%201/ordinary",
+    );
+  });
+
+  it("falls back to the thread when local storage cannot be read", async () => {
+    mocks.getItemAsync.mockRejectedValueOnce(new Error("storage unavailable"));
+    const lookup = await loadNotificationBotsForEnvironment(() => null);
+    expect(agentNotificationUrlForBots("t3code://threads/env/home", lookup)).toBe(
+      "t3code://threads/env/home",
+    );
+  });
+});
 
 describe("mobile connection storage", () => {
   beforeEach(() => {

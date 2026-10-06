@@ -78,6 +78,8 @@ function layerCloudClient() {
     Layer.succeed(
       MobileStorage.MobileStorage,
       MobileStorage.MobileStorage.of({
+        loadBotHomeThreads: Effect.succeed({}),
+        saveBotHomeThreads: () => Effect.void,
         loadOrCreateAgentAwarenessDeviceId: Effect.succeed("device-1"),
         loadAgentAwarenessDeviceId: Effect.succeed("device-1"),
         loadAgentAwarenessRegistrationRecord: Effect.succeed(null),
@@ -85,6 +87,8 @@ function layerCloudClient() {
         clearAgentAwarenessRegistrationRecord: Effect.void,
         loadRecentThreadShortcuts: Effect.succeed([]),
         saveRecentThreadShortcuts: () => Effect.void,
+        loadOpenItemNotificationMarks: Effect.succeed({}),
+        saveOpenItemNotificationMarks: () => Effect.void,
       }),
     ),
     ManagedRelay.layer({

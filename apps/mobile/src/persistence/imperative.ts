@@ -21,6 +21,11 @@ const runStorage = <A, E>(
 const runPreferences = <A, E>(
   use: (store: MobilePreferences.MobilePreferencesStore["Service"]) => Effect.Effect<A, E>,
 ) => runtime.runPromise(MobilePreferences.MobilePreferencesStore.pipe(Effect.flatMap(use)));
+export const loadBotHomeThreads = () => runStorage((storage) => storage.loadBotHomeThreads);
+export const saveBotHomeThreads = (
+  environmentId: string,
+  bots: Parameters<MobileStorage.MobileStorage["Service"]["saveBotHomeThreads"]>[1],
+) => runStorage((storage) => storage.saveBotHomeThreads(environmentId, bots));
 
 export const loadPreferences = () => runPreferences((store) => store.load);
 export const savePreferencesPatch = (patch: Partial<MobilePreferences.Preferences>) =>
@@ -46,3 +51,8 @@ export const loadRecentThreadShortcuts = () =>
 export const saveRecentThreadShortcuts = (
   threads: ReadonlyArray<MobileStorage.RecentThreadShortcut>,
 ) => runStorage((storage) => storage.saveRecentThreadShortcuts(threads));
+
+export const loadOpenItemNotificationMarks = () =>
+  runStorage((storage) => storage.loadOpenItemNotificationMarks);
+export const saveOpenItemNotificationMarks = (marks: Readonly<Record<string, string>>) =>
+  runStorage((storage) => storage.saveOpenItemNotificationMarks(marks));

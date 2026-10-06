@@ -91,6 +91,11 @@ export function botRouteOnScreen(pathname: string) {
   }
 }
 
+/**
+ * The deep link a notification would have to carry to target the thread the
+ * given route is showing, including its nested screens such as the file
+ * inspector. Null when the route is not inside a thread or a known bot chat.
+ */
 export function threadDeepLinkOnScreen(
   pathname: string,
   bots?: ReadonlyArray<NotificationBot> | null,

@@ -1,3 +1,4 @@
+import type { BotSummary } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -12,6 +13,10 @@ const AGENT_AWARENESS_DEVICE_ID_KEY = "t3code.agent-awareness.device-id";
 const AGENT_AWARENESS_REGISTRATION_KEY = "t3code.agent-awareness.registration";
 const RECENT_THREAD_SHORTCUTS_KEY = "t3code.recent-thread-shortcuts";
 const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const BOT_HOME_THREADS_KEY = "t3code.bot-home-threads";
+const OPEN_ITEM_NOTIFICATION_MARKS_KEY = "t3code.open-item-notification-marks";
+
+export type BotHomeThreads = Readonly<Record<string, Readonly<Record<string, string>>>>;
 
 export class MobileStorageDecodeError extends Schema.TaggedError<MobileStorageDecodeError>()(
   "MobileStorageDecodeError",
@@ -61,6 +66,17 @@ export interface RecentThreadShortcut {
 export class MobileStorage extends Context.Service<
   MobileStorage,
   {
+    readonly loadBotHomeThreads: Effect.Effect<
+      BotHomeThreads,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly saveBotHomeThreads: (
+      environmentId: string,
+      bots: ReadonlyArray<Pick<BotSummary, "id" | "homeThreadId">>,
+    ) => Effect.Effect<
+      void,
+      MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
+    >;
     readonly loadOrCreateAgentAwarenessDeviceId: Effect.Effect<
       string,
       MobileSecureStorage.MobileSecureStorageError | MobileDeviceIdGenerationError
@@ -93,12 +109,23 @@ export class MobileStorage extends Context.Service<
       void,
       MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
     >;
+    readonly loadOpenItemNotificationMarks: Effect.Effect<
+      Readonly<Record<string, string>>,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly saveOpenItemNotificationMarks: (
+      marks: Readonly<Record<string, string>>,
+    ) => Effect.Effect<
+      void,
+      MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
+    >;
   }
 >()("@t3tools/mobile/persistence/mobile-storage/MobileStorage") {}
 
 export const make = Effect.fn("MobileStorage.make")(function* () {
   const secureStorage = yield* MobileSecureStorage.MobileSecureStorage;
   const deviceIdLock = yield* Semaphore.make(1);
+  const botHomeThreadsLock = yield* Semaphore.make(1);
 
   const parseJson = <A>(key: string, raw: string): A | null => {
     if (!raw.trim()) return null;
@@ -124,6 +151,39 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     );
     yield* secureStorage.setItem(key, encoded);
   });
+
+  const loadBotHomeThreads = readJson<BotHomeThreads>(BOT_HOME_THREADS_KEY).pipe(
+    Effect.map((parsed) =>
+      Object.fromEntries(
+        Object.entries(parsed ?? {}).flatMap(([environmentId, threads]) =>
+          threads && typeof threads === "object" && !Array.isArray(threads)
+            ? [
+                [
+                  environmentId,
+                  Object.fromEntries(
+                    Object.entries(threads).filter(
+                      ([threadId, botId]) =>
+                        threadId.length > 0 && typeof botId === "string" && botId.length > 0,
+                    ),
+                  ),
+                ],
+              ]
+            : [],
+        ),
+      ),
+    ),
+  );
+
+  const saveBotHomeThreads = Effect.fn("MobileStorage.saveBotHomeThreads")(function* (
+    environmentId: string,
+    bots: ReadonlyArray<Pick<BotSummary, "id" | "homeThreadId">>,
+  ) {
+    const current = yield* loadBotHomeThreads;
+    yield* writeJson(BOT_HOME_THREADS_KEY, {
+      ...current,
+      [environmentId]: Object.fromEntries(bots.map((bot) => [bot.homeThreadId, bot.id])),
+    });
+  }, botHomeThreadsLock.withPermits(1));
 
   const loadOrCreateAgentAwarenessDeviceId = Effect.gen(function* () {
     const existing = yield* secureStorage.getItem(AGENT_AWARENESS_DEVICE_ID_KEY);
@@ -180,7 +240,21 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     ),
   );
 
+  const loadOpenItemNotificationMarks = readJson<Record<string, unknown>>(
+    OPEN_ITEM_NOTIFICATION_MARKS_KEY,
+  ).pipe(
+    Effect.map((parsed) =>
+      Object.fromEntries(
+        Object.entries(parsed ?? {}).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+    ),
+  );
+
   return MobileStorage.of({
+    loadBotHomeThreads,
+    saveBotHomeThreads,
     loadOrCreateAgentAwarenessDeviceId,
     loadAgentAwarenessDeviceId,
     loadAgentAwarenessRegistrationRecord,
@@ -195,6 +269,8 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     saveRecentThreadShortcuts: Effect.fn("MobileStorage.saveRecentThreadShortcuts")((threads) =>
       writeJson(RECENT_THREAD_SHORTCUTS_KEY, { threads }),
     ),
+    loadOpenItemNotificationMarks,
+    saveOpenItemNotificationMarks: (marks) => writeJson(OPEN_ITEM_NOTIFICATION_MARKS_KEY, marks),
   });
 });
 
