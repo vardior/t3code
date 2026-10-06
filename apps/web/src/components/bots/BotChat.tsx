@@ -647,7 +647,8 @@ function BotComposer(props: {
         if (useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt === sentText) {
           setPrompt(draftTarget, "");
         }
-        for (const image of images) removeImage(image);
+        const store = useComposerDraftStore.getState();
+        for (const image of images) store.removeImage(draftTarget, image.id);
       } else if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
