@@ -36,6 +36,9 @@ it("routes bot image drafts to their environment independently of the home threa
   expect(composerDraftEnvironmentId("environment-2:bot-chat-home-thread", [])).toBe(
     EnvironmentId.make("environment-2"),
   );
+  expect(
+    composerDraftEnvironmentId(`environment-1:bot-chat-${encodeURIComponent("mcp:home")}`, []),
+  ).toBe(environmentId);
 });
 
 describe("composer attachment upload queue", () => {

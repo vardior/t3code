@@ -140,7 +140,7 @@ function BotConversation(props: {
     initialBotComposer,
   );
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
-  const draftKey = `${environmentId}:bot-chat-${bot.homeThreadId}`;
+  const draftKey = `${environmentId}:bot-chat-${encodeURIComponent(bot.homeThreadId)}`;
   const draft = useComposerDraft(draftKey);
   const serverConfig = useEnvironmentServerConfig(environmentId);
   const getDraftKey = useCallback(() => draftKey, [draftKey]);
