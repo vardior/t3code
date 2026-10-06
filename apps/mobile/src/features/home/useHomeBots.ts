@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
@@ -8,6 +9,7 @@ import { AppState } from "react-native";
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
+import { homeBotsState } from "./homeBots.logic";
 
 export function useHomeBots(environmentIds: ReadonlyArray<EnvironmentId>) {
   const queries = useMemo(
@@ -21,10 +23,23 @@ export function useHomeBots(environmentIds: ReadonlyArray<EnvironmentId>) {
   const botsAtom = useMemo(
     () =>
       Atom.make((get) =>
-        queries.flatMap(({ environmentId, atom, refresh }) => {
-          const data = Option.getOrNull(AsyncResult.value(get(atom)));
-          return data?.bots.map((bot) => ({ environmentId, bot, refresh })) ?? [];
-        }),
+        homeBotsState(
+          queries.map(({ environmentId, atom, refresh }) => {
+            const result = get(atom);
+            const failure = result._tag === "Failure" ? Cause.squash(result.cause) : null;
+            return {
+              environmentId,
+              data: Option.getOrNull(AsyncResult.value(result)),
+              error:
+                result._tag === "Failure"
+                  ? failure instanceof Error && failure.message.trim()
+                    ? failure.message
+                    : "The environment request failed."
+                  : null,
+              refresh,
+            };
+          }),
+        ),
       ).pipe(Atom.withLabel("mobile:home-bots")),
     [queries],
   );

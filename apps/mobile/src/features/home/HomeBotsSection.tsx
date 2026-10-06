@@ -20,16 +20,16 @@ export function HomeBotsSection(props: {
   const shells = useMemo(
     () =>
       new Map(
-        props.bots.length === 0
+        props.bots.bots.length === 0
           ? []
           : props.threads.map((thread) => [
               scopedThreadKey(thread.environmentId, thread.id),
               thread,
             ]),
       ),
-    [props.bots.length, props.threads],
+    [props.bots.bots.length, props.threads],
   );
-  if (props.bots.length === 0) return null;
+  if (props.bots.bots.length === 0 && props.bots.errors.length === 0) return null;
   return (
     <View className="mb-4 px-4">
       <Text
@@ -38,7 +38,20 @@ export function HomeBotsSection(props: {
       >
         Bots
       </Text>
-      {props.bots.map((entry) => (
+      {props.bots.errors.map((entry) => (
+        <View key={entry.environmentId} className="flex-row items-center gap-3 py-3">
+          <Text accessibilityRole="alert" className="min-w-0 flex-1 text-sm text-destructive">
+            {props.environmentLabels.size > 1
+              ? `${props.environmentLabels.get(entry.environmentId)} · `
+              : ""}
+            Could not load bots: {entry.error}
+          </Text>
+          <Pressable accessibilityRole="button" onPress={entry.refresh} className="p-2">
+            <Text className="text-sm text-primary-text">Try again</Text>
+          </Pressable>
+        </View>
+      ))}
+      {props.bots.bots.map((entry) => (
         <HomeBotRow
           key={scopedThreadKey(entry.environmentId, entry.bot.homeThreadId)}
           entry={entry}
@@ -57,7 +70,7 @@ export function HomeBotsSection(props: {
 }
 
 function HomeBotRow(props: {
-  readonly entry: ReturnType<typeof useHomeBots>[number];
+  readonly entry: ReturnType<typeof useHomeBots>["bots"][number];
   readonly shell: EnvironmentThreadShell | undefined;
   readonly environmentLabel: string | undefined;
   readonly now: number;
