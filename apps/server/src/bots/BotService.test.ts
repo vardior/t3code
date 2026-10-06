@@ -53,7 +53,11 @@ const withBots = <A, E, R>(
     Effect.provide(
       BotService.layer.pipe(
         Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir)),
-        Layer.provideMerge(scheduledTasksLayer),
+        Layer.provideMerge(
+          scheduledTasksLayer.pipe(
+            Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir)),
+          ),
+        ),
       ),
     ),
     Effect.provideService(HostProcessEnvironment, input.env ?? {}),
@@ -435,7 +439,30 @@ it.effect(
           expect((yield* helper)?.paused).toBe(false);
 
           yield* bots.setPaused({ botId: "helper", paused: true });
-          yield* schedules.setEnabled({ id: ScheduledTaskId.make("listed"), enabled: true });
+          for (const id of ["listed", "bound", "already-off"]) {
+            const error = yield* schedules
+              .setEnabled({ id: ScheduledTaskId.make(id), enabled: true })
+              .pipe(Effect.flip);
+            expect(error.message).toBe(
+              "Paused with bot Helper. Resume the bot before enabling this task.",
+            );
+          }
+          const { tasks } = yield* schedules.list();
+          const bound = tasks.find((task) => task.id === "bound")!;
+          const error = yield* schedules.upsert({ ...bound, enabled: true }).pipe(Effect.flip);
+          expect(error.message).toBe(
+            "Paused with bot Helper. Resume the bot before enabling this task.",
+          );
+          const createError = yield* schedules
+            .upsert({ ...bound, id: ScheduledTaskId.make("blocked-create"), enabled: true })
+            .pipe(Effect.flip);
+          expect(createError.message).toBe(
+            "Paused with bot Helper. Resume the bot before enabling this task.",
+          );
+          expect((yield* schedules.list()).tasks.some((task) => task.id === "blocked-create")).toBe(
+            false,
+          );
+          yield* schedules.setEnabled({ id: ScheduledTaskId.make("unrelated"), enabled: true });
           yield* insertSchedule(sql, {
             id: "new-bound",
             threadId: "home",

@@ -27,6 +27,16 @@ import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 
+import {
+  BOT_ID,
+  BotSchedulePauseTransition,
+  decodeBotConfig,
+  isPaused,
+  listedScheduleIds,
+  ownThreadIds,
+  type BotConfigFile,
+} from "./BotConfig.ts";
+
 const HOME_THREAD_CACHE_TTL_MS = 30_000;
 const MAX_WORKERS_PER_BOT = 50;
 const MAX_SLACK_DMS_PER_BOT = 200;
@@ -49,20 +59,6 @@ const replyPreview = (text: string) => {
     : plainText;
 };
 
-const BotConfigFile = Schema.Struct({
-  name: Schema.String,
-  homeThreadId: ThreadId,
-  triageThreadId: Schema.optional(ThreadId),
-  dmRelayThreadId: Schema.optional(ThreadId),
-  scheduledTaskId: Schema.optional(ScheduledTaskId),
-  dmRelayScheduledTaskId: Schema.optional(ScheduledTaskId),
-  paused: Schema.optional(Schema.Boolean),
-  pausedUntil: Schema.optional(Schema.String),
-  pausedScheduleIds: Schema.optional(Schema.Array(ScheduledTaskId)),
-});
-type BotConfigFile = typeof BotConfigFile.Type;
-
-const decodeBotConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(BotConfigFile));
 const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown), {
   space: 2,
 });
@@ -71,19 +67,6 @@ const encodeJsonObject = Schema.encodeEffect(JsonObject);
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
 const PAUSE_KEYS = new Set(["paused", "pausedUntil", "pausedReason", "pausedScheduleIds"]);
 const isBotError = Schema.is(BotError);
-const BOT_ID = /^[\w-][\w.-]*$/;
-
-const listedScheduleIds = (config: BotConfigFile) =>
-  [config.scheduledTaskId, config.dmRelayScheduledTaskId].filter((value) => value !== undefined);
-
-const ownThreadIds = (config: BotConfigFile) =>
-  [config.homeThreadId, config.triageThreadId, config.dmRelayThreadId].filter(
-    (value) => value !== undefined,
-  );
-
-const isPaused = (config: BotConfigFile, nowMs: number) =>
-  config.paused === true ||
-  (config.pausedUntil !== undefined && Date.parse(config.pausedUntil) > nowMs);
 
 const isPauseExpired = (config: BotConfigFile, nowMs: number) =>
   config.paused !== true &&
@@ -415,8 +398,13 @@ export const layer = Layer.effect(
         return homeThreadIds.has(threadId);
       }).pipe(homeThreadLookupLock.withPermit);
 
+    const setBotScheduleEnabled = (id: ScheduledTaskId, enabled: boolean) =>
+      scheduledTasks
+        .setEnabled({ id, enabled })
+        .pipe(Effect.provideService(BotSchedulePauseTransition, true));
+
     const setScheduleIdsEnabled = (ids: ReadonlyArray<ScheduledTaskId>, enabled: boolean) =>
-      Effect.forEach(ids, (id) => scheduledTasks.setEnabled({ id, enabled }), { discard: true });
+      Effect.forEach(ids, (id) => setBotScheduleEnabled(id, enabled), { discard: true });
 
     const setPaused = (input: BotSetPausedInput, onlyIfExpired = false) =>
       Effect.gen(function* () {
@@ -455,7 +443,7 @@ export const layer = Layer.effect(
           const disabledIds: ScheduledTaskId[] = [];
           yield* Effect.gen(function* () {
             for (const id of enabledIds) {
-              yield* scheduledTasks.setEnabled({ id, enabled: false });
+              yield* setBotScheduleEnabled(id, false);
               disabledIds.push(id);
             }
             yield* writePauseFields({
@@ -489,7 +477,7 @@ export const layer = Layer.effect(
         const enabledIds: ScheduledTaskId[] = [];
         yield* Effect.gen(function* () {
           for (const id of resumeIds) {
-            yield* scheduledTasks.setEnabled({ id, enabled: true });
+            yield* setBotScheduleEnabled(id, true);
             enabledIds.push(id);
           }
           yield* writePauseFields(null);

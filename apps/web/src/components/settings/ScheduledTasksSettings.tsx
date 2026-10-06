@@ -756,6 +756,10 @@ function ScheduledTaskRow({
   const canOperate = useAtomValue(
     serverEnvironment.upsertScheduledTask.permissionAtom(environmentId),
   );
+  const botsQuery = useEnvironmentQuery(serverEnvironment.bots.list({ environmentId, input: {} }));
+  const pausedBotName = botsQuery.data?.bots.find(
+    (bot) => bot.paused && bot.scheduledTaskIds.includes(task.id),
+  )?.name;
   const [busy, setBusy] = useState(false);
   const [deliveriesOpen, setDeliveriesOpen] = useState(false);
   const isWebhook = task.schedule.type === "webhook";
@@ -810,6 +814,7 @@ function ScheduledTaskRow({
               "Not scheduled"
             )}
           </span>
+          {pausedBotName ? <span>Paused with bot {pausedBotName}</span> : null}
           {task.checkCommand ? (
             <span>
               Runs when <code className="font-mono">{task.checkCommand}</code> prints
@@ -828,7 +833,7 @@ function ScheduledTaskRow({
         <div className="flex items-center gap-2">
           <Switch
             checked={task.enabled}
-            disabled={busy || !canOperate}
+            disabled={busy || !canOperate || pausedBotName !== undefined}
             aria-label={`Enable ${task.title}`}
             onCheckedChange={() => void act("toggle")}
           />
@@ -1382,6 +1387,12 @@ function ScheduledTaskEditorForm({
     environment?.connection.phase === "connected" && environment.serverConfig !== null;
   const tasksQuery = useEnvironmentQuery(
     connected ? serverEnvironment.scheduledTasksLive({ environmentId, input: {} }) : null,
+  );
+  const botsQuery = useEnvironmentQuery(
+    connected ? serverEnvironment.bots.list({ environmentId, input: {} }) : null,
+  );
+  const pausedBot = botsQuery.data?.bots.find(
+    (bot) => bot.paused && task !== null && bot.scheduledTaskIds.includes(task.id),
   );
   const allProjects = useProjects();
   const projectsOn = (id: EnvironmentId) =>
@@ -2122,13 +2133,16 @@ function ScheduledTaskEditorForm({
             <div className="min-w-0 space-y-1">
               <Label htmlFor="scheduled-task-enabled">Enabled</Label>
               <p id="scheduled-task-enabled-description" className="text-sm text-muted-foreground">
-                Disabled tasks stay saved but do not run.
+                {pausedBot
+                  ? `Paused with bot ${pausedBot.name}`
+                  : "Disabled tasks stay saved but do not run."}
               </p>
             </div>
             <Switch
               id="scheduled-task-enabled"
               aria-describedby="scheduled-task-enabled-description"
               checked={draft.enabled}
+              disabled={pausedBot !== undefined}
               onCheckedChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
             />
           </div>

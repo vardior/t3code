@@ -680,6 +680,10 @@ function TaskForm({
   const submissionPending = useRef(false);
   const [timePickerOpen, setTimePickerOpen] = useState(false);
   const [runAtPicker, setRunAtPicker] = useState<"date" | "time" | null>(null);
+  const botsQuery = useEnvironmentQuery(serverEnvironment.bots.list({ environmentId, input: {} }));
+  const pausedBot = botsQuery.data?.bots.find(
+    (bot) => bot.paused && draft.task !== null && bot.scheduledTaskIds.includes(draft.task.id),
+  );
   const taskMissing =
     draft.task !== null &&
     tasks.data !== null &&
@@ -1284,9 +1288,15 @@ function TaskForm({
             <ThemedSwitch
               accessibilityLabel="Task enabled"
               value={draft.enabled}
+              disabled={pausedBot !== undefined}
               onValueChange={(enabled) => setDraft({ ...draft, enabled })}
             />
           </View>
+          {pausedBot ? (
+            <Text className="px-4 pb-3 text-sm text-foreground-muted">
+              Paused with bot {pausedBot.name}
+            </Text>
+          ) : null}
         </SettingsSection>
         {draft.schedule.mode === "fixed_time" ? (
           <Text className="px-2 text-sm text-foreground-muted">
@@ -1416,6 +1426,9 @@ function EnvironmentTasks({
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
+  const botsQuery = useEnvironmentQuery(serverEnvironment.bots.list({ environmentId, input: {} }));
+  const pausedBotFor = (task: ScheduledTask) =>
+    botsQuery.data?.bots.find((bot) => bot.paused && bot.scheduledTaskIds.includes(task.id));
   const visibleTasks = tasks.data?.tasks.filter(
     (task) => projectIds === null || projectIds.includes(task.projectId),
   );
@@ -1507,6 +1520,11 @@ function EnvironmentTasks({
                   {task.blockedByPolicy}
                 </Text>
               ) : null}
+              {pausedBotFor(task) ? (
+                <Text className="text-sm text-foreground-muted">
+                  Paused with bot {pausedBotFor(task)?.name}
+                </Text>
+              ) : null}
               {task.checkCommand ? (
                 <Text className="text-sm text-foreground-muted" numberOfLines={1}>
                   Runs when {task.checkCommand} prints
@@ -1527,7 +1545,7 @@ function EnvironmentTasks({
                 {
                   id: "toggle",
                   title: task.enabled ? "Pause" : "Resume",
-                  attributes: { disabled: !canOperate },
+                  attributes: { disabled: !canOperate || pausedBotFor(task) !== undefined },
                 },
                 ...(task.schedule.type === "webhook"
                   ? []

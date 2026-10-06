@@ -28,6 +28,19 @@ import {
   scheduledTaskThreadMode,
   managedRuntimeModeDenial,
 } from "@t3tools/contracts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as Clock from "effect/Clock";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { ServerConfig } from "../config.ts";
+import {
+  BOT_ID,
+  BotSchedulePauseTransition,
+  decodeBotConfig,
+  isPaused,
+  listedScheduleIds,
+  ownThreadIds,
+} from "../bots/BotConfig.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
@@ -104,6 +117,8 @@ const LEGACY_DELIVERY_OUTCOMES: ReadonlySet<string> = new Set([
 interface WebhookOrigin {
   readonly relayHookBaseUrl: string | null;
 }
+
+const isScheduledTaskError = Schema.is(ScheduledTaskError);
 
 const ENDPOINT_KEY = /^[0-9a-f]{16}$/;
 
@@ -495,6 +510,47 @@ export const layer = Layer.effect(
       webhookPolicyBlock !== undefined && task.schedule.type === "webhook"
         ? { ...task, blockedByPolicy: webhookPolicyBlock }
         : task;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const config = yield* Effect.serviceOption(ServerConfig);
+    const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim();
+    const botsDir =
+      configuredBotsDir || (Option.isSome(config) ? path.join(config.value.baseDir, "bots") : null);
+    const assertBotScheduleCanEnable = (id: ScheduledTaskId, threadId: ThreadId | null) =>
+      Effect.gen(function* () {
+        if (botsDir === null || (yield* BotSchedulePauseTransition)) return;
+        const ids = yield* fileSystem
+          .readDirectory(botsDir)
+          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])));
+        const now = yield* Clock.currentTimeMillis;
+        for (const botId of ids.filter((id) => BOT_ID.test(id))) {
+          const configPath = path.join(botsDir, botId, "bot.json");
+          if (!(yield* fileSystem.exists(configPath))) continue;
+          const bot = yield* fileSystem
+            .readFileString(configPath)
+            .pipe(Effect.flatMap(decodeBotConfig));
+          if (
+            isPaused(bot, now) &&
+            (listedScheduleIds(bot).includes(id) ||
+              (threadId !== null && ownThreadIds(bot).includes(threadId)))
+          ) {
+            return yield* taskError(
+              `Paused with bot ${bot.name}. Resume the bot before enabling this task.`,
+              { taskId: id },
+            );
+          }
+        }
+      }).pipe(
+        Effect.mapError((cause) =>
+          isScheduledTaskError(cause)
+            ? cause
+            : taskError("Could not check whether this task's bot is paused.", {
+                taskId: id,
+                cause,
+              }),
+        ),
+      );
+
     const webhookPermits = yield* Ref.make<ReadonlyMap<ScheduledTaskId, Semaphore.Semaphore>>(
       new Map(),
     );
@@ -1430,6 +1486,10 @@ ${checkOutput}` : basePrompt;
           ? managedRuntimeModeDenial(managedPolicy.summary, input.runtimeMode)
           : undefined;
       if (modeDenial !== undefined) return yield* taskError(modeDenial, { taskId: id });
+      if (input.enabled) {
+        yield* assertBotScheduleCanEnable(id, input.threadId ?? null);
+        if (existingTask !== null) yield* assertBotScheduleCanEnable(id, existingTask.threadId);
+      }
       // Keep the existing next_run_at when the schedule itself is untouched:
       // editing a title or prompt must not postpone (or resurrect) a due
       // run — only schedule/enabled changes restart the clock.
@@ -1551,6 +1611,7 @@ ${checkOutput}` : basePrompt;
       "ScheduledTaskService.setEnabled",
     )(function* (input) {
       const existing = yield* loadTask(input.id);
+      if (input.enabled) yield* assertBotScheduleCanEnable(input.id, existing.threadId);
       if (existing.enabled === input.enabled) return { task: existing };
       if (
         input.enabled &&
