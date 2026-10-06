@@ -31,6 +31,13 @@ function request(id: string, environment = environmentId): ComposerAttachmentUpl
   };
 }
 
+it("routes bot image drafts to their environment independently of the home thread draft", () => {
+  expect(composerDraftEnvironmentId("environment-1:bot-chat-home-thread", [])).toBe(environmentId);
+  expect(composerDraftEnvironmentId("environment-2:bot-chat-home-thread", [])).toBe(
+    EnvironmentId.make("environment-2"),
+  );
+});
+
 describe("composer attachment upload queue", () => {
   it("bounds concurrency, deduplicates updates, and drains all attachments", async () => {
     const gates = new Map<string, ReturnType<typeof Promise.withResolvers<boolean>>>();

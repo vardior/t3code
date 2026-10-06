@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
@@ -8,15 +9,26 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
 import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
+import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
+import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import { ComposerEditor } from "../../components/ComposerEditor";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { ScreenHeader } from "../../components/ScreenHeader";
+import { useEnvironmentServerConfig } from "../../state/entities";
+import { useComposerMediaAttachments } from "../../state/use-composer-media-attachments";
+import { clearComposerDraftContent, useComposerDraft } from "../../state/use-composer-drafts";
+import { prepareComposerDraftAttachments } from "../../state/prepare-composer-draft-attachments";
+import {
+  composerAttachmentUploadsAtom,
+  composerAttachmentsStillUploading,
+  composerAttachmentUploadBlockReason,
+} from "../../state/composer-attachment-uploads";
 import { uuidv4 } from "../../lib/uuid";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -128,6 +140,25 @@ function BotConversation(props: {
     initialBotComposer,
   );
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
+  const draftKey = `${environmentId}:bot-chat-${bot.homeThreadId}`;
+  const draft = useComposerDraft(draftKey);
+  const serverConfig = useEnvironmentServerConfig(environmentId);
+  const getDraftKey = useCallback(() => draftKey, [draftKey]);
+  const { onPickDraftMedia, onRemoveDraftImage } = useComposerMediaAttachments({
+    getDraftKey,
+    serverConfig,
+    imagesOnly: true,
+    appendReference: false,
+  });
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  const uploadInput = {
+    environmentId,
+    attachments: draft.attachments,
+    serverConfig,
+    states: uploadStates,
+  };
+  const attachmentsUploading = composerAttachmentsStillUploading(uploadInput);
+  const uploadError = composerAttachmentUploadBlockReason({ ...uploadInput, connected: true });
   const pending = useRef(false);
   const sending = composer.pendingRequestId !== null;
   const busy = sending;
@@ -136,7 +167,12 @@ function BotConversation(props: {
     reportFailure: false,
   });
   const ready = projection !== null && thread.status === "live";
-  const canSend = ready && !busy && composer.text.trim().length > 0;
+  const canSend =
+    ready &&
+    !busy &&
+    !attachmentsUploading &&
+    uploadError === null &&
+    (composer.text.trim().length > 0 || draft.attachments.length > 0);
   usePreventRemove(busy, () =>
     Alert.alert("Command pending", "Wait for the bot command to finish before leaving."),
   );
@@ -147,38 +183,49 @@ function BotConversation(props: {
     if (!canSend || projection === null || pending.current) return;
     pending.current = true;
     const requestId = uuidv4();
-    dispatch({ type: "send", requestId });
-    const result = await startTurn({
-      environmentId,
-      input: {
-        threadId: bot.homeThreadId,
-        message: {
-          messageId: MessageId.make(requestId),
-          role: "user",
-          text: composer.text.trim(),
-          attachments: [],
+    dispatch({ type: "send", requestId, attachmentCount: draft.attachments.length });
+    let success = false;
+    let error: string | null = null;
+    try {
+      const prepared = await prepareComposerDraftAttachments({
+        draftKey,
+        environmentId,
+        supportsImageUploads: serverConfig?.environment.capabilities.attachmentUploads === true,
+      });
+      if (prepared.status !== "ready") return;
+      const result = await startTurn({
+        environmentId,
+        input: {
+          threadId: bot.homeThreadId,
+          message: {
+            messageId: MessageId.make(requestId),
+            role: "user",
+            text: composer.text.trim(),
+            attachments: prepared.attachments,
+          },
+          runtimeMode: projection.thread.runtimeMode,
+          interactionMode: projection.thread.interactionMode,
+          dispatchMode: "queue",
         },
-        runtimeMode: projection.thread.runtimeMode,
-        interactionMode: projection.thread.interactionMode,
-        dispatchMode: "queue",
-      },
-    });
-    pending.current = false;
-    const failure =
-      result._tag === "Success" || isAtomCommandInterrupted(result)
-        ? null
-        : squashAtomCommandFailure(result);
-    dispatch({
-      type: "settled",
-      scope: composer.scope,
-      requestId,
-      success: result._tag === "Success",
-      error: failure === null ? null : failure instanceof Error ? failure.message : String(failure),
-    });
+      });
+      success = result._tag === "Success";
+      const failure =
+        result._tag === "Success" || isAtomCommandInterrupted(result)
+          ? null
+          : squashAtomCommandFailure(result);
+      error =
+        failure === null ? null : failure instanceof Error ? failure.message : String(failure);
+      if (success) clearComposerDraftContent(draftKey);
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : String(failure);
+    } finally {
+      pending.current = false;
+      dispatch({ type: "settled", scope: composer.scope, requestId, success, error });
+    }
   };
   const history = thread.history;
   const historyError = history.error;
-  const error = composer.error ?? Option.getOrNull(thread.error);
+  const error = composer.error ?? uploadError ?? Option.getOrNull(thread.error);
   return (
     <View className="flex-1 bg-screen">
       <ScreenHeader
@@ -299,7 +346,21 @@ function BotConversation(props: {
               {error}
             </Text>
           ) : null}
+          {draft.attachments.length > 0 ? (
+            <ComposerAttachmentStrip
+              environmentId={environmentId}
+              attachments={draft.attachments}
+              onRemove={busy ? () => undefined : onRemoveDraftImage}
+              onPressPreview={setPreview}
+            />
+          ) : null}
           <View className="flex-row items-end gap-2">
+            <ComposerAttachmentButton
+              supportsFiles={false}
+              disabled={!ready || busy}
+              onPickMedia={onPickDraftMedia}
+              onPickFiles={onPickDraftMedia}
+            />
             <View className="min-w-0 flex-1 rounded-2xl bg-subtle px-3 py-2">
               <ComposerEditor
                 value={composer.text}

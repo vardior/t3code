@@ -31,7 +31,7 @@ export function initialBotComposer(scope: string): BotComposerState {
 
 type BotComposerAction =
   | { readonly type: "edit"; readonly text: string }
-  | { readonly type: "send"; readonly requestId: string }
+  | { readonly type: "send"; readonly requestId: string; readonly attachmentCount?: number }
   | {
       readonly type: "settled";
       readonly scope: string;
@@ -48,7 +48,8 @@ export function botComposerReducer(
     return state.pendingRequestId === null ? { ...state, text: action.text, error: null } : state;
   }
   if (action.type === "send") {
-    if (state.pendingRequestId !== null || !state.text.trim()) return state;
+    if (state.pendingRequestId !== null || (!state.text.trim() && !action.attachmentCount))
+      return state;
     return { ...state, pendingRequestId: action.requestId, error: null };
   }
   if (action.scope !== state.scope || action.requestId !== state.pendingRequestId) return state;

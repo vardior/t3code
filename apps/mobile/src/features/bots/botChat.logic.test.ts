@@ -93,6 +93,25 @@ describe("bot text submission", () => {
     ).toBe(pending);
   });
 
+  it("submits an image-only draft and settles without dropping failure state", () => {
+    const empty = initialBotComposer("image-only");
+    const sending = botComposerReducer(empty, {
+      type: "send",
+      requestId: "image-send",
+      attachmentCount: 1,
+    });
+    expect(sending.pendingRequestId).toBe("image-send");
+    expect(
+      botComposerReducer(sending, {
+        type: "settled",
+        scope: empty.scope,
+        requestId: "image-send",
+        success: false,
+        error: "Upload failed",
+      }),
+    ).toMatchObject({ pendingRequestId: null, error: "Upload failed" });
+  });
+
   it("blocks duplicate sends and draft replacement during submission", () => {
     expect(botComposerReducer(pending, { type: "send", requestId: "send-2" })).toBe(pending);
     expect(botComposerReducer(pending, { type: "edit", text: "another draft" })).toBe(pending);
