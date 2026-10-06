@@ -7,20 +7,13 @@ import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-r
 import {
   botChatHistoryStart,
   botConversationStatus,
-  isBotWorking,
   isBotQueueHeld,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import {
-  EnvironmentId,
-  MessageId,
-  type BotSummary,
-  type ScheduledTask,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
@@ -56,8 +49,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
 import { botChatScrollReducer, botComposerReducer, initialBotComposer } from "./botChat.logic";
 import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
-
-const EMPTY_SCHEDULES: ReadonlyArray<ScheduledTask> = [];
 
 type BotChatRouteProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -184,8 +175,12 @@ function BotConversation(props: {
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
     [projection],
   );
-  const working = isBotWorking(projection?.runs ?? []);
+  const working = status.kind === "working";
   const queueHeld = isBotQueueHeld(projection?.runs ?? []);
+  const scheduleTitles = useMemo(
+    () => new Map(schedules.data?.tasks.map((task) => [task.id, task.title]) ?? []),
+    [schedules.data],
+  );
   const refreshBots = props.refresh;
   const refreshDetail = detail.refresh;
   const refresh = useCallback(() => {
@@ -384,14 +379,18 @@ function BotConversation(props: {
           key={listMountKey}
           ref={listRef}
           data={conversationShown ? items : []}
-          extraData={schedules.data}
+          extraData={scheduleTitles}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <BotChatRow
               item={item}
               botName={bot.name}
               environmentId={environmentId}
-              schedules={schedules.data?.tasks ?? EMPTY_SCHEDULES}
+              scheduleTitle={
+                item.kind === "wake" && item.scheduledTaskId !== null
+                  ? scheduleTitles.get(item.scheduledTaskId)
+                  : undefined
+              }
               onOpenThread={openThread}
               onPreview={setPreview}
               onDisclosureToggle={onDisclosureToggle}

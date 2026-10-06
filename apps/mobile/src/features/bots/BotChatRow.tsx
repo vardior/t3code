@@ -4,7 +4,7 @@ import {
   rewriteThreadLinks,
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
-import type { EnvironmentId, ScheduledTask, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { memo, useState } from "react";
 import { Pressable, Text as NativeText, View } from "react-native";
 import { Markdown } from "react-native-nitro-markdown";
@@ -26,7 +26,7 @@ export const BotChatRow = memo(function BotChatRow(props: {
   readonly item: BotChatItem;
   readonly botName: string;
   readonly environmentId: EnvironmentId;
-  readonly schedules: ReadonlyArray<ScheduledTask>;
+  readonly scheduleTitle: string | undefined;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
   readonly onDisclosureToggle: (itemId: string) => void;
@@ -101,7 +101,7 @@ function WakeRow(props: {
   readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
   readonly botName: string;
   readonly environmentId: EnvironmentId;
-  readonly schedules: ReadonlyArray<ScheduledTask>;
+  readonly scheduleTitle: string | undefined;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -110,10 +110,9 @@ function WakeRow(props: {
       ? scopeThreadRef(props.environmentId, props.item.senderThreadId)
       : null,
   );
-  const title = props.schedules.find((task) => task.id === props.item.scheduledTaskId)?.title;
   const from = botWakeSenderLabel({
     senderTitle: sender?.title,
-    scheduleTitle: title,
+    scheduleTitle: props.scheduleTitle,
     botName: props.botName,
     scheduled: props.item.scheduledTaskId !== null,
   });

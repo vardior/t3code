@@ -80,6 +80,7 @@ import {
   unbindDraftFromThread,
   type ScheduledTaskDraft as Draft,
 } from "./scheduledTaskDraft";
+import { useBots } from "../bots/useBots";
 import { settingsTargetsForProject } from "./settings-environment-filter.logic";
 import { useScheduledTaskDestinationLabel, useScheduledTaskEditor } from "./scheduled-task-editor";
 import {
@@ -680,7 +681,7 @@ function TaskForm({
   const submissionPending = useRef(false);
   const [timePickerOpen, setTimePickerOpen] = useState(false);
   const [runAtPicker, setRunAtPicker] = useState<"date" | "time" | null>(null);
-  const botsQuery = useEnvironmentQuery(serverEnvironment.bots.list({ environmentId, input: {} }));
+  const botsQuery = useBots(environmentId);
   const pausedBot = botsQuery.data?.bots.find(
     (bot) => bot.paused && draft.task !== null && bot.scheduledTaskIds.includes(draft.task.id),
   );
@@ -1426,7 +1427,7 @@ function EnvironmentTasks({
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
-  const botsQuery = useEnvironmentQuery(serverEnvironment.bots.list({ environmentId, input: {} }));
+  const botsQuery = useBots(environmentId);
   const pausedBotFor = (task: ScheduledTask) =>
     botsQuery.data?.bots.find((bot) => bot.paused && bot.scheduledTaskIds.includes(task.id));
   const visibleTasks = tasks.data?.tasks.filter(
