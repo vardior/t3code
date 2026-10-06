@@ -148,9 +148,17 @@ export function botWakeSenderLabel(input: {
   return scheduleName || (input.scheduled ? "a scheduled task" : "another thread");
 }
 
+export function botChatHistoryStart(
+  messages: ReadonlyArray<ChatMessage>,
+  hasMoreHistory: boolean,
+): number | undefined {
+  if (!hasMoreHistory || messages.length === 0) return undefined;
+  return Math.min(...messages.map((message) => DateTime.toEpochMillis(message.createdAt)));
+}
+
 export function buildBotChat(input: {
   readonly bot: BotSummary;
-  readonly since?: number;
+  readonly since?: number | undefined;
   readonly detail?: BotDetail | null;
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly runs: ReadonlyArray<ChatRun>;

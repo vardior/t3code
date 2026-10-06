@@ -3,6 +3,7 @@ import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
 import { useNavigation, usePreventRemove, type StaticScreenProps } from "@react-navigation/native";
 import {
+  botChatHistoryStart,
   botConversationStatus,
   buildBotChat,
   isBotWorking,
@@ -12,7 +13,6 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ViewInstance } from "react-native";
@@ -119,13 +119,7 @@ function BotConversation(props: {
       buildBotChat({
         bot,
         detail: detail.data,
-        since: thread.history.hasMoreHistory
-          ? Math.min(
-              ...(projection?.messages ?? []).map((message) =>
-                DateTime.toEpochMillis(message.createdAt),
-              ),
-            )
-          : undefined,
+        since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],

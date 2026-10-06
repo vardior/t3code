@@ -56,6 +56,7 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
+  botChatHistoryStart,
   botConversationStatus,
   botWakeSenderLabel,
   rewriteThreadLinks,
@@ -113,6 +114,7 @@ export function BotChat(props: {
       projectChat({
         bot: props.bot,
         detail: detail.data,
+        since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
@@ -121,6 +123,7 @@ export function BotChat(props: {
       projectChat,
       props.bot,
       detail.data,
+      thread.history.hasMoreHistory,
       projection?.messages,
       projection?.runs,
       projection?.turnItems,

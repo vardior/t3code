@@ -17,6 +17,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  botChatHistoryStart,
   botConversationStatus,
   botThreadShellStatus,
   botWakeSenderLabel,
@@ -790,6 +791,16 @@ describe("bot auxiliary history", () => {
     ).toEqual(["current", "different", "worker"]);
     expect(buildBotChat(input)).toHaveLength(5);
     expect(buildBotChat({ ...input, since: Infinity })).toEqual([]);
+  });
+
+  it("starts the window at the earliest loaded message only while more history exists", () => {
+    const loaded = [
+      message({ id: "b", role: "user", runId: "r2", createdAt: "2026-10-02T00:00:00Z", text: "" }),
+      message({ id: "a", role: "user", runId: "r1", createdAt: "2026-10-01T00:00:00Z", text: "" }),
+    ];
+    expect(botChatHistoryStart(loaded, true)).toBe(Date.parse("2026-10-01T00:00:00Z"));
+    expect(botChatHistoryStart(loaded, false)).toBeUndefined();
+    expect(botChatHistoryStart([], true)).toBeUndefined();
   });
 
   it("keeps DM keys stable as the window slides and distinguishes same-time texts", () => {

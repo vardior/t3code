@@ -31,6 +31,7 @@ export function createBotChatProjector() {
       previousInput !== null &&
       previousInput.bot === input.bot &&
       previousInput.detail === input.detail &&
+      previousInput.since === input.since &&
       messages.length === previousInput.messages.length &&
       messages.every((message, index) => message === previousInput?.messages[index]) &&
       turnItems.length === previousInput.turnItems.length &&
