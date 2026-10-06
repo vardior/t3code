@@ -1,5 +1,7 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import { ScheduledTaskId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -9,23 +11,80 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerConfig } from "../config.ts";
+import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as BotService from "./BotService.ts";
 
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const testLayer = Layer.mergeAll(SqlitePersistence.layerMemory, NodeServices.layer);
 
-const listBots = (input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv }) =>
-  Effect.gen(function* () {
-    const service = yield* BotService.BotService;
-    return yield* service.list();
-  }).pipe(
+const scheduledTasksLayer = ScheduledTaskService.layer.pipe(
+  Layer.provide(NodeServices.layer),
+  Layer.provide(
+    Layer.mergeAll(
+      NodeCrypto.layer,
+      Scheduler.layer,
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+    ),
+  ),
+);
+
+const withBots = <A, E, R>(
+  input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv },
+  effect: Effect.Effect<A, E, R>,
+) =>
+  effect.pipe(
     Effect.provide(
-      BotService.layer.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir))),
+      BotService.layer.pipe(
+        Layer.provide(ServerConfig.layerTest(process.cwd(), input.baseDir)),
+        Layer.provideMerge(scheduledTasksLayer),
+      ),
     ),
     Effect.provideService(HostProcessEnvironment, input.env ?? {}),
   );
+
+const listBots = (input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv }) =>
+  withBots(
+    input,
+    Effect.gen(function* () {
+      const service = yield* BotService.BotService;
+      return yield* service.list();
+    }),
+  );
+
+const insertSchedule = (
+  sql: SqlClient.SqlClient,
+  schedule: { id: string; threadId: string | null; enabled: boolean; createdAt: string },
+) =>
+  sql`INSERT INTO scheduled_tasks ${sql.insert({
+    task_id: schedule.id,
+    title: schedule.id,
+    prompt: "Wake up.",
+    enabled: schedule.enabled ? 1 : 0,
+    schedule_json: JSON.stringify({ type: "interval", everyMs: 900_000 }),
+    project_id: "project-1",
+    thread_id: schedule.threadId,
+    workspace_strategy_json: '{"type":"root"}',
+    model_selection_json: '{"instanceId":"codex","model":"gpt-5"}',
+    runtime_mode: "full-access",
+    interaction_mode: "default",
+    created_by: "agent",
+    creation_source: "mcp",
+    created_at: schedule.createdAt,
+    updated_at: schedule.createdAt,
+    next_run_at: schedule.enabled ? "2026-10-01T01:00:00.000Z" : null,
+    last_run_at: null,
+    last_run_status: "never",
+    last_run_error: null,
+    run_count: 0,
+  })}`;
 
 const insertThread = (
   sql: SqlClient.SqlClient,
@@ -169,6 +228,7 @@ it.effect("lists bots with their charter and the worker threads their home threa
           name: "Helper",
           homeThreadId: "home",
           scheduledTaskIds: ["task-1"],
+          paused: false,
           charter: "Be helpful.",
           workers: [
             {
@@ -189,4 +249,130 @@ it.effect("lists bots with their charter and the worker threads their home threa
       ],
     });
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect(
+  "pausing a bot turns off every schedule that wakes it, and resuming turns back on only those",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-home-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(botDir, "bot.json"),
+        toJson({
+          name: "Helper",
+          homeThreadId: "home",
+          triageThreadId: "triage",
+          scheduledTaskId: "listed",
+          intervalMs: 900_000,
+        }),
+      );
+      yield* insertSchedule(sql, {
+        id: "listed",
+        threadId: "triage",
+        enabled: true,
+        createdAt: "2026-10-01T00:03:00.000Z",
+      });
+      yield* insertSchedule(sql, {
+        id: "bound",
+        threadId: "home",
+        enabled: true,
+        createdAt: "2026-10-01T00:01:00.000Z",
+      });
+      yield* insertSchedule(sql, {
+        id: "already-off",
+        threadId: "home",
+        enabled: false,
+        createdAt: "2026-10-01T00:02:00.000Z",
+      });
+      yield* insertSchedule(sql, {
+        id: "unrelated",
+        threadId: "elsewhere",
+        enabled: true,
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+
+      const readConfig = fs
+        .readFileString(path.join(botDir, "bot.json"))
+        .pipe(Effect.map((text): unknown => JSON.parse(text)));
+
+      yield* withBots(
+        { baseDir },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const schedules = yield* ScheduledTaskService.ScheduledTaskService;
+          const enabledById = schedules
+            .list()
+            .pipe(
+              Effect.map(({ tasks }) =>
+                Object.fromEntries(tasks.map((task) => [task.id, task.enabled])),
+              ),
+            );
+          const helper = bots.list().pipe(Effect.map(({ bots }) => bots[0]));
+
+          expect((yield* helper)?.scheduledTaskIds).toEqual(["listed", "bound", "already-off"]);
+          expect((yield* helper)?.paused).toBe(false);
+
+          yield* bots.setPaused({ botId: "helper", paused: true });
+          yield* bots.setPaused({ botId: "helper", paused: true });
+          expect((yield* helper)?.paused).toBe(true);
+          expect(yield* enabledById).toEqual({
+            listed: false,
+            bound: false,
+            "already-off": false,
+            unrelated: true,
+          });
+          expect(yield* readConfig).toMatchObject({
+            intervalMs: 900_000,
+            paused: true,
+            pausedScheduleIds: ["listed", "bound"],
+          });
+
+          yield* bots.setPaused({ botId: "helper", paused: false });
+          expect((yield* helper)?.paused).toBe(false);
+          expect(yield* enabledById).toEqual({
+            listed: true,
+            bound: true,
+            "already-off": false,
+            unrelated: true,
+          });
+          expect(yield* readConfig).toEqual({
+            name: "Helper",
+            homeThreadId: "home",
+            triageThreadId: "triage",
+            scheduledTaskId: "listed",
+            intervalMs: 900_000,
+          });
+
+          yield* schedules.setEnabled({ id: ScheduledTaskId.make("listed"), enabled: false });
+          yield* fs.writeFileString(
+            path.join(botDir, "bot.json"),
+            toJson({
+              name: "Helper",
+              homeThreadId: "home",
+              scheduledTaskId: "listed",
+              pausedUntil: "2999-01-01T00:00:00Z",
+              pausedReason: "Paused by its parent",
+            }),
+          );
+          expect((yield* helper)?.paused).toBe(true);
+          yield* bots.setPaused({ botId: "helper", paused: false });
+          expect((yield* enabledById).listed).toBe(true);
+          expect(yield* readConfig).toEqual({
+            name: "Helper",
+            homeThreadId: "home",
+            scheduledTaskId: "listed",
+          });
+
+          const escaped = yield* bots
+            .setPaused({ botId: "../helper", paused: true })
+            .pipe(Effect.flip);
+          expect(escaped.message).toBe("Unknown bot ../helper");
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

@@ -129,6 +129,7 @@ export function BotsPage({ botId }: { readonly botId: string | undefined }) {
           environmentId={environmentId}
           open={infoOpen}
           onOpenChange={setInfoOpen}
+          onPausedChange={botsQuery.refresh}
         />
       ) : null}
     </SidebarInset>
@@ -144,6 +145,7 @@ function BotListItem(props: {
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
   const working = isActiveRunStatus(shell?.latestRun?.status);
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
+  const statusLabel = botStatusLabel({ working, paused: props.bot.paused, lastActivity });
   return (
     <button
       type="button"
@@ -157,10 +159,19 @@ function BotListItem(props: {
       <BotAvatar name={props.bot.name} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium text-sm">{props.bot.name}</span>
-        <span className="truncate text-muted-foreground text-xs">
-          {working ? "Working…" : lastActivity ? formatRelativeTimeLabel(lastActivity) : "Idle"}
-        </span>
+        <span className="truncate text-muted-foreground text-xs">{statusLabel}</span>
       </span>
     </button>
   );
+}
+
+function botStatusLabel(status: {
+  readonly working: boolean;
+  readonly paused: boolean;
+  readonly lastActivity: string | null;
+}) {
+  if (status.working) return "Working…";
+  if (status.paused) return "Paused";
+  if (status.lastActivity) return formatRelativeTimeLabel(status.lastActivity);
+  return "Idle";
 }

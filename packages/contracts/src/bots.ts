@@ -21,6 +21,7 @@ export const BotSummary = Schema.Struct({
   name: Schema.String,
   homeThreadId: ThreadId,
   scheduledTaskIds: Schema.Array(ScheduledTaskId),
+  paused: Schema.Boolean,
   charter: Schema.NullOr(Schema.String),
   workers: Schema.Array(BotWorker),
   slackDms: Schema.Array(BotSlackDm),
@@ -34,6 +35,15 @@ export const BotListResult = Schema.Struct({
   bots: Schema.Array(BotSummary),
 });
 export type BotListResult = typeof BotListResult.Type;
+
+export const BotSetPausedInput = Schema.Struct({
+  botId: Schema.String,
+  paused: Schema.Boolean,
+});
+export type BotSetPausedInput = typeof BotSetPausedInput.Type;
+
+export const BotSetPausedResult = Schema.Struct({});
+export type BotSetPausedResult = typeof BotSetPausedResult.Type;
 
 export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,

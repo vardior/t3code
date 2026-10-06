@@ -128,6 +128,7 @@ describe("buildBotChat", () => {
       name: "Helper",
       homeThreadId: ThreadId.make("home"),
       scheduledTaskIds: [],
+      paused: false,
       charter: null,
       workers: [
         {
@@ -256,6 +257,7 @@ const botWithoutHistory: BotSummary = {
   name: "Helper",
   homeThreadId: ThreadId.make("home"),
   scheduledTaskIds: [],
+  paused: false,
   charter: null,
   workers: [],
   slackDms: [],

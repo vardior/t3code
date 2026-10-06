@@ -4,10 +4,13 @@ import {
   ScheduledTaskId,
   ThreadId,
   type BotListResult,
+  type BotSetPausedInput,
+  type BotSetPausedResult,
   type BotSummary,
   type BotWorker,
 } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -17,7 +20,9 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
+import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 
 const MAX_WORKERS_PER_BOT = 50;
 const MAX_SLACK_DMS_PER_BOT = 200;
@@ -29,10 +34,32 @@ const BotConfigFile = Schema.Struct({
   dmRelayThreadId: Schema.optional(ThreadId),
   scheduledTaskId: Schema.optional(ScheduledTaskId),
   dmRelayScheduledTaskId: Schema.optional(ScheduledTaskId),
+  paused: Schema.optional(Schema.Boolean),
+  pausedUntil: Schema.optional(Schema.String),
+  pausedScheduleIds: Schema.optional(Schema.Array(ScheduledTaskId)),
 });
+type BotConfigFile = typeof BotConfigFile.Type;
 
 const decodeBotConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(BotConfigFile));
+const decodeJsonObject = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
+const PAUSE_KEYS = new Set(["paused", "pausedUntil", "pausedReason", "pausedScheduleIds"]);
+const isBotError = Schema.is(BotError);
+const BOT_ID = /^[\w-][\w.-]*$/;
+
+const listedScheduleIds = (config: BotConfigFile) =>
+  [config.scheduledTaskId, config.dmRelayScheduledTaskId].filter((value) => value !== undefined);
+
+const ownThreadIds = (config: BotConfigFile) =>
+  [config.homeThreadId, config.triageThreadId, config.dmRelayThreadId].filter(
+    (value) => value !== undefined,
+  );
+
+const isPaused = (config: BotConfigFile, nowMs: number) =>
+  config.paused === true ||
+  (config.pausedUntil !== undefined && Date.parse(config.pausedUntil) > nowMs);
 
 interface WorkerRow {
   readonly thread_id: string;
@@ -45,6 +72,7 @@ export class BotService extends Context.Service<
   BotService,
   {
     readonly list: () => Effect.Effect<BotListResult, BotError>;
+    readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
   }
 >()("t3/bots/BotService") {}
 
@@ -54,6 +82,7 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    const scheduledTasks = yield* ScheduledTaskService;
     const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim() || null;
     const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
 
@@ -97,6 +126,20 @@ export const layer = Layer.effect(
         ),
       );
 
+    const scheduleIdsFor = (config: BotConfigFile) =>
+      sql<{ readonly task_id: string }>`
+        SELECT task_id FROM scheduled_tasks
+        WHERE thread_id IN ${sql.in(ownThreadIds(config))}
+        ORDER BY created_at
+      `.pipe(
+        Effect.map((rows) => [
+          ...new Set([
+            ...listedScheduleIds(config),
+            ...rows.map((row) => ScheduledTaskId.make(row.task_id)),
+          ]),
+        ]),
+      );
+
     const readCharter = (botDir: string) =>
       fileSystem.readFileString(path.join(botDir, "charter.md")).pipe(
         Effect.map((text) => text.trim() || null),
@@ -118,18 +161,17 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const raw = yield* fileSystem.readFileString(path.join(botDir, "bot.json"));
         const config = yield* decodeBotConfig(raw);
-        const ownThreadIds = new Set(
+        const sideThreadIds = new Set(
           [config.triageThreadId, config.dmRelayThreadId].filter((value) => value !== undefined),
         );
         const bot: BotSummary = {
           id,
           name: config.name,
           homeThreadId: config.homeThreadId,
-          scheduledTaskIds: [config.scheduledTaskId, config.dmRelayScheduledTaskId].filter(
-            (value) => value !== undefined,
-          ),
+          scheduledTaskIds: yield* scheduleIdsFor(config),
+          paused: isPaused(config, yield* Clock.currentTimeMillis),
           charter: yield* readCharter(botDir),
-          workers: yield* listWorkers(config.homeThreadId, ownThreadIds),
+          workers: yield* listWorkers(config.homeThreadId, sideThreadIds),
           slackDms: yield* readSlackDms(botDir),
         };
         return Option.some(bot);
@@ -172,6 +214,66 @@ export const layer = Layer.effect(
         return { bots: bots.flatMap((bot) => Option.toArray(bot)) };
       });
 
-    return BotService.of({ list });
+    const setScheduleIdsEnabled = (ids: ReadonlyArray<ScheduledTaskId>, enabled: boolean) =>
+      Effect.forEach(ids, (id) => scheduledTasks.setEnabled({ id, enabled }), { discard: true });
+
+    const setPaused = (input: BotSetPausedInput) =>
+      Effect.gen(function* () {
+        if (!BOT_ID.test(input.botId)) {
+          return yield* new BotError({ message: `Unknown bot ${input.botId}` });
+        }
+        const configPath = path.join(botsDir, input.botId, "bot.json");
+        const raw = yield* fileSystem.readFileString(configPath);
+        const config = yield* decodeBotConfig(raw);
+        const document = yield* decodeJsonObject(raw);
+        const writeConfig = (next: Record<string, unknown>) =>
+          writeFileStringAtomically({
+            filePath: configPath,
+            contents: `${JSON.stringify(next, null, 2)}\n`,
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          );
+
+        if (input.paused) {
+          if (config.paused === true) return {};
+          const botScheduleIds = new Set(yield* scheduleIdsFor(config));
+          const { tasks } = yield* scheduledTasks.list();
+          const enabledIds = tasks
+            .filter((task) => task.enabled && botScheduleIds.has(task.id))
+            .map((task) => task.id);
+          yield* writeConfig({
+            ...document,
+            paused: true,
+            pausedReason: "Paused from the Bots view",
+            pausedScheduleIds: enabledIds,
+          });
+          yield* setScheduleIdsEnabled(enabledIds, false);
+          return {};
+        }
+
+        if (!isPaused(config, yield* Clock.currentTimeMillis)) return {};
+        const { tasks } = yield* scheduledTasks.list();
+        const existingIds = new Set(tasks.map((task) => task.id));
+        const resumeIds = (config.pausedScheduleIds ?? listedScheduleIds(config)).filter((id) =>
+          existingIds.has(id),
+        );
+        yield* setScheduleIdsEnabled(resumeIds, true);
+        yield* writeConfig(
+          Object.fromEntries(Object.entries(document).filter(([key]) => !PAUSE_KEYS.has(key))),
+        );
+        return {};
+      }).pipe(
+        Effect.mapError((cause) =>
+          isBotError(cause)
+            ? cause
+            : new BotError({
+                message: `Cannot ${input.paused ? "pause" : "resume"} bot ${input.botId}`,
+                cause,
+              }),
+        ),
+      );
+
+    return BotService.of({ list, setPaused });
   }),
 );

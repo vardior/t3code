@@ -1574,6 +1574,12 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    setBotPaused: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:set-paused",
+      tag: WS_METHODS.botsSetPaused,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
     deleteScheduledTask: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:delete",
       tag: WS_METHODS.scheduledTasksDelete,

@@ -384,7 +384,13 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
-import { BotError, BotListInput, BotListResult } from "./bots.ts";
+import {
+  BotError,
+  BotListInput,
+  BotListResult,
+  BotSetPausedInput,
+  BotSetPausedResult,
+} from "./bots.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -560,6 +566,7 @@ export const WS_METHODS = {
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
   botsList: "bots.list",
+  botsSetPaused: "bots.setPaused",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -2053,6 +2060,12 @@ const WsBotsListRpc = Rpc.make(WS_METHODS.botsList, {
   error: Schema.Union([BotError, EnvironmentAuthorizationError]),
 });
 
+const WsBotsSetPausedRpc = Rpc.make(WS_METHODS.botsSetPaused, {
+  payload: BotSetPausedInput,
+  success: BotSetPausedResult,
+  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
@@ -2142,6 +2155,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsBotsListRpc,
+  WsBotsSetPausedRpc,
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,

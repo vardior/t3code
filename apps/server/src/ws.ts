@@ -2388,6 +2388,7 @@ export const layerWsRpc = (
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
         [WS_METHODS.botsList]: (_input) => bots.list(),
+        [WS_METHODS.botsSetPaused]: (input) => bots.setPaused(input),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({

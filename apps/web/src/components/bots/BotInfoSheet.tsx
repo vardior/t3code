@@ -23,6 +23,7 @@ export function BotInfoSheet(props: {
   readonly environmentId: EnvironmentId;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  readonly onPausedChange: () => void;
 }) {
   const navigate = useNavigate();
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
@@ -48,7 +49,10 @@ export function BotInfoSheet(props: {
       <SheetPopup side="right">
         <SheetHeader>
           <SheetTitle>{props.bot.name}</SheetTitle>
-          <SheetDescription>{shell?.modelSelection.model ?? "Model unknown"}</SheetDescription>
+          <SheetDescription>
+            {shell?.modelSelection.model ?? "Model unknown"}
+            {props.bot.paused ? " · Paused" : null}
+          </SheetDescription>
         </SheetHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6 text-sm">
           <InfoSection title="Schedule">
@@ -61,6 +65,11 @@ export function BotInfoSheet(props: {
                 <ScheduleRow key={task.id} task={task} environmentId={props.environmentId} />
               ))
             )}
+            <PauseBotButton
+              bot={props.bot}
+              environmentId={props.environmentId}
+              onPausedChange={props.onPausedChange}
+            />
           </InfoSection>
 
           <InfoSection title="Charter">
@@ -112,6 +121,43 @@ function InfoSection(props: { readonly title: string; readonly children: ReactNo
       </h2>
       {props.children}
     </section>
+  );
+}
+
+function PauseBotButton(props: {
+  readonly bot: BotSummary;
+  readonly environmentId: EnvironmentId;
+  readonly onPausedChange: () => void;
+}) {
+  const setPaused = useAtomCommand(serverEnvironment.setBotPaused, { label: "bot pause toggle" });
+  const [busy, setBusy] = useState(false);
+  const paused = props.bot.paused;
+
+  const toggle = async () => {
+    if (busy) return;
+    setBusy(true);
+    const result = await setPaused({
+      environmentId: props.environmentId,
+      input: { botId: props.bot.id, paused: !paused },
+    });
+    setBusy(false);
+    props.onPausedChange();
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: paused ? "Could not resume bot" : "Could not pause bot",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  };
+
+  return (
+    <Button variant="outline" disabled={busy} onClick={() => void toggle()}>
+      {paused ? "Resume bot" : "Pause bot"}
+    </Button>
   );
 }
 
