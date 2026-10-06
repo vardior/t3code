@@ -161,6 +161,15 @@ function ChatRow(props: {
   if (item.kind === "you") {
     return <YourMessage item={item} environmentId={props.environmentId} />;
   }
+  if (item.kind === "compaction") {
+    return (
+      <div className="my-2 flex items-center gap-3 text-muted-foreground text-xs">
+        <span className="h-px flex-1 bg-border" />
+        <span>{item.text}</span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+    );
+  }
   return (
     <div className="max-w-[85%] self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
       <BotMarkdown text={item.text} environmentId={props.environmentId} />

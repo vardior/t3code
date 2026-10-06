@@ -121,6 +121,33 @@ const commandItem = (input: {
   ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
 });
 
+const compactionItem = (input: {
+  id: string;
+  runId: string;
+  completedAt: string;
+  beforeTokenCount?: number;
+  afterTokenCount?: number;
+}): OrchestrationV2TurnItem => ({
+  id: TurnItemId.make(input.id),
+  threadId: ThreadId.make("home"),
+  runId: RunId.make(input.runId),
+  nodeId: null,
+  providerThreadId: null,
+  providerTurnId: null,
+  nativeItemRef: null,
+  parentItemId: null,
+  ordinal: 0,
+  status: "completed",
+  title: "Context compacted",
+  startedAt: at(input.completedAt),
+  completedAt: at(input.completedAt),
+  updatedAt: at(input.completedAt),
+  type: "compaction",
+  driver: null,
+  ...(input.beforeTokenCount === undefined ? {} : { beforeTokenCount: input.beforeTokenCount }),
+  ...(input.afterTokenCount === undefined ? {} : { afterTokenCount: input.afterTokenCount }),
+});
+
 describe("buildBotChat", () => {
   it("shows each turn's final reply only, and each agent wake as one row with its final reply", () => {
     const bot: BotSummary = {
@@ -262,6 +289,133 @@ const botWithoutHistory: BotSummary = {
   workers: [],
   slackDms: [],
 };
+
+describe("buildBotChat compaction rows", () => {
+  it("shows one divider for a self-sent /compact without a wake, user row, or reply", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [
+        message({
+          id: "self-compact",
+          role: "user",
+          runId: "run-compact",
+          createdAt: "2026-10-01T00:01:00.000Z",
+          text: "/compact",
+          createdBy: "agent",
+          senderThreadId: "home",
+        }),
+        message({
+          id: "compact-reply",
+          role: "assistant",
+          runId: "run-compact",
+          createdAt: "2026-10-01T00:02:00.000Z",
+          text: "Compacted",
+        }),
+      ],
+      runs: [{ id: RunId.make("run-compact"), status: "completed" }],
+      turnItems: [
+        compactionItem({
+          id: "compact",
+          runId: "run-compact",
+          completedAt: "2026-10-01T00:01:30.000Z",
+          beforeTokenCount: 182_000,
+          afterTokenCount: 12_000,
+        }),
+      ],
+    });
+
+    expect(items).toMatchObject([{ kind: "compaction", text: "Context reset · 182k → 12k" }]);
+  });
+
+  it("shows a divider for auto-compaction without a /compact message", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [],
+      runs: [],
+      turnItems: [
+        compactionItem({
+          id: "auto-compact",
+          runId: "run-auto",
+          completedAt: "2026-10-01T00:01:00.000Z",
+        }),
+      ],
+    });
+
+    expect(items).toMatchObject([{ kind: "compaction", text: "Context reset" }]);
+  });
+
+  it("keeps normal wake rows and replies around compactions", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [
+        message({
+          id: "wake-before",
+          role: "user",
+          runId: "run-before",
+          createdAt: "2026-10-01T00:01:00.000Z",
+          text: "First wake",
+          createdBy: "agent",
+          senderThreadId: "triage",
+        }),
+        message({
+          id: "reply-before",
+          role: "assistant",
+          runId: "run-before",
+          createdAt: "2026-10-01T00:01:30.000Z",
+          text: "First reply",
+        }),
+        message({
+          id: "self-compact",
+          role: "user",
+          runId: "run-compact",
+          createdAt: "2026-10-01T00:02:00.000Z",
+          text: "/compact",
+          createdBy: "agent",
+          senderThreadId: "home",
+        }),
+        message({
+          id: "wake-after",
+          role: "user",
+          runId: "run-after",
+          createdAt: "2026-10-01T00:03:00.000Z",
+          text: "Second wake",
+          createdBy: "agent",
+          senderThreadId: "triage",
+        }),
+        message({
+          id: "reply-after",
+          role: "assistant",
+          runId: "run-after",
+          createdAt: "2026-10-01T00:03:30.000Z",
+          text: "Second reply",
+        }),
+      ],
+      runs: [
+        { id: RunId.make("run-before"), status: "completed" },
+        { id: RunId.make("run-compact"), status: "completed" },
+        { id: RunId.make("run-after"), status: "completed" },
+      ],
+      turnItems: [
+        compactionItem({
+          id: "manual",
+          runId: "run-compact",
+          completedAt: "2026-10-01T00:02:30.000Z",
+        }),
+        compactionItem({
+          id: "auto",
+          runId: "run-after",
+          completedAt: "2026-10-01T00:03:15.000Z",
+        }),
+      ],
+    });
+
+    expect(items.map((item) => item.kind)).toEqual(["wake", "compaction", "wake", "compaction"]);
+    expect(items.filter((item) => item.kind === "wake")).toMatchObject([
+      { text: "First wake", reply: "First reply" },
+      { text: "Second wake", reply: "Second reply" },
+    ]);
+  });
+});
 
 describe("buildBotChat wake rows", () => {
   const wake = message({

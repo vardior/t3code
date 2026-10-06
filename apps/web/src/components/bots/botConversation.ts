@@ -10,6 +10,8 @@ import {
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 
+import { formatContextWindowTokens } from "../../lib/contextWindow";
+
 export type BotChatItem =
   | {
       readonly kind: "you";
@@ -19,6 +21,7 @@ export type BotChatItem =
       readonly imageIds: ReadonlyArray<ChatAttachmentId>;
     }
   | { readonly kind: "bot"; readonly id: string; readonly at: number; readonly text: string }
+  | { readonly kind: "compaction"; readonly id: string; readonly at: number; readonly text: string }
   | {
       readonly kind: "wake";
       readonly id: string;
@@ -74,7 +77,15 @@ export function buildBotChat(input: {
   readonly runs: ReadonlyArray<ChatRun>;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
 }): BotChatItem[] {
-  const incoming = input.messages.filter((message) => message.role === "user");
+  const incoming = input.messages.filter(
+    (message) =>
+      message.role === "user" &&
+      !(
+        message.createdBy === "agent" &&
+        message.senderThreadId === input.bot.homeThreadId &&
+        message.text === "/compact"
+      ),
+  );
   const ownerMessages = incoming.filter(
     (message) =>
       message.createdBy === "user" &&
@@ -123,6 +134,21 @@ export function buildBotChat(input: {
       at: DateTime.toEpochMillis(message.createdAt),
       text: message.text,
     })),
+    ...input.turnItems.flatMap((item) => {
+      if (item.type !== "compaction" || item.status !== "completed") return [];
+      const sizes =
+        item.beforeTokenCount === undefined || item.afterTokenCount === undefined
+          ? ""
+          : ` · ${formatContextWindowTokens(item.beforeTokenCount)} → ${formatContextWindowTokens(item.afterTokenCount)}`;
+      return [
+        {
+          kind: "compaction" as const,
+          id: `compaction:${item.id}`,
+          at: DateTime.toEpochMillis(item.completedAt ?? item.updatedAt),
+          text: `Context reset${sizes}`,
+        },
+      ];
+    }),
     ...Array.from(wakesByRun).flatMap(([runId, wakes]) => {
       if (dmSendRunIds.has(runId)) return [];
       const first = wakes[0]!;
