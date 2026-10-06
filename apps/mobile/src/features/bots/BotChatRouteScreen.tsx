@@ -156,6 +156,7 @@ function BotConversation(props: {
   const listRef = useRef<LegendListRef>(null);
   const composerOverlayRef = useRef<ViewInstance>(null);
   const followEndAfterDisclosure = useRef(false);
+  const [togglingDisclosureKey, setTogglingDisclosureKey] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (items.length === 0) return;
     if (followEndAfterDisclosure.current) void listRef.current?.scrollToEnd({ animated: false });
@@ -311,6 +312,7 @@ function BotConversation(props: {
               onOpenThread={openThread}
               onPreview={setPreview}
               onDisclosureToggle={() => {
+                setTogglingDisclosureKey(item.id);
                 followEndAfterDisclosure.current = botChatScrollReducer(
                   followEndAfterDisclosure.current,
                   {
@@ -345,7 +347,10 @@ function BotConversation(props: {
             animated: false,
             on: { dataChange: true, itemLayout: false, layout: true },
           }}
-          maintainVisibleContentPosition
+          maintainVisibleContentPosition={togglingDisclosureKey === null}
+          onItemSizeChanged={({ itemKey }) => {
+            if (itemKey === togglingDisclosureKey) setTogglingDisclosureKey(null);
+          }}
           getItemType={(item) => item.kind}
           ListHeaderComponent={
             unavailableReason === null && (history.hasMoreHistory || historyError) ? (
