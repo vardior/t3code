@@ -219,7 +219,7 @@ function ScheduleRow(props: {
         </span>
       </button>
       <Switch
-        aria-label={props.task.enabled ? "Pause schedule" : "Resume schedule"}
+        aria-label={`${props.task.enabled ? "Pause" : "Resume"} schedule ${props.task.title}`}
         checked={props.task.enabled}
         disabled={busy || props.botPaused}
         onCheckedChange={(checked) => void toggle(checked)}
