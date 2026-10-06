@@ -3,6 +3,8 @@ import { ComponentCatalogScreen } from "./features/development/ComponentCatalogS
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
 import { PullRequestDiscussionScreen } from "./features/pull-requests/PullRequestDiscussionScreen";
+import { BotChatRouteScreen } from "./features/bots/BotChatRouteScreen";
+import { SettingsBotsRouteScreen } from "./features/settings/SettingsBotsRouteScreen";
 import { createWorkspaceStackNavigator } from "./features/layout/createWorkspaceStackNavigator";
 import {
   createPathConfigForStaticNavigation,
@@ -281,6 +283,11 @@ const SETTINGS_SCREENS = {
     linking: "settings/follow-ups",
     options: settingsPage("Chat"),
   }),
+  SettingsBots: createNativeStackScreen({
+    screen: SettingsBotsRouteScreen,
+    linking: "settings/bots",
+    options: { ...SETTINGS_PAGE_OPTIONS, title: "Bots" },
+  }),
   SettingsScheduledTasks: createNativeStackScreen({
     screen: SettingsScheduledTasksRouteScreen,
     linking: "settings/scheduled-tasks",
@@ -545,6 +552,11 @@ const RootStackConfig = createWorkspaceStackNavigator({
     PullRequestEdit: createNativeStackScreen({
       screen: PullRequestEditScreen,
       options: sheetRoute({ detent: 0.75, androidFit: true }),
+    }),
+    BotChat: createNativeStackScreen({
+      screen: BotChatRouteScreen,
+      linking: "bots/:environmentId/:botId",
+      options: GLASS_HEADER_OPTIONS,
     }),
     Thread: createNativeStackScreen({
       screen: ThreadRouteScreen,
