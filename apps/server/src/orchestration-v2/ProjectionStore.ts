@@ -198,6 +198,7 @@ export type ProjectionSettlementCandidate = Pick<
   OrchestrationV2ThreadShell,
   | "id"
   | "projectId"
+  | "lineage"
   | "branch"
   | "worktreePath"
   | "pullRequests"
@@ -222,9 +223,11 @@ export type ProjectionSettlementCandidate = Pick<
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
   | "pendingGuestMessageCount"
+  | "openItems"
 > &
   Pick<OrchestrationV2AppThread, "lastSnoozeWakeAt"> & {
     readonly latestUserAuthoredMessageAt: DateTime.Utc | null;
+    readonly latestRunlessRootNode: OrchestrationV2ExecutionNode | null;
   };
 
 const ProjectionCheckpointContext = Schema.Struct({
@@ -558,6 +561,7 @@ export interface ProjectionStoreV2Shape {
   ) => Effect.Effect<number | null, ProjectionStoreV2Error>;
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
+    options?: { readonly subagentOnly?: boolean },
   ) => Effect.Effect<ReadonlyArray<ProjectionSettlementCandidate>, ProjectionStoreV2Error>;
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
@@ -852,6 +856,7 @@ export function applyToProjection(
     case "thread.unpinned":
     case "thread.pin-reordered":
     case "thread.metadata-updated":
+    case "thread.open-items-updated":
     case "thread.runtime-mode-updated":
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":
@@ -1067,7 +1072,7 @@ type SettlementThreadRow = Pick<
   | "latest_run_completed_at"
   | "latest_user_message_at"
   | "latest_user_authored_message_at"
->;
+> & { readonly latest_runless_root_node: string | null };
 
 type ShellRunItemCountRow = {
   readonly thread_id: string;
@@ -1626,6 +1631,9 @@ export function threadShellFromProjection(
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     pullRequests: threadPullRequestsOf(projection.thread),
+    ...(projection.thread.openItems === undefined
+      ? {}
+      : { openItems: projection.thread.openItems }),
     ...(projection.thread.linkedPullRequest === undefined
       ? {}
       : { linkedPullRequest: projection.thread.linkedPullRequest }),
@@ -1907,6 +1915,9 @@ function shellFromState(input: {
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     pullRequests: threadPullRequestsOf(input.state.thread),
+    ...(input.state.thread.openItems === undefined
+      ? {}
+      : { openItems: input.state.thread.openItems }),
     ...(input.state.thread.linkedPullRequest === undefined
       ? {}
       : { linkedPullRequest: input.state.thread.linkedPullRequest }),
@@ -2027,6 +2038,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.deleted":
             case "thread.settled":
             case "thread.unsettled":
+            case "thread.open-items-updated":
             case "thread.snoozed":
             case "thread.unsnoozed":
             case "thread.auto-settle-set":
@@ -2841,6 +2853,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.deleted" &&
             event.type !== "thread.settled" &&
             event.type !== "thread.unsettled" &&
+            event.type !== "thread.open-items-updated" &&
             event.type !== "thread.snoozed" &&
             event.type !== "thread.unsnoozed" &&
             event.type !== "thread.auto-settle-set" &&
@@ -6574,12 +6587,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return { providerThreadsByThreadId, pendingTurnItemsByThreadId };
     });
 
-    const getSettlementCandidates: ProjectionStoreV2Shape["getSettlementCandidates"] = (threadId) =>
+    const getSettlementCandidates: ProjectionStoreV2Shape["getSettlementCandidates"] = (
+      threadId,
+      options,
+    ) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             const rows = yield* sql<SettlementThreadRow>`
             SELECT t.thread_id, t.payload_json,
+              (
+                SELECT node.payload_json FROM orchestration_v2_projection_nodes node
+                WHERE node.thread_id = t.thread_id AND node.run_id IS NULL
+                  AND node.kind = 'root_turn' AND r.run_id IS NULL
+                  AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                  AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL
+                ORDER BY node.started_at DESC, node.node_id DESC
+                LIMIT 1
+              ) AS latest_runless_root_node,
               r.run_id AS latest_run_id,
               r.status AS latest_run_status,
               r.requested_at AS latest_run_requested_at,
@@ -6610,7 +6635,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ORDER BY latest.ordinal DESC, latest.run_id DESC
               LIMIT 1
             )
-            WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}
+            WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}${
+              options?.subagentOnly
+                ? sql` AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+              AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL`
+                : sql``
+            }
               AND json_extract(t.payload_json, '$.archivedAt') IS NULL
               AND json_extract(t.payload_json, '$.settledOverride') IS NULL
               AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
@@ -6618,7 +6648,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runs active
                 WHERE active.thread_id = t.thread_id
-                  AND active.status IN ('preparing', 'starting', 'running', 'waiting')
+                  AND (
+                    active.status IN ('preparing', 'starting', 'running', 'waiting')
+                    OR (active.status = 'queued'
+                      AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                      AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL)
+                  )
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_nodes node
+                WHERE node.thread_id = t.thread_id AND node.run_id IS NULL
+                  AND node.kind = 'root_turn' AND node.status IN ('idle', 'pending', 'running', 'waiting')
+                  AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                  AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL
               )
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runtime_requests request
@@ -6657,6 +6699,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   row.latest_run_id === null ? null : RunId.make(row.latest_run_id);
                 return {
                   ...thread,
+                  latestRunlessRootNode:
+                    row.latest_runless_root_node === null
+                      ? null
+                      : yield* decodeNodePayload(row.latest_runless_root_node),
                   pinnedAt: thread.pinnedAt ?? null,
 
                   autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,

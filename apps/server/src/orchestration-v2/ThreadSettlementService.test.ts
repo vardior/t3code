@@ -5,15 +5,19 @@ import {
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   EventId,
+  MessageId,
+  NodeId,
   ProviderInstanceId,
-  RuntimeRequestId,
+  ProviderSessionId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
   type OrchestrationProjectShell,
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ExecutionNode,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ThreadShell,
   type PullRequestSummary,
@@ -53,7 +57,10 @@ function at(offsetMs: number): DateTime.Utc {
 }
 
 type SettlementShell = OrchestrationV2ThreadShell &
-  Pick<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">;
+  Pick<
+    ProjectionStore.ProjectionSettlementCandidate,
+    "latestUserAuthoredMessageAt" | "latestRunlessRootNode"
+  >;
 
 function shell(overrides: Partial<SettlementShell> = {}): SettlementShell {
   return {
@@ -93,6 +100,7 @@ function shell(overrides: Partial<SettlementShell> = {}): SettlementShell {
     latestRunCompletedAt: null,
     latestUserMessageAt: null,
     latestUserAuthoredMessageAt: overrides.latestUserMessageAt ?? null,
+    latestRunlessRootNode: null,
     createdAt: at(-30 * DAY_MS),
     updatedAt: at(-10 * DAY_MS),
     archivedAt: null,
@@ -1580,6 +1588,234 @@ describe("ThreadSettlementServiceV2 terminals", () => {
           yield* fixture.publishEvent(settledEvent(thread));
           assert.strictEqual((yield* Queue.take(fixture.scriptRuns)).threadId, thread.id);
           assert.strictEqual((yield* Queue.take(fixture.scriptRuns)).threadId, thread.id);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+});
+
+describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
+  const parentId = ThreadId.make("parent-thread");
+  const lineage = {
+    parentThreadId: parentId,
+    relationshipToParent: "subagent" as const,
+    rootThreadId: parentId,
+  };
+  const rootNode = (threadId: ThreadId): OrchestrationV2ExecutionNode => ({
+    id: NodeId.make(`node:${threadId}`),
+    threadId,
+    runId: null,
+    parentNodeId: null,
+    rootNodeId: NodeId.make(`node:${threadId}`),
+    kind: "root_turn",
+    status: "completed",
+    countsForRun: false,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    runtimeRequestId: null,
+    checkpointScopeId: null,
+    startedAt: DateTime.makeUnsafe(NOW),
+    completedAt: DateTime.makeUnsafe(NOW),
+  });
+  const finishedChild = (id: string, native: boolean) => {
+    const threadId = ThreadId.make(id);
+    return makeThread(id, {
+      lineage,
+      latestUserMessageAt: DateTime.makeUnsafe(NOW),
+      status: native ? "idle" : "completed",
+      latestRunId: native ? null : RunId.make(`run:${id}`),
+      latestRunCompletedAt: native ? null : DateTime.makeUnsafe(NOW),
+      latestRunlessRootNode: native ? rootNode(threadId) : null,
+    });
+  };
+  const disabledSettings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    sidebarAutoSettleAfterDays: null,
+    sidebarAutoSettleOnMerge: false,
+  };
+
+  it.effect.each([
+    ["provider-native", "thread:native-child", true],
+    ["delegated", "thread:delegated-task:child", false],
+  ] as const)("settles a finished %s child from its terminal event", ([, id, native]) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const finished = finishedChild(id, native);
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([]),
+          settings: disabledSettings,
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          yield* Ref.set(fixture.snapshots, makeSnapshot([finished]));
+          const event: OrchestrationV2DomainEvent = native
+            ? {
+                type: "node.updated",
+                id: EventId.make(`event:${id}`),
+                threadId: finished.id,
+                occurredAt: DateTime.makeUnsafe(NOW),
+                payload: rootNode(finished.id),
+              }
+            : {
+                type: "run.updated",
+                id: EventId.make(`event:${id}`),
+                threadId: finished.id,
+                occurredAt: DateTime.makeUnsafe(NOW),
+                payload: {
+                  id: RunId.make(`run:${id}`),
+                  threadId: finished.id,
+                  ordinal: 1,
+                  providerInstanceId: finished.providerInstanceId,
+                  modelSelection: finished.modelSelection,
+                  providerThreadId: null,
+                  userMessageId: MessageId.make(`message:${id}`),
+                  rootNodeId: null,
+                  activeAttemptId: null,
+                  status: "completed",
+                  requestedAt: DateTime.makeUnsafe(NOW),
+                  startedAt: DateTime.makeUnsafe(NOW),
+                  completedAt: DateTime.makeUnsafe(NOW),
+                  checkpointId: null,
+                  contextHandoffId: null,
+                },
+              };
+          yield* fixture.publishEvent(event);
+          yield* Queue.take(fixture.snapshotReads);
+          yield* service.drain;
+          const commands = yield* Ref.get(fixture.commands);
+          assert.equal(commands.length, 1);
+          assert.equal(commands[0]?.threadId, finished.id);
+          assert.deepEqual(commands[0]?.settledAt, DateTime.makeUnsafe(NOW));
+          assert.deepEqual(yield* Ref.get(fixture.branchCalls), []);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("settles an existing finished child at startup with archived ancestors", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const rootId = ThreadId.make("archived-root");
+        const finished = finishedChild("existing-native-child", true);
+        const child = { ...finished, lineage: { ...lineage, rootThreadId: rootId } };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread(rootId, { archivedAt: DateTime.makeUnsafe(NOW) }),
+            makeThread(parentId, { archivedAt: DateTime.makeUnsafe(NOW) }),
+            child,
+          ]),
+          settings: disabledSettings,
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          assert.deepEqual(
+            (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
+            [child.id],
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("keeps running, blocked, unstarted, top-level, and fork threads unsettled", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const finished = finishedChild("child", false);
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            {
+              ...finished,
+              id: ThreadId.make("running"),
+              status: "running",
+              activityRunStatus: "running",
+            },
+            {
+              ...finishedChild("native-running", true),
+              latestRunlessRootNode: {
+                ...rootNode(ThreadId.make("native-running")),
+                status: "running",
+                completedAt: null,
+              },
+            },
+            ...(["command", "user_input"] as const).map((kind) => ({
+              ...finished,
+              id: ThreadId.make(kind),
+              pendingRuntimeRequest: {
+                id: RuntimeRequestId.make(`request:${kind}`),
+                nodeId: NodeId.make(`node:${kind}`),
+                providerTurnId: null,
+                nativeRequestRef: null,
+                kind,
+                status: "pending" as const,
+                responseCapability: { type: "not_resumable" as const, reason: "Process stopped" },
+                createdAt: DateTime.makeUnsafe(NOW),
+                resolvedAt: null,
+              },
+            })),
+            {
+              ...finished,
+              id: ThreadId.make("unstarted"),
+              status: "idle",
+              latestRunId: null,
+              latestRunCompletedAt: null,
+            },
+            {
+              ...finished,
+              id: ThreadId.make("top-level"),
+              createdBy: "agent",
+              lineage: { ...lineage, parentThreadId: null, relationshipToParent: null },
+            },
+            {
+              ...finished,
+              id: ThreadId.make("fork"),
+              lineage: { ...lineage, relationshipToParent: "fork" },
+            },
+          ]),
+          settings: disabledSettings,
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          assert.deepEqual(yield* Ref.get(fixture.commands), []);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("a finished run reads only its own thread's settlement candidate", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const finished = makeThread("finished-run");
+        const other = makeThread("other-thread");
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([finished, other]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 3 },
+        });
+
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          yield* Ref.set(fixture.candidateReads, []);
+          yield* fixture.publishEvent({
+            type: "provider-session.detached",
+            id: EventId.make("event:detached"),
+            threadId: finished.id,
+            occurredAt: DateTime.makeUnsafe(NOW),
+            payload: {
+              providerSessionId: ProviderSessionId.make("provider-session:finished"),
+              detachedAt: DateTime.makeUnsafe(NOW),
+            },
+          });
+          yield* Queue.take(fixture.snapshotReads);
+          yield* service.drain;
+          assert.deepStrictEqual(yield* Ref.get(fixture.candidateReads), [finished.id]);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

@@ -9,6 +9,7 @@ import {
   isOrchestrationV2WorkActive,
   type ThreadId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ExecutionNode,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -45,6 +46,16 @@ export interface SettlementPullRequest {
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+
+function workHasEnded(status: string): boolean {
+  return ["completed", "interrupted", "failed", "cancelled", "rolled_back"].includes(status);
+}
+
+function isSubagentChild(thread: Pick<OrchestrationV2ThreadShell, "lineage">): boolean {
+  return (
+    thread.lineage.parentThreadId !== null && thread.lineage.relationshipToParent === "subagent"
+  );
+}
 
 function toMillis(value: DateTime.Utc | null | undefined): number | null {
   return value == null ? null : DateTime.toEpochMillis(value);
@@ -108,16 +119,19 @@ export function threadHasQueuedTurnStart(
     | "status"
   >,
   nowMs: number,
+  runlessRootNode: OrchestrationV2ExecutionNode | null = null,
 ): boolean {
   const messageAtMs = toMillis(thread.latestUserMessageAt);
   if (messageAtMs === null || thread.status === "failed") return false;
   const age = nowMs - messageAtMs;
   if (Number.isNaN(age) || Math.abs(age) > QUEUED_TURN_START_GRACE_MS) return false;
-  if (thread.latestRunId === null) return true;
+  if (thread.latestRunId === null && runlessRootNode === null) return true;
   return [
     toMillis(thread.latestRunRequestedAt),
     toMillis(thread.latestRunStartedAt),
     toMillis(thread.latestRunCompletedAt),
+    toMillis(runlessRootNode?.startedAt),
+    toMillis(runlessRootNode?.completedAt),
   ].every((value) => value === null || value < messageAtMs);
 }
 
@@ -154,8 +168,9 @@ export function isAutoSettlementCandidate(
   // A guest is waiting on the owner; settling would hide the Request.
   if ((thread.pendingGuestMessageCount ?? 0) > 0) return false;
   if (thread.activityRunStatus != null) return false;
+  if (isSubagentChild(thread) && thread.status === "queued") return false;
   if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) return false;
-  if (threadHasQueuedTurnStart(thread, nowMs)) return false;
+  if (threadHasQueuedTurnStart(thread, nowMs, thread.latestRunlessRootNode)) return false;
   // Interrupted runs must keep the same snooze protection the sidebar shows.
   return !isSnoozed(thread, nowMs);
 }
@@ -202,6 +217,14 @@ export function resolveAutoSettlementAt(input: {
   readonly autoSettleKeepPullRequests?: boolean;
 }): DateTime.Utc | null {
   const { thread } = input;
+  if (!isAutoSettlementCandidate(thread, input.nowMs)) return null;
+  if (isSubagentChild(thread)) {
+    const rootNode = thread.latestRunlessRootNode;
+    const status = thread.latestRunId === null ? rootNode?.status : thread.status;
+    return status !== undefined && workHasEnded(status)
+      ? (thread.latestRunCompletedAt ?? rootNode?.completedAt ?? thread.updatedAt)
+      : null;
+  }
   let pullRequest = input.pullRequest;
   const links = settlementPullRequestLinks(thread.pullRequests ?? []);
   if (links.some((link) => link.snapshot === null)) return null;
@@ -223,7 +246,6 @@ export function resolveAutoSettlementAt(input: {
             closedAt: latest.snapshot.closedAt ?? null,
           };
   }
-  if (!isAutoSettlementCandidate(thread, input.nowMs)) return null;
   const activityAtMs =
     latestMillis([
       toMillis(thread.latestUserMessageAt),
@@ -320,16 +342,15 @@ export const make = Effect.gen(function* () {
     threadId?: ThreadId,
   ) {
     const settings = yield* settingsService.getSettings;
-    if (!autoSettlementConfigured(settings)) {
-      return;
-    }
+    const configured = autoSettlementConfigured(settings);
     const threads = yield* projections.getSettlementCandidates(threadId);
     if (threads.length === 0) return;
-    const projectShells = yield* projectStore.listShells();
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-    const projects = new Map(projectShells.map((project) => [project.id, project]));
     // Merge events resweep all candidates because unlinked threads settle through branch lookup.
-    const candidates = threads.filter((thread) => isAutoSettlementCandidate(thread, nowMs));
+    const candidates = threads.filter(
+      (thread) =>
+        (configured || isSubagentChild(thread)) && isAutoSettlementCandidate(thread, nowMs),
+    );
 
     // Runs per candidate thread, thousands per sweep on busy servers; the sweep owns the span.
     const settleThread = Effect.fnUntraced(
@@ -390,6 +411,7 @@ export const make = Effect.gen(function* () {
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
+      .filter((thread) => !isSubagentChild(thread))
       .filter((thread) => visibleThreadPullRequests(thread.pullRequests ?? []).length === 0)
       .filter(
         (thread) =>
@@ -397,6 +419,9 @@ export const make = Effect.gen(function* () {
           thread.linkedPullRequest != null ||
           thread.branchPullRequest != null,
       );
+    if (lookupCandidates.length === 0) return;
+    const projectShells = yield* projectStore.listShells();
+    const projects = new Map(projectShells.map((project) => [project.id, project]));
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(
       lookupCandidates,
@@ -672,11 +697,15 @@ export const make = Effect.gen(function* () {
           ? enqueueThread(event.threadId)
           : Effect.void;
       case "run.updated":
-        return ["completed", "interrupted", "failed", "cancelled", "rolled_back"].includes(
-          event.payload.status,
-        )
+        return workHasEnded(event.payload.status) ? enqueueThread(event.threadId) : Effect.void;
+      case "node.updated":
+        return event.payload.runId === null &&
+          event.payload.kind === "root_turn" &&
+          workHasEnded(event.payload.status)
           ? enqueueThread(event.threadId)
           : Effect.void;
+      case "runtime-request.updated":
+        return event.payload.status !== "pending" ? enqueueThread(event.threadId) : Effect.void;
       default:
         return Effect.void;
     }
