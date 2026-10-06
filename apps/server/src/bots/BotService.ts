@@ -248,6 +248,14 @@ export const layer = Layer.effect(
         WHERE thread_id = ${threadId} AND deleted_at IS NULL
       `.pipe(Effect.map((rows) => rows.length === 0));
 
+    const isThreadQueueHeld = (threadId: ThreadId) =>
+      sql<{ readonly found: number }>`
+        SELECT 1 AS found FROM orchestration_v2_projection_runs
+        WHERE thread_id = ${threadId} AND status = 'queued'
+          AND json_extract(payload_json, '$.queueHeld') IS 1
+        LIMIT 1
+      `.pipe(Effect.map((rows) => rows.length > 0));
+
     const scheduleIdsFor = (config: BotConfigFile) =>
       sql<{ readonly task_id: string }>`
         SELECT task_id FROM scheduled_tasks
@@ -344,6 +352,7 @@ export const layer = Layer.effect(
           scheduledTaskIds: yield* scheduleIdsFor(config),
           paused: isPaused(config, yield* Clock.currentTimeMillis),
           homeThreadMissing: yield* isThreadMissing(config.homeThreadId),
+          ...((yield* isThreadQueueHeld(config.homeThreadId)) ? { homeThreadQueueHeld: true } : {}),
           lastReply: yield* readLastReply(config.homeThreadId),
         };
         return Option.some(bot);

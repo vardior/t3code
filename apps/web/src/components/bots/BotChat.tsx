@@ -58,6 +58,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   botChatHistoryStart,
   botConversationStatus,
+  isBotQueueHeld,
   botWakeSenderLabel,
   rewriteThreadLinks,
   threadIdFromHref,
@@ -134,6 +135,22 @@ export function BotChat(props: {
     [projection],
   );
   const working = status.kind === "working";
+  const queueHeld = isBotQueueHeld(projection?.runs ?? []);
+  const resumeQueue = useAtomCommand(threadEnvironment.resumeThreadQueue);
+  const [resuming, setResuming] = useState(false);
+  const resume = async () => {
+    if (resuming) return;
+    setResuming(true);
+    try {
+      await resumeQueue({
+        environmentId: props.environmentId,
+        input: { threadId: props.bot.homeThreadId },
+      });
+      props.onRunSettled();
+    } finally {
+      setResuming(false);
+    }
+  };
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
   const [stopping, setStopping] = useState(false);
   const stop = async () => {
@@ -184,7 +201,9 @@ export function BotChat(props: {
             ? "Run failed."
             : status.kind === "stopped"
               ? "Stopped."
-              : `${props.bot.name} is ready.`;
+              : queueHeld
+                ? "Queue held."
+                : `${props.bot.name} is ready.`;
   const onRunSettled = useEffectEvent(() => {
     props.onRunSettled();
     detail.refresh();
@@ -313,7 +332,7 @@ export function BotChat(props: {
           ) : status.kind === "failed" ? (
             <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
               <p>Run failed{status.error ? `: ${status.error}` : "."}</p>
-              <p>Send your message again to retry, or open the thread for details.</p>
+              <p>Open the thread for details.</p>
               <Button
                 size="sm"
                 variant="outline"
@@ -325,6 +344,19 @@ export function BotChat(props: {
           ) : status.kind === "stopped" ? (
             <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-muted-foreground text-sm">
               Stopped
+            </div>
+          ) : null}
+          {queueHeld ? (
+            <div role="status" className="self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
+              <span>Queue held</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={resuming || disabledReason !== null}
+                onClick={() => void resume()}
+              >
+                {resuming ? "Resuming…" : "Resume"}
+              </Button>
             </div>
           ) : null}
         </div>

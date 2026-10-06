@@ -61,15 +61,26 @@ export function isActiveRunStatus(status: string | null | undefined): boolean {
 export function botThreadShellStatus(
   shell: EnvironmentThreadShell | null | undefined,
   homeThreadMissing = false,
-): "idle" | "working" | "needs-approval" | "needs-input" | "failed" | "stopped" | "missing" {
+  homeThreadState: Pick<BotSummary, "homeThreadQueueHeld"> = {},
+):
+  | "idle"
+  | "working"
+  | "needs-approval"
+  | "needs-input"
+  | "failed"
+  | "stopped"
+  | "missing"
+  | "queue-held" {
   if (homeThreadMissing) return "missing";
   const request = shell?.source.pendingRuntimeRequest?.kind;
   if (request === "user_input") return "needs-input";
   if (request && request !== "auth_refresh" && request !== "dynamic_tool_call")
     return "needs-approval";
   const status = shell?.latestRun?.status;
-  if (isActiveRunStatus(status)) return "working";
+  if (isActiveRunStatus(status) && !(status === "queued" && homeThreadState.homeThreadQueueHeld))
+    return "working";
   if (status === "failed") return "failed";
+  if (homeThreadState.homeThreadQueueHeld) return "queue-held";
   if (status === "interrupted") return "stopped";
   return "idle";
 }
@@ -82,13 +93,14 @@ const BOT_THREAD_STATUS_LABELS = {
   failed: "Failed",
   stopped: null,
   missing: "Home thread missing",
+  "queue-held": "Queue held",
 } as const;
 
 export function botThreadShellStatusLabel(status: ReturnType<typeof botThreadShellStatus>) {
   return BOT_THREAD_STATUS_LABELS[status];
 }
 
-type ChatRun = Pick<OrchestrationV2Run, "id" | "status">;
+type ChatRun = Pick<OrchestrationV2Run, "id" | "status" | "queueHeld">;
 type ChatMessage = Pick<
   OrchestrationV2ConversationMessage,
   | "id"
@@ -105,7 +117,14 @@ type ChatMessage = Pick<
 >;
 
 export function isBotWorking(runs: ReadonlyArray<ChatRun>): boolean {
-  return runs.some((run) => isActiveRunStatus(run.status));
+  const queueHeld = isBotQueueHeld(runs);
+  return runs.some(
+    (run) => isActiveRunStatus(run.status) && !(run.status === "queued" && queueHeld),
+  );
+}
+
+export function isBotQueueHeld(runs: ReadonlyArray<ChatRun>): boolean {
+  return runs.some((run) => run.status === "queued" && run.queueHeld === true);
 }
 
 export function botConversationStatus(
@@ -113,19 +132,25 @@ export function botConversationStatus(
     readonly runs: ReadonlyArray<ChatRun & Pick<OrchestrationV2Run, "ordinal">>;
   },
 ):
-  | { readonly kind: "idle" | "working" | "stopped" }
+  | { readonly kind: "idle" | "working" | "stopped" | "queue-held" }
   | { readonly kind: "needs-attention"; readonly request: "approval" | "input" }
   | { readonly kind: "failed"; readonly error: string | null } {
   const pending = derivePendingThreadRequests(projection);
   if (pending.approvals.length > 0) return { kind: "needs-attention", request: "approval" };
   if (pending.userInputs.length > 0) return { kind: "needs-attention", request: "input" };
   if (isBotWorking(projection.runs)) return { kind: "working" };
+  const queueHeld = isBotQueueHeld(projection.runs);
   const latest = projection.runs.reduce<(ChatRun & Pick<OrchestrationV2Run, "ordinal">) | null>(
-    (current, run) => (current === null || run.ordinal > current.ordinal ? run : current),
+    (current, run) =>
+      run.status === "queued" && queueHeld
+        ? current
+        : current === null || run.ordinal > current.ordinal
+          ? run
+          : current,
     null,
   );
   if (latest?.status === "interrupted") return { kind: "stopped" };
-  if (latest?.status !== "failed") return { kind: "idle" };
+  if (latest?.status !== "failed") return { kind: queueHeld ? "queue-held" : "idle" };
   const error = projection.turnItems.findLast(
     (item) => item.runId === latest.id && item.type === "error",
   );

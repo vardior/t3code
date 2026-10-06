@@ -20,6 +20,8 @@ import {
   botChatHistoryStart,
   botConversationStatus,
   botThreadShellStatus,
+  isBotQueueHeld,
+  isBotWorking,
   botWakeSenderLabel,
   buildBotChat,
   slackMarkupToMarkdown,
@@ -549,6 +551,55 @@ describe("botConversationStatus", () => {
     resolvedAt: null,
   };
 
+  it("keeps held messages idle and exposes failures before newer held wakes", () => {
+    const queued = {
+      ...run,
+      id: RunId.make("queued"),
+      ordinal: 2,
+      status: "queued" as const,
+      queueHeld: true,
+    };
+    const error: OrchestrationV2TurnItem = {
+      ...commandItem({
+        id: "error",
+        command: "",
+        completedAt: "2026-10-01T00:01:00Z",
+        runId: "run",
+      }),
+      type: "error",
+      failure: { class: "unknown", message: "Provider stopped", code: null, retryable: false },
+    };
+    expect(isBotWorking([queued])).toBe(false);
+    expect(isBotQueueHeld([queued])).toBe(true);
+    expect(botConversationStatus({ runs: [queued], runtimeRequests: [], turnItems: [] })).toEqual({
+      kind: "queue-held",
+    });
+    expect(
+      botConversationStatus({
+        runs: [{ ...run, status: "failed" }, queued],
+        runtimeRequests: [],
+        turnItems: [error],
+      }),
+    ).toEqual({ kind: "failed", error: "Provider stopped" });
+    expect(
+      botConversationStatus({
+        runs: [{ ...run, status: "interrupted" }, queued],
+        runtimeRequests: [],
+        turnItems: [],
+      }),
+    ).toEqual({ kind: "stopped" });
+    expect(isBotWorking([run, queued])).toBe(true);
+    expect(isBotWorking([queued, { ...queued, queueHeld: false }])).toBe(false);
+    expect(isBotWorking([{ ...queued, queueHeld: false }])).toBe(true);
+    expect(
+      botConversationStatus({
+        runs: [{ ...queued, queueHeld: false }],
+        runtimeRequests: [],
+        turnItems: [],
+      }),
+    ).toEqual({ kind: "working" });
+  });
+
   it("distinguishes pending approval from an active run", () => {
     expect(
       botConversationStatus({ runs: [run], runtimeRequests: [request], turnItems: [] }),
@@ -698,6 +749,28 @@ describe("botWakeSenderLabel", () => {
 });
 
 describe("botThreadShellStatus", () => {
+  it("shows a held queue while preserving an executed failure or active run", () => {
+    const shell = presentThreadShell(EnvironmentId.make("env"), {
+      ...v2ThreadShell,
+      latestRunId: RunId.make("run"),
+      status: "interrupted",
+    });
+    expect(botThreadShellStatus(shell, false, { homeThreadQueueHeld: true })).toBe("queue-held");
+    expect(
+      botThreadShellStatus(
+        { ...shell, latestRun: { ...shell.latestRun!, status: "failed" } },
+        false,
+        { homeThreadQueueHeld: true },
+      ),
+    ).toBe("failed");
+    expect(
+      botThreadShellStatus(
+        { ...shell, latestRun: { ...shell.latestRun!, status: "running" } },
+        false,
+        { homeThreadQueueHeld: true },
+      ),
+    ).toBe("working");
+  });
   it("prioritizes user requests over active and failed runs", () => {
     const source = {
       ...v2ThreadShell,

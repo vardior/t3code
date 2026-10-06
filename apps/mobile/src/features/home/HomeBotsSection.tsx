@@ -80,7 +80,7 @@ function HomeBotRow(props: {
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
   const { bot, environmentId, refresh } = props.entry;
-  const status = botThreadShellStatus(props.shell, bot.homeThreadMissing);
+  const status = botThreadShellStatus(props.shell, bot.homeThreadMissing, bot);
   const working = status === "working";
   const statusText = botThreadShellStatusLabel(status);
   useBotRunSettlement(working, refresh);

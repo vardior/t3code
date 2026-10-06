@@ -655,6 +655,33 @@ it.effect("previews only the latest settled final assistant reply, as bounded pl
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
+it.effect("reports a held queue only while held runs remain queued", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-queue-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(botDir, "bot.json"),
+      toJson({ name: "Helper", homeThreadId: "home" }),
+    );
+    yield* insertThread(sql, { id: "home", createdAt: "2026-10-01T00:00:00.000Z" });
+    yield* insertRun(sql, { id: "held", threadId: "home", ordinal: 1, status: "queued" });
+    const readHeld = listBots({ baseDir }).pipe(
+      Effect.map((result) => result.bots[0]!.homeThreadQueueHeld),
+    );
+    expect(yield* readHeld).toBeUndefined();
+    yield* sql`UPDATE orchestration_v2_projection_runs SET payload_json = '{"queueHeld":true}' WHERE run_id = 'held'`;
+    expect(yield* readHeld).toBe(true);
+    yield* sql`UPDATE orchestration_v2_projection_runs SET payload_json = '{"queueHeld":false}' WHERE run_id = 'held'`;
+    expect(yield* readHeld).toBeUndefined();
+    yield* sql`UPDATE orchestration_v2_projection_runs SET status = 'completed', payload_json = '{"queueHeld":true}' WHERE run_id = 'held'`;
+    expect(yield* readHeld).toBeUndefined();
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
 it.effect("flags bots whose home thread is deleted or absent but not archived", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

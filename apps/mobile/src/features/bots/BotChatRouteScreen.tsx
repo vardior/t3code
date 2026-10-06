@@ -7,6 +7,7 @@ import {
   botConversationStatus,
   buildBotChat,
   isBotWorking,
+  isBotQueueHeld,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   isAtomCommandInterrupted,
@@ -131,6 +132,7 @@ function BotConversation(props: {
     [projection],
   );
   const working = isBotWorking(projection?.runs ?? []);
+  const queueHeld = isBotQueueHeld(projection?.runs ?? []);
   const refreshBots = props.refresh;
   const refreshDetail = detail.refresh;
   const refresh = useCallback(() => {
@@ -197,6 +199,18 @@ function BotConversation(props: {
   const sending = composer.pendingRequestId !== null;
   const busy = sending;
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const resumeQueue = useAtomCommand(threadEnvironment.resumeThreadQueue, "resume queue");
+  const [resuming, setResuming] = useState(false);
+  const resume = async () => {
+    if (resuming) return;
+    setResuming(true);
+    try {
+      await resumeQueue({ environmentId, input: { threadId: bot.homeThreadId } });
+      refresh();
+    } finally {
+      setResuming(false);
+    }
+  };
   const [stopping, setStopping] = useState(false);
   const stop = async () => {
     if (stopping) return;
@@ -377,58 +391,75 @@ function BotConversation(props: {
             )
           }
           ListFooterComponent={
-            unavailableReason !== null ? undefined : status.kind === "working" ? (
-              <View className="self-start flex-row items-center gap-2 rounded-2xl bg-card px-3.5 py-2">
-                <Text className="text-sm text-foreground-muted">Working…</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Stop agent"
-                  accessibilityState={{ disabled: stopping || !ready }}
-                  disabled={stopping || !ready}
-                  onPress={() => void stop()}
-                  className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
-                >
-                  <Text className="text-sm text-foreground-muted">
-                    {stopping ? "Stopping…" : "Stop"}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : status.kind === "needs-attention" || status.kind === "failed" ? (
-              <View className="self-start gap-2 rounded-2xl bg-card px-3.5 py-2">
-                <Text
-                  accessibilityRole={status.kind === "failed" ? "alert" : undefined}
-                  className={
-                    status.kind === "failed"
-                      ? "text-sm text-danger-foreground"
-                      : "text-sm text-foreground"
-                  }
-                >
-                  {status.kind === "failed"
-                    ? `Run failed${status.error ? `: ${status.error}` : "."}`
-                    : status.request === "approval"
-                      ? "Needs your approval"
-                      : "Needs your input"}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={busy}
-                  onPress={() => openThread(bot.homeThreadId)}
-                  className="self-start rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
-                >
-                  <Text className="text-sm text-primary-text">
+            <View className="gap-2">
+              {unavailableReason !== null ? undefined : status.kind === "working" ? (
+                <View className="self-start flex-row items-center gap-2 rounded-2xl bg-card px-3.5 py-2">
+                  <Text className="text-sm text-foreground-muted">Working…</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Stop agent"
+                    accessibilityState={{ disabled: stopping || !ready }}
+                    disabled={stopping || !ready}
+                    onPress={() => void stop()}
+                    className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
+                  >
+                    <Text className="text-sm text-foreground-muted">
+                      {stopping ? "Stopping…" : "Stop"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : status.kind === "needs-attention" || status.kind === "failed" ? (
+                <View className="self-start gap-2 rounded-2xl bg-card px-3.5 py-2">
+                  <Text
+                    accessibilityRole={status.kind === "failed" ? "alert" : undefined}
+                    className={
+                      status.kind === "failed"
+                        ? "text-sm text-danger-foreground"
+                        : "text-sm text-foreground"
+                    }
+                  >
                     {status.kind === "failed"
-                      ? "Open thread"
+                      ? `Run failed${status.error ? `: ${status.error}` : "."}`
                       : status.request === "approval"
-                        ? "Review approval in thread"
-                        : "Answer in thread"}
+                        ? "Needs your approval"
+                        : "Needs your input"}
                   </Text>
-                </Pressable>
-              </View>
-            ) : status.kind === "stopped" ? (
-              <Text className="self-start rounded-2xl bg-card px-3.5 py-2 text-sm text-foreground-muted">
-                Stopped
-              </Text>
-            ) : undefined
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => openThread(bot.homeThreadId)}
+                    className="self-start rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
+                  >
+                    <Text className="text-sm text-primary-text">
+                      {status.kind === "failed"
+                        ? "Open thread"
+                        : status.request === "approval"
+                          ? "Review approval in thread"
+                          : "Answer in thread"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : status.kind === "stopped" ? (
+                <Text className="self-start rounded-2xl bg-card px-3.5 py-2 text-sm text-foreground-muted">
+                  Stopped
+                </Text>
+              ) : undefined}
+              {queueHeld ? (
+                <View className="self-start flex-row items-center gap-2 rounded-2xl bg-card px-3.5 py-2">
+                  <Text className="text-sm text-foreground-muted">Queue held</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={resuming || !ready}
+                    onPress={() => void resume()}
+                    className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
+                  >
+                    <Text className="text-sm text-primary-text">
+                      {resuming ? "Resuming…" : "Resume"}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
           }
         />
       </View>
