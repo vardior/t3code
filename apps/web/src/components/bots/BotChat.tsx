@@ -54,6 +54,14 @@ export function BotChat(props: {
 }) {
   const thread = useEnvironmentThread(props.environmentId, props.bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
+  const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
+    reportFailure: false,
+  });
+  const loadEarlier = () =>
+    void loadEarlierHistory({
+      environmentId: props.environmentId,
+      input: { threadId: props.bot.homeThreadId },
+    });
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
   );
@@ -115,6 +123,27 @@ export function BotChat(props: {
     >
       <div className="min-h-0 flex-1 overflow-y-auto" onClickCapture={interceptThreadLinks}>
         <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-6">
+          {thread.history.hasMoreHistory || thread.history.error !== null ? (
+            <div className="flex flex-col items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={thread.history.loading}
+                onClick={loadEarlier}
+              >
+                {thread.history.loading
+                  ? "Loading earlier turns…"
+                  : thread.history.error
+                    ? "Retry loading earlier turns"
+                    : "Load earlier turns"}
+              </Button>
+              {thread.history.error !== null ? (
+                <p role="status" className="text-center text-muted-foreground text-xs">
+                  {thread.history.error}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {projection === null ? (
             <p className="text-center text-muted-foreground text-sm">Loading…</p>
           ) : items.length === 0 ? (
