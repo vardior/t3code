@@ -8,6 +8,7 @@ import {
   EventId,
   MessageId,
   NodeId,
+  OpenItemId,
   ProviderInstanceId,
   ProviderSessionId,
   RunId,
@@ -143,6 +144,78 @@ function persistedLink(
 }
 
 describe("isAutoSettlementCandidate", () => {
+  it("excludes overridden, pinned, blocked, and working threads", () => {
+    expect(ThreadSettlementService.isAutoSettlementCandidate(shell(), NOW_MS)).toBe(true);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(shell({ archivedAt: at(-1) }), NOW_MS),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ settledOverride: "settled" }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ settledOverride: "active" }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(shell({ pinnedAt: at(-1) }), NOW_MS),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ autoSettleDisabledAt: at(-1) }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ activityRunStatus: "running" }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({
+          pendingRuntimeRequest: { kind: "approval" } as never,
+        }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ pendingBackgroundTasks: [{ taskId: "review", kind: "subagent" }] }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a thread with an open item until the owner resolves it", () => {
+    const item = {
+      id: OpenItemId.make("item-1"),
+      threadId: ThreadId.make("thread-1"),
+      title: "Which region?",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as const;
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ openItems: [{ ...item, status: "open", resolvedAt: null }] }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({
+          openItems: [{ ...item, status: "dropped", resolvedAt: "2026-01-02T00:00:00.000Z" }],
+        }),
+        NOW_MS,
+      ),
+    ).toBe(true);
+  });
+
   it("settles a thread whose only background work is a command left running", () => {
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(
