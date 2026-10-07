@@ -1,4 +1,5 @@
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -30,11 +31,14 @@ import {
 
 import { useAssetUrls } from "../../assets/assetUrls";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
+import { composerSubmissionIntentForKey } from "../../composer-logic";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { useClientSettings } from "../../hooks/useSettings";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentQuery } from "../../state/query";
-import { serverEnvironment } from "../../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import {
   useEnvironmentThread,
   refreshEnvironmentThread,
@@ -434,6 +438,7 @@ export function BotChat(props: {
         disabledReason={disabledReason}
         runtimeMode={projection?.thread.runtimeMode ?? null}
         interactionMode={projection?.thread.interactionMode ?? null}
+        isRunning={working}
       />
     </section>
   );
@@ -647,7 +652,11 @@ function BotComposer(props: {
   readonly disabledReason: string | null;
   readonly runtimeMode: RuntimeMode | null;
   readonly interactionMode: ProviderInteractionMode | null;
+  readonly isRunning: boolean;
 }) {
+  const settings = useClientSettings();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const isMobileViewport = useMediaQuery("max-sm");
   const draftTarget = useMemo(
     () => scopeThreadRef(props.environmentId, props.bot.homeThreadId),
     [props.environmentId, props.bot.homeThreadId],
@@ -920,9 +929,30 @@ function BotComposer(props: {
             addImages(files);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+            const submissionIntent = composerSubmissionIntentForKey({
+              event: event.nativeEvent,
+              keybindings,
+              isMobileViewport,
+              isDraftThread: false,
+              isRunning: props.isRunning,
+              sendShortcut: settings.sendShortcut,
+              prompt: text,
+            });
+            if (submissionIntent !== null) {
               event.preventDefault();
+              event.stopPropagation();
               void send();
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.setRangeText(
+                "\n",
+                event.currentTarget.selectionStart,
+                event.currentTarget.selectionEnd,
+                "end",
+              );
+              setText(event.currentTarget.value);
             }
           }}
         />
