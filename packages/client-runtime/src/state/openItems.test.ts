@@ -1,7 +1,13 @@
 import { OpenItemId, ThreadId, type OpenItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { countOpenItems, groupOpenItems, hasUnseenOpenItem, openItemIds } from "./openItems.ts";
+import {
+  countOpenItems,
+  groupOpenItems,
+  hasRecentlyResolvedOpenItem,
+  hasUnseenOpenItem,
+  openItemIds,
+} from "./openItems.ts";
 
 const item = (id: string, status: OpenItem["status"], at: string): OpenItem => ({
   id: OpenItemId.make(id),
@@ -41,5 +47,13 @@ describe("open items", () => {
         item("old-answer", "open", "2026-10-07T08:00:00.000Z"),
       ]),
     ).toBe(true);
+  });
+
+  it("treats items resolved in the last day as recently resolved", () => {
+    const now = Date.parse("2026-10-08T07:00:00.000Z");
+    expect(hasRecentlyResolvedOpenItem(items, now)).toBe(true);
+    expect(hasRecentlyResolvedOpenItem(items, Date.parse("2026-10-08T12:30:00.000Z"))).toBe(false);
+    expect(hasRecentlyResolvedOpenItem([items[0]!], now)).toBe(false);
+    expect(hasRecentlyResolvedOpenItem(undefined, now)).toBe(false);
   });
 });

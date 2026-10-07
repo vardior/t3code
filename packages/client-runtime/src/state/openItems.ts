@@ -35,3 +35,15 @@ export function hasUnseenOpenItem(
 ): boolean {
   return items.some((item) => item.status === "open" && !seen.has(item.id));
 }
+
+const RECENTLY_RESOLVED_MS = 24 * 60 * 60 * 1000;
+
+export function hasRecentlyResolvedOpenItem(
+  items: ReadonlyArray<OpenItem> | undefined,
+  nowMs: number,
+): boolean {
+  return (items ?? []).some(
+    (item) =>
+      item.resolvedAt !== null && nowMs - Date.parse(item.resolvedAt) < RECENTLY_RESOLVED_MS,
+  );
+}
