@@ -11,6 +11,10 @@
       "types": "./src/authScopeOptions.ts",
       "import": "./src/authScopeOptions.ts"
     },
+    "./notifyOwnerTool": {
+      "types": "./src/notifyOwnerTool.ts",
+      "import": "./src/notifyOwnerTool.ts"
+    },
     "./slackTextFromCommand": {
       "types": "./src/slackTextFromCommand.ts",
       "import": "./src/slackTextFromCommand.ts"

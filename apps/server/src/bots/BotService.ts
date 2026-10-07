@@ -12,6 +12,7 @@ import {
   type BotSummary,
 } from "@t3tools/contracts";
 import { RelayOwnerNotification } from "@t3tools/contracts/relay";
+import { NOTIFY_OWNER_TOOL_NAMES } from "@t3tools/shared/notifyOwnerTool";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Clock from "effect/Clock";
@@ -270,7 +271,7 @@ export const layer = Layer.effect(
 
     const readLastReply = (homeThreadId: ThreadId) =>
       sql<{ readonly kind: "assistant" | "command"; readonly text: string; readonly at: string }>`
-        WITH owner_reply AS (
+        WITH visible_reply AS (
           SELECT json_extract(m.payload_json, '$.text') AS text, m.created_at AS at,
             m.message_id AS id
           FROM orchestration_v2_projection_messages m
@@ -281,18 +282,29 @@ export const layer = Layer.effect(
               WHERE r.run_id = m.run_id
                 AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
             )
-            AND EXISTS (
+            AND NOT EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_messages incoming
+              WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
+                AND incoming.role = 'user'
+                AND json_extract(incoming.payload_json, '$.text') = '/compact'
+            )
+            AND (EXISTS (
               SELECT 1 FROM orchestration_v2_projection_messages incoming
               WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
                 AND incoming.role = 'user'
                 AND json_extract(incoming.payload_json, '$.createdBy') IS 'user'
                 AND json_extract(incoming.payload_json, '$.senderThreadId') IS NULL
                 AND json_extract(incoming.payload_json, '$.scheduledTaskId') IS NULL
-            )
+            ) OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_turn_items notification
+              WHERE notification.thread_id = m.thread_id AND notification.run_id = m.run_id
+                AND notification.type = 'dynamic_tool' AND notification.status = 'completed'
+                AND json_extract(notification.payload_json, '$.toolName') IN ${sql.in(NOTIFY_OWNER_TOOL_NAMES)}
+            ))
           ORDER BY m.created_at DESC, m.message_id DESC
           LIMIT 1
         )
-        SELECT 'assistant' AS kind, text, at, id, 0 AS ordinal FROM owner_reply
+        SELECT 'assistant' AS kind, text, at, id, 0 AS ordinal FROM visible_reply
         UNION ALL
         SELECT 'command' AS kind, json_extract(i.payload_json, '$.input') AS text,
           COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at) AS at,
@@ -304,7 +316,7 @@ export const layer = Layer.effect(
             OR json_extract(i.payload_json, '$.exitCode') = 0)
           AND json_extract(i.payload_json, '$.input') LIKE '%dm-send%'
           AND COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at)
-            >= COALESCE((SELECT at FROM owner_reply), '')
+            >= COALESCE((SELECT at FROM visible_reply), '')
         ORDER BY at DESC, kind DESC, ordinal DESC, id DESC
       `.pipe(
         Effect.map((rows) => {

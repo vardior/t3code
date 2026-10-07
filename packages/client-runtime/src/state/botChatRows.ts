@@ -1,20 +1,10 @@
-import type { BotSummary, ThreadId } from "@t3tools/contracts";
+import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
 import { buildBotChat, type BotChatItem } from "./botConversation.ts";
 
-export type VisibleBotChatItem =
-  | Extract<BotChatItem, { readonly kind: "you" | "bot" }>
-  | (Extract<BotChatItem, { readonly kind: "wake" }> & { readonly senderName: string });
+export type VisibleBotChatItem = Extract<BotChatItem, { readonly kind: "you" | "bot" }>;
 
-export function visibleBotChatItem(
-  item: BotChatItem,
-  bots: ReadonlyArray<Pick<BotSummary, "homeThreadId" | "name">>,
-  homeThreadId: ThreadId,
-): VisibleBotChatItem | null {
-  if (item.kind === "you" || item.kind === "bot") return item;
-  if (item.kind !== "wake" || item.scheduledTaskId !== null || item.senderThreadId === homeThreadId)
-    return null;
-  const sender = bots.find((bot) => bot.homeThreadId === item.senderThreadId);
-  return sender ? { ...item, senderName: sender.name } : null;
+export function visibleBotChatItem(item: BotChatItem): VisibleBotChatItem | null {
+  return item.kind === "you" || item.kind === "bot" ? item : null;
 }
 
 export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolean {
@@ -34,9 +24,7 @@ export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolea
 }
 
 export function createBotChatProjector() {
-  type Input = Parameters<typeof buildBotChat>[0] & {
-    readonly bots: ReadonlyArray<BotSummary>;
-  };
+  type Input = Parameters<typeof buildBotChat>[0];
   let previous = new Map<string, VisibleBotChatItem>();
   let previousInput: Input | null = null;
   let result: VisibleBotChatItem[] = [];
@@ -47,12 +35,13 @@ export function createBotChatProjector() {
     const turnItems = input.turnItems.filter(
       (item) =>
         item.status === "completed" &&
-        (item.type === "command_execution" || item.type === "compaction"),
+        (item.type === "command_execution" ||
+          item.type === "compaction" ||
+          (item.type === "dynamic_tool" && isNotifyOwnerToolName(item.toolName))),
     );
     if (
       previousInput !== null &&
       previousInput.bot === input.bot &&
-      previousInput.bots === input.bots &&
       previousInput.detail === input.detail &&
       previousInput.since === input.since &&
       messages.length === previousInput.messages.length &&
@@ -69,7 +58,7 @@ export function createBotChatProjector() {
       return result;
     previousInput = { ...input, messages, turnItems };
     const items = buildBotChat(previousInput).flatMap((item) => {
-      const visible = visibleBotChatItem(item, input.bots, input.bot.homeThreadId);
+      const visible = visibleBotChatItem(item);
       if (visible === null) return [];
       const existing = previous.get(item.id);
       return [existing && botChatItemsEqual(existing, visible) ? existing : visible];

@@ -55,12 +55,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { useEnvironmentThread, environmentThreads, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
-import {
-  botChatScrollReducer,
-  botComposerAtom,
-  botComposerReducer,
-  isBotSendDraftUnchanged,
-} from "./botChat.logic";
+import { botComposerAtom, botComposerReducer, isBotSendDraftUnchanged } from "./botChat.logic";
 import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
 import { resolveComposerSendPresentation } from "../threads/composerSendPresentation";
 
@@ -121,7 +116,6 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
     <BotConversation
       key={bot.homeThreadId}
       bot={bot}
-      bots={bots.data?.bots ?? []}
       environmentId={props.environmentId}
       refresh={bots.refresh}
       connected={connected}
@@ -133,7 +127,6 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
 
 function BotConversation(props: {
   readonly bot: BotSummary;
-  readonly bots: ReadonlyArray<BotSummary>;
   readonly environmentId: EnvironmentId;
   readonly refresh: () => void;
   readonly connected: boolean;
@@ -230,14 +223,13 @@ function BotConversation(props: {
     () =>
       projectChat({
         bot,
-        bots: props.bots,
         detail: detail.data,
         since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [projectChat, bot, props.bots, detail.data, projection, thread.history.hasMoreHistory],
+    [projectChat, bot, detail.data, projection, thread.history.hasMoreHistory],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
@@ -269,7 +261,6 @@ function BotConversation(props: {
   const listRef = useRef<LegendListRef>(null);
   const composerOverlayRef = useRef<ViewInstance>(null);
   const followingEnd = useRef(true);
-  const [togglingDisclosureKey, setTogglingDisclosureKey] = useState<string | null>(null);
   const lastItem = items.at(-1);
   const previousEnd = useRef({ length: 0, lastItem });
   useLayoutEffect(() => {
@@ -279,13 +270,6 @@ function BotConversation(props: {
     if (items.length > 0 && endChanged && followingEnd.current)
       void listRef.current?.scrollToEnd({ animated: false });
   }, [items.length, lastItem]);
-  const onDisclosureToggle = useCallback((itemId: string) => {
-    setTogglingDisclosureKey(itemId);
-    followingEnd.current = botChatScrollReducer(followingEnd.current, {
-      type: "disclosure",
-      atEnd: listRef.current?.getState().isWithinMaintainScrollAtEndThreshold ?? false,
-    });
-  }, []);
   const initialComposerHeight = 88 + Math.max(insets.bottom, 12) - nativeInsetOvercount;
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
@@ -487,7 +471,6 @@ function BotConversation(props: {
               threadId={bot.homeThreadId}
               onOpenThread={openThread}
               onPreview={setPreview}
-              onDisclosureToggle={onDisclosureToggle}
             />
           )}
           style={{ flex: 1 }}
@@ -502,7 +485,7 @@ function BotConversation(props: {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onScrollBeginDrag={() => {
-            followingEnd.current = botChatScrollReducer(followingEnd.current, { type: "drag" });
+            followingEnd.current = false;
           }}
           initialScrollAtEnd
           alignItemsAtEnd
@@ -510,10 +493,7 @@ function BotConversation(props: {
             animated: false,
             on: { dataChange: true, itemLayout: false, layout: true },
           }}
-          maintainVisibleContentPosition={togglingDisclosureKey === null}
-          onItemSizeChanged={({ itemKey }) => {
-            if (itemKey === togglingDisclosureKey) setTogglingDisclosureKey(null);
-          }}
+          maintainVisibleContentPosition
           getItemType={(item) => item.kind}
           ListHeaderComponent={
             unavailableReason === null && (history.hasMoreHistory || historyError) ? (

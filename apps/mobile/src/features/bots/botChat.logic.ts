@@ -78,13 +78,6 @@ export function botComposerReducer(
   };
 }
 
-export function botChatScrollReducer(
-  followingEnd: boolean,
-  action: { readonly type: "disclosure"; readonly atEnd: boolean } | { readonly type: "drag" },
-) {
-  return action.type === "drag" ? false : followingEnd || action.atEnd;
-}
-
 export function botThreadLinkTarget(href: string, knownEnvironmentIds: ReadonlyArray<string>) {
   const target = parseThreadLink(href, "https://t3.invalid");
   return target && knownEnvironmentIds.includes(target.environmentId) ? target : null;

@@ -112,6 +112,18 @@ const commandItem = (input: {
   ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
 });
 
+const notificationItem = (
+  toolName = "t3-code.notify_owner",
+  status: OrchestrationV2TurnItem["status"] = "completed",
+  runId = "run-wake",
+): OrchestrationV2TurnItem => ({
+  ...commandItem({ id: "notification", command: "", runId, completedAt: "2026-10-01T00:02:00Z" }),
+  type: "dynamic_tool",
+  toolName,
+  status,
+  input: {},
+});
+
 const compactionItem = (input: {
   id: string;
   runId: string;
@@ -140,7 +152,7 @@ const compactionItem = (input: {
 });
 
 describe("buildBotChat", () => {
-  it("shows each turn's final reply only, and each agent wake as one row with its final reply", () => {
+  it("shows owner final replies, DM sends and workers while hiding background turns", () => {
     const bot: BotSummary = {
       id: "helper",
       name: "Helper",
@@ -258,22 +270,15 @@ describe("buildBotChat", () => {
       items.filter((item) => item.kind !== "worker" && !item.id.startsWith("slack-dm:")),
     );
 
-    expect(
-      items.map((item) => [
-        item.kind,
-        item.kind === "wake" ? item.reply : "text" in item ? item.text : item.title,
-      ]),
-    ).toEqual([
+    expect(items.map((item) => [item.kind, "text" in item ? item.text : item.title])).toEqual([
       ["you", "How is it going?"],
       ["bot", "All good"],
-      ["wake", "Handled the triage note"],
       ["worker", "Fix the build"],
       ["you", "From Slack"],
       ["bot", "See [this](https://example.com)"],
       ["you", "And now?"],
     ]);
     expect(items[0]).toMatchObject({ imageIds: ["shot"] });
-    expect(items[2]).toMatchObject({ senderThreadId: "triage", text: "triage note" });
   });
 });
 
@@ -293,7 +298,7 @@ describe("bot chat run status", () => {
     ["queued", "Queued"],
     ["running", null],
     ["completed", null],
-  ] as const)("preserves %s on owner and wake rows after a later run", (status, label) => {
+  ] as const)("preserves %s on owner rows after a later run", (status, label) => {
     const items = buildBotChat({
       bot: botWithoutHistory,
       messages: [
@@ -329,9 +334,9 @@ describe("bot chat run status", () => {
       turnItems: [],
     });
     expect(items[0]).toMatchObject({ kind: "you", runId: "owner-run", runStatus: status });
-    expect(items[1]).toMatchObject({ kind: "wake", reply: null, runStatus: status });
-    for (const item of items.slice(0, 2)) {
-      if (item.kind !== "you" && item.kind !== "wake") throw new Error("Expected incoming row");
+    expect(items).toHaveLength(2);
+    for (const item of items.slice(0, 1)) {
+      if (item.kind !== "you") throw new Error("Expected owner row");
       expect(botChatRunStatusLabel(item.runStatus)).toBe(label);
     }
   });
@@ -436,7 +441,7 @@ describe("buildBotChat compaction rows", () => {
     expect(items).toMatchObject([{ kind: "compaction", text: "Context reset" }]);
   });
 
-  it("shows one divider for a self-sent /compact without a wake, user row, or reply", () => {
+  it("shows one divider for a notified self-sent /compact without its prompt or reply", () => {
     const items = buildBotChat({
       bot: botWithoutHistory,
       messages: [
@@ -459,6 +464,7 @@ describe("buildBotChat compaction rows", () => {
       ],
       runs: [{ id: RunId.make("run-compact"), status: "completed" }],
       turnItems: [
+        notificationItem("t3-code.notify_owner", "completed", "run-compact"),
         compactionItem({
           id: "compact",
           runId: "run-compact",
@@ -488,168 +494,122 @@ describe("buildBotChat compaction rows", () => {
 
     expect(items).toMatchObject([{ kind: "compaction", text: "Context reset" }]);
   });
-
-  it("keeps normal wake rows and replies around compactions", () => {
-    const items = buildBotChat({
-      bot: botWithoutHistory,
-      messages: [
-        message({
-          id: "wake-before",
-          role: "user",
-          runId: "run-before",
-          createdAt: "2026-10-01T00:01:00.000Z",
-          text: "First wake",
-          createdBy: "agent",
-          senderThreadId: "triage",
-        }),
-        message({
-          id: "reply-before",
-          role: "assistant",
-          runId: "run-before",
-          createdAt: "2026-10-01T00:01:30.000Z",
-          text: "First reply",
-        }),
-        message({
-          id: "self-compact",
-          role: "user",
-          runId: "run-compact",
-          createdAt: "2026-10-01T00:02:00.000Z",
-          text: "/compact",
-          createdBy: "agent",
-          senderThreadId: "home",
-        }),
-        message({
-          id: "wake-after",
-          role: "user",
-          runId: "run-after",
-          createdAt: "2026-10-01T00:03:00.000Z",
-          text: "Second wake",
-          createdBy: "agent",
-          senderThreadId: "triage",
-        }),
-        message({
-          id: "reply-after",
-          role: "assistant",
-          runId: "run-after",
-          createdAt: "2026-10-01T00:03:30.000Z",
-          text: "Second reply",
-        }),
-      ],
-      runs: [
-        { id: RunId.make("run-before"), status: "completed" },
-        { id: RunId.make("run-compact"), status: "completed" },
-        { id: RunId.make("run-after"), status: "completed" },
-      ],
-      turnItems: [
-        compactionItem({
-          id: "manual",
-          runId: "run-compact",
-          completedAt: "2026-10-01T00:02:30.000Z",
-        }),
-        compactionItem({
-          id: "auto",
-          runId: "run-after",
-          completedAt: "2026-10-01T00:03:15.000Z",
-        }),
-      ],
-    });
-
-    expect(items.map((item) => item.kind)).toEqual(["wake", "compaction", "wake", "compaction"]);
-    expect(items.filter((item) => item.kind === "wake")).toMatchObject([
-      { text: "First wake", reply: "First reply" },
-      { text: "Second wake", reply: "Second reply" },
-    ]);
-  });
 });
 
-describe("buildBotChat wake rows", () => {
-  const wake = message({
+describe("buildBotChat background replies", () => {
+  const prompt = message({
     id: "wake",
     role: "user",
     runId: "run-wake",
-    createdAt: "2026-10-01T00:01:00.000Z",
+    createdAt: "2026-10-01T00:01:00Z",
     text: "Wake prompt",
-    createdBy: "agent",
     scheduledTaskId: "schedule-triage",
   });
-  const dmSend = commandItem({
-    id: "dm-send",
+  const reply = message({
+    id: "reply",
+    role: "assistant",
     runId: "run-wake",
-    command: `printf '%s' 'Done' | bin/dm-send`,
-    completedAt: "2026-10-01T00:02:00.000Z",
-    exitCode: 0,
+    createdAt: "2026-10-01T00:03:00Z",
+    text: "Zoom agenda prepared",
   });
+  const input = {
+    bot: botWithoutHistory,
+    messages: [prompt, reply],
+    runs: [{ id: RunId.make("run-wake"), status: "completed" as const }],
+    turnItems: [],
+  };
 
-  it("drops a wake when the same run sent a Slack DM", () => {
-    const items = buildBotChat({
-      bot: botWithoutHistory,
-      messages: [wake],
-      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
-      turnItems: [dmSend],
-    });
-    expect(items.map((item) => item.kind)).toEqual(["bot"]);
-  });
-
-  it("keeps an incoming thread message when its run also sends a Slack DM", () => {
-    const items = buildBotChat({
-      bot: botWithoutHistory,
-      messages: [
-        message({
-          id: "bot-message",
-          role: "user",
-          runId: "run-wake",
-          createdAt: "2026-10-01T00:01:00.000Z",
-          text: "Check this build",
-          createdBy: "agent",
-          senderThreadId: "chief-of-staff",
+  it.each(["mcp__t3-code__notify_owner", "t3-code.notify_owner"])(
+    "shows only the final settled poll reply after %s completes",
+    (toolName) => {
+      expect(
+        buildBotChat({
+          ...input,
+          messages: [prompt, { ...reply, id: MessageId.make("progress"), text: "Checking" }, reply],
+          turnItems: [notificationItem(toolName)],
         }),
-      ],
-      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
-      turnItems: [dmSend],
-    });
-    expect(items.map((item) => item.kind)).toEqual(["wake", "bot"]);
-    expect(items[0]).toMatchObject({ senderThreadId: "chief-of-staff", text: "Check this build" });
+      ).toMatchObject([{ kind: "bot", id: "message:reply", text: "Zoom agenda prepared" }]);
+    },
+  );
+
+  it.each([
+    { scheduledTaskId: ScheduledTaskId.make("schedule-triage") },
+    { scheduledTaskId: undefined, createdBy: "agent" as const, creationSource: "server" as const },
+    {
+      scheduledTaskId: undefined,
+      createdBy: "agent" as const,
+      senderThreadId: ThreadId.make("other-bot"),
+    },
+  ])("hides background prompts and replies without notification: %s", (origin) => {
+    expect(buildBotChat({ ...input, messages: [{ ...prompt, ...origin }, reply] })).toEqual([]);
+    expect(
+      buildBotChat({
+        ...input,
+        messages: [{ ...prompt, ...origin }, reply],
+        turnItems: [notificationItem()],
+      }),
+    ).toMatchObject([{ kind: "bot", text: reply.text }]);
   });
 
-  it("keeps a wake when its run did not send a Slack DM", () => {
-    const items = buildBotChat({
-      bot: botWithoutHistory,
-      messages: [wake],
-      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
-      turnItems: [
-        commandItem({
-          id: "other-command",
-          runId: "run-wake",
-          command: "echo done",
-          completedAt: "2026-10-01T00:02:00.000Z",
-          exitCode: 0,
-        }),
-      ],
-    });
-    expect(items.filter((item) => item.kind === "wake")).toHaveLength(1);
+  it.each(["pending", "running", "failed", "interrupted"] as const)(
+    "ignores a %s notify_owner call",
+    (status) => {
+      expect(
+        buildBotChat({ ...input, turnItems: [notificationItem("t3-code.notify_owner", status)] }),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    "notify_owner",
+    "mcp__other__notify_owner",
+    "t3-code.notify_owner_extra",
+    "t3-code.thread_send",
+  ])("ignores the unrelated tool %s", (toolName) => {
+    expect(buildBotChat({ ...input, turnItems: [notificationItem(toolName)] })).toEqual([]);
   });
 
-  it("keeps a wake when another run sent the Slack DM", () => {
-    const items = buildBotChat({
-      bot: botWithoutHistory,
-      messages: [wake],
-      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
-      turnItems: [{ ...dmSend, runId: RunId.make("other-run") }],
-    });
-    expect(items.filter((item) => item.kind === "wake")).toHaveLength(1);
+  it("ignores notifications from other runs or without a run", () => {
+    for (const runId of [RunId.make("other-run"), null]) {
+      expect(buildBotChat({ ...input, turnItems: [{ ...notificationItem(), runId }] })).toEqual([]);
+    }
   });
 
-  it("carries the scheduled task ID on a wake", () => {
-    const items = buildBotChat({
-      bot: botWithoutHistory,
-      messages: [wake],
-      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
-      turnItems: [],
-    });
-    expect(items[0]).toMatchObject({
-      kind: "wake",
-      scheduledTaskId: ScheduledTaskId.make("schedule-triage"),
-    });
+  it("waits for a settled run and excludes streaming replies", () => {
+    const notified = { ...input, turnItems: [notificationItem()] };
+    expect(
+      buildBotChat({ ...notified, runs: [{ id: RunId.make("run-wake"), status: "running" }] }),
+    ).toEqual([]);
+    expect(
+      buildBotChat({ ...notified, messages: [prompt, { ...reply, streaming: true }] }),
+    ).toEqual([]);
+  });
+
+  it("does not duplicate an owner reply when that run also notifies", () => {
+    expect(
+      buildBotChat({
+        ...input,
+        messages: [{ ...prompt, scheduledTaskId: undefined }, reply],
+        turnItems: [notificationItem()],
+      }).map((item) => item.kind),
+    ).toEqual(["you", "bot"]);
+  });
+
+  it("keeps successful DM sends visible without a notification", () => {
+    expect(
+      buildBotChat({
+        ...input,
+        turnItems: [
+          commandItem({
+            id: "dm-send",
+            runId: "run-wake",
+            command: "printf '%s' 'Done' | bin/dm-send",
+            completedAt: "2026-10-01T00:02:00Z",
+            exitCode: 0,
+          }),
+        ],
+      }),
+    ).toMatchObject([{ kind: "bot", text: "Done" }]);
   });
 });
 

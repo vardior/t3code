@@ -2,7 +2,6 @@ import { AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  botChatScrollReducer,
   botThreadLinkTarget,
   botMarkdownThreadLinks,
   botComposerReducer,
@@ -94,25 +93,6 @@ describe("bot command state", () => {
         error: null,
       }),
     ).toEqual(draft);
-  });
-});
-
-describe("bot chat end following after disclosure", () => {
-  it("retains live-end following across expansion and collapse until the user drags", () => {
-    const expandedAtEnd = botChatScrollReducer(false, { type: "disclosure", atEnd: true });
-    expect(expandedAtEnd).toBe(true);
-    const collapsedAwayFromEnd = botChatScrollReducer(expandedAtEnd, {
-      type: "disclosure",
-      atEnd: false,
-    });
-    expect(collapsedAwayFromEnd).toBe(true);
-    const dragged = botChatScrollReducer(collapsedAwayFromEnd, { type: "drag" });
-    expect(dragged).toBe(false);
-    expect(botChatScrollReducer(dragged, { type: "disclosure", atEnd: false })).toBe(false);
-  });
-
-  it("does not follow new messages when a disclosure was opened away from the end", () => {
-    expect(botChatScrollReducer(false, { type: "disclosure", atEnd: false })).toBe(false);
   });
 });
 

@@ -149,9 +149,6 @@ export function BotChat(props: {
       input: { threadId: props.bot.homeThreadId },
     });
   }, [loadEarlierHistory, props.environmentId, props.bot.homeThreadId]);
-  const bots = useEnvironmentQuery(
-    serverEnvironment.bots.list({ environmentId: props.environmentId, input: {} }),
-  );
   const projectChat = useMemo(() => createBotChatProjector(), []);
   const threadError = Option.getOrNull(thread.error);
   const homeThreadArchived =
@@ -195,7 +192,6 @@ export function BotChat(props: {
     () =>
       projectChat({
         bot: props.bot,
-        bots: bots.data?.bots ?? [],
         detail: detail.data,
         since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
         messages: projection?.messages ?? [],
@@ -205,7 +201,6 @@ export function BotChat(props: {
     [
       projectChat,
       props.bot,
-      bots.data,
       detail.data,
       thread.history.hasMoreHistory,
       projection?.messages,
@@ -486,9 +481,6 @@ const ChatRow = memo(function ChatRow(props: {
   readonly threadId: ThreadId;
 }) {
   const { item } = props;
-  if (item.kind === "wake") {
-    return <WakeRow item={item} environmentId={props.environmentId} />;
-  }
   if (item.kind === "you") {
     return (
       <YourMessage item={item} environmentId={props.environmentId} threadId={props.threadId} />
@@ -590,53 +582,6 @@ function YourMessage(props: {
     </div>
   );
 }
-
-const WakeRow = memo(function WakeRow(props: {
-  readonly item: Extract<VisibleBotChatItem, { readonly kind: "wake" }>;
-  readonly environmentId: EnvironmentId;
-}) {
-  const { item } = props;
-  const [expanded, setExpanded] = useState(false);
-  const replyPreview =
-    botChatRunStatusLabel(item.runStatus) ??
-    item.reply
-      ?.split("\n")
-      .find((line) => line.trim())
-      ?.replace(/[*`#>]/g, "") ??
-    "no reply yet";
-  return (
-    <details
-      className="group min-w-0 max-w-[85%] self-start text-muted-foreground text-xs"
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full border border-border/70 px-3 py-1.5 hover:bg-accent/60 hover:text-foreground">
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="shrink-0">From</span>
-          <span className="truncate">{item.senderName}</span>
-        </span>
-        <span
-          className={
-            item.runStatus === "failed" ? "truncate text-destructive" : "truncate opacity-70"
-          }
-        >
-          · {replyPreview}
-        </span>
-      </summary>
-      {expanded ? (
-        <div className="mt-2 flex flex-col gap-2">
-          <div className="rounded-2xl border border-border/70 px-3.5 py-2">
-            <BotMarkdown text={item.text} environmentId={props.environmentId} />
-          </div>
-          {item.reply ? (
-            <div className="rounded-2xl bg-muted px-3.5 py-2 text-foreground text-sm">
-              <BotMarkdown text={item.reply} environmentId={props.environmentId} />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </details>
-  );
-});
 
 function BotComposer(props: {
   readonly bot: BotSummary;

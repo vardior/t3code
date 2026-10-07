@@ -28,10 +28,8 @@ export const BotChatRow = memo(function BotChatRow(props: {
   readonly threadId: ThreadId;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
-  readonly onDisclosureToggle: (itemId: string) => void;
 }) {
   const { item } = props;
-  if (item.kind === "wake") return <WakeRow {...props} item={item} />;
   return (
     <View
       className={
@@ -114,66 +112,6 @@ function OwnerMessageStatus(props: {
         >
           <Text className="text-xs text-primary-text">{cancelling ? "Cancelling…" : "Cancel"}</Text>
         </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function WakeRow(props: {
-  readonly onDisclosureToggle: (itemId: string) => void;
-  readonly item: Extract<VisibleBotChatItem, { readonly kind: "wake" }>;
-  readonly environmentId: EnvironmentId;
-  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const preview =
-    botChatRunStatusLabel(props.item.runStatus) ??
-    props.item.reply
-      ?.split("\n")
-      .find((line) => line.trim())
-      ?.replace(/[*`#>]/g, "") ??
-    "no reply yet";
-  return (
-    <View className="max-w-[85%] self-start gap-2">
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        onPress={() => {
-          props.onDisclosureToggle(props.item.id);
-          setExpanded(!expanded);
-        }}
-        className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70"
-      >
-        <Text
-          numberOfLines={2}
-          className={
-            props.item.runStatus === "failed"
-              ? "text-xs text-danger-foreground"
-              : "text-xs text-foreground-muted"
-          }
-        >
-          From {props.item.senderName} · {preview}
-        </Text>
-      </Pressable>
-      {expanded ? (
-        <>
-          <View className="rounded-2xl border border-border-subtle px-3.5 py-2">
-            <BotMarkdown
-              text={props.item.text}
-              environmentId={props.environmentId}
-              onOpenThread={props.onOpenThread}
-            />
-          </View>
-          {props.item.reply ? (
-            <View className="rounded-2xl bg-card px-3.5 py-2">
-              <BotMarkdown
-                text={props.item.reply}
-                environmentId={props.environmentId}
-                onOpenThread={props.onOpenThread}
-              />
-            </View>
-          ) : null}
-        </>
       ) : null}
     </View>
   );

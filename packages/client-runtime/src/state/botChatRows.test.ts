@@ -1,8 +1,15 @@
-import { ChatAttachmentId, MessageId, RunId, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
+import {
+  ChatAttachmentId,
+  MessageId,
+  RunId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import { botChatItemsEqual, createBotChatProjector, visibleBotChatItem } from "./botChatRows.ts";
-import { botChatRunStatusLabel, shouldLoadEarlierBotChatHistory } from "./botConversation.ts";
+import { shouldLoadEarlierBotChatHistory } from "./botConversation.ts";
 
 const bot = {
   id: "bot",
@@ -23,185 +30,89 @@ const message = {
   createdAt: DateTime.makeUnsafe("2026-10-06T10:00:00Z"),
 };
 
-const senderBot = {
-  ...bot,
-  id: "chief",
-  name: "chief-of-staff",
-  homeThreadId: ThreadId.make("chief"),
-};
-const wake = {
-  kind: "wake" as const,
-  id: "wake",
-  at: 1,
-  senderThreadId: senderBot.homeThreadId,
-  scheduledTaskId: null,
-  text: "Please check the build",
-  reply: "Done",
-  runStatus: "completed" as const,
+const notification: OrchestrationV2TurnItem = {
+  id: TurnItemId.make("notification"),
+  threadId: bot.homeThreadId,
+  runId: message.runId,
+  nodeId: null,
+  providerThreadId: null,
+  providerTurnId: null,
+  nativeItemRef: null,
+  parentItemId: null,
+  ordinal: 0,
+  status: "completed",
+  title: null,
+  startedAt: message.createdAt,
+  completedAt: message.createdAt,
+  updatedAt: message.createdAt,
+  type: "dynamic_tool",
+  toolName: "t3-code.notify_owner",
+  input: {},
 };
 
 describe("visibleBotChatItem", () => {
-  it("shows bot senders by their bot name", () => {
-    expect(visibleBotChatItem(wake, [bot, senderBot], bot.homeThreadId)).toEqual({
-      ...wake,
-      senderName: "chief-of-staff",
-    });
-  });
-
-  it.each(["worker", "delegated-child", "missing-thread", "home", null])(
-    "hides messages and results from %s",
-    (sender) => {
-      expect(
-        visibleBotChatItem(
-          { ...wake, senderThreadId: sender === null ? null : ThreadId.make(sender) },
-          [bot, senderBot],
-          bot.homeThreadId,
-        ),
-      ).toBeNull();
-    },
-  );
-
-  it("hides scheduled wake prompts even with a bot sender", () => {
-    expect(
-      visibleBotChatItem(
-        { ...wake, scheduledTaskId: ScheduledTaskId.make("schedule") },
-        [senderBot],
-        bot.homeThreadId,
-      ),
-    ).toBeNull();
+  it("shows normal bot replies", () => {
+    const reply = { kind: "bot" as const, id: "reply", at: 1, text: "Done" };
+    expect(visibleBotChatItem(reply)).toBe(reply);
   });
 
   it.each(["running", "completed"])("hides %s child-thread chips", (status) => {
     expect(
-      visibleBotChatItem(
-        {
-          kind: "worker",
-          id: "worker",
-          at: 1,
-          threadId: ThreadId.make("child"),
-          title: "Task",
-          status,
-        },
-        [senderBot],
-        bot.homeThreadId,
-      ),
+      visibleBotChatItem({
+        kind: "worker",
+        id: "worker",
+        at: 1,
+        threadId: ThreadId.make("child"),
+        title: "Task",
+        status,
+      }),
     ).toBeNull();
   });
 
   it("hides context reset rows", () => {
     expect(
-      visibleBotChatItem(
-        { kind: "compaction", id: "reset", at: 1, text: "Context reset" },
-        [senderBot],
-        bot.homeThreadId,
-      ),
+      visibleBotChatItem({ kind: "compaction", id: "reset", at: 1, text: "Context reset" }),
     ).toBeNull();
-  });
-
-  it.each([
-    ["interrupted", "Stopped"],
-    ["failed", "Failed"],
-    ["queued", "Queued"],
-  ] as const)("keeps %s labels on bot messages", (runStatus, label) => {
-    const visible = visibleBotChatItem({ ...wake, runStatus }, [senderBot], bot.homeThreadId);
-    expect(visible).toMatchObject({ senderName: senderBot.name, runStatus });
-    if (visible?.kind !== "wake") throw new Error("Expected bot sender row");
-    expect(botChatRunStatusLabel(visible.runStatus)).toBe(label);
   });
 });
 
 describe("bot chat row projection", () => {
-  it.each([message.runId, null])(
-    "shows bot messages with run %s alongside owner messages",
-    (runId) => {
-      const items = createBotChatProjector()({
+  it.each(["mcp__t3-code__notify_owner", "t3-code.notify_owner"])(
+    "updates background visibility only when %s completes",
+    (toolName) => {
+      const project = createBotChatProjector();
+      const input = {
         bot,
-        bots: [bot, senderBot],
         messages: [
-          message,
+          { ...message, createdBy: "agent" as const, creationSource: "server" as const },
           {
             ...message,
-            id: MessageId.make("chief"),
-            createdBy: "agent",
-            senderThreadId: senderBot.homeThreadId,
-            runId,
-            text: "Bot message",
+            id: MessageId.make("reply"),
+            role: "assistant" as const,
+            text: "Final reply",
           },
-          { ...message, id: MessageId.make("reply"), role: "assistant", text: "Final reply" },
         ],
-        runs: [{ id: message.runId, status: "completed" }],
+        runs: [{ id: message.runId, status: "completed" as const }],
         turnItems: [],
-      });
-      expect(items).toMatchObject([
-        { kind: "you", text: "Hello" },
-        { kind: "bot", text: "Final reply" },
-        { kind: "wake", senderName: senderBot.name, text: "Bot message", reply: null },
-      ]);
+      };
+      const initial = project(input);
+      expect(initial).toEqual([]);
+      expect(
+        project({ ...input, turnItems: [{ ...notification, toolName, status: "running" }] }),
+      ).toBe(initial);
+      expect(
+        project({ ...input, turnItems: [{ ...notification, toolName: "t3-code.thread_send" }] }),
+      ).toBe(initial);
+      const visible = project({ ...input, turnItems: [{ ...notification, toolName }] });
+      expect(visible).toMatchObject([{ kind: "bot", text: "Final reply" }]);
+      expect(project(input)).toEqual([]);
     },
   );
-
-  it("keeps bot messages separate from worker messages delivered in the same run", () => {
-    const project = createBotChatProjector();
-    const input = {
-      bot,
-      bots: [bot, senderBot],
-      detail: {
-        charter: null,
-        slackDms: [],
-        workers: [
-          {
-            threadId: ThreadId.make("spawned"),
-            title: "Spawned task",
-            status: "running",
-            createdAt: "2026-10-06T10:00:00Z",
-          },
-          {
-            threadId: ThreadId.make("delegated"),
-            title: "Delegated task",
-            status: "completed",
-            createdAt: "2026-10-06T10:00:00Z",
-          },
-        ],
-      },
-      messages: [
-        {
-          ...message,
-          createdBy: "agent" as const,
-          senderThreadId: ThreadId.make("worker"),
-          text: "Worker result",
-        },
-        {
-          ...message,
-          id: MessageId.make("chief"),
-          createdBy: "agent" as const,
-          senderThreadId: senderBot.homeThreadId,
-          text: "Bot message",
-        },
-        {
-          ...message,
-          id: MessageId.make("reply"),
-          role: "assistant" as const,
-          text: "Final reply",
-        },
-      ],
-      runs: [{ id: message.runId, status: "completed" as const }],
-      turnItems: [],
-    };
-    const initial = project(input);
-    expect(initial).toMatchObject([
-      { kind: "wake", senderName: "chief-of-staff", text: "Bot message", reply: "Final reply" },
-    ]);
-    expect(project({ ...input, bots: [bot] })).toEqual([]);
-    expect(project({ ...input, bots: [bot, { ...senderBot, name: "Chief" }] })).toMatchObject([
-      { senderName: "Chief", text: "Bot message" },
-    ]);
-  });
 
   it("loads earlier history through pages containing only hidden rows", () => {
     const project = createBotChatProjector();
     const input = {
       bot,
-      bots: [bot],
       messages: [
         { ...message, createdBy: "agent" as const, senderThreadId: ThreadId.make("worker") },
       ],
@@ -223,7 +134,6 @@ describe("bot chat row projection", () => {
     const project = createBotChatProjector();
     const input = {
       bot,
-      bots: [bot],
       detail: null,
       runs: [{ id: RunId.make("run"), status: "running" as const }],
       messages: [message],
@@ -255,7 +165,6 @@ describe("bot chat row projection", () => {
     const project = createBotChatProjector();
     const input = {
       bot,
-      bots: [bot],
       runs: [{ id: message.runId, status: "running" as const }],
       messages: [message],
       turnItems: [],
@@ -285,7 +194,6 @@ describe("bot chat row projection", () => {
       const hiddenRunId = RunId.make("restart");
       const items = createBotChatProjector()({
         bot,
-        bots: [bot],
         messages: [
           message,
           { ...reply, id: MessageId.make("progress"), text: "Checking" },
@@ -327,7 +235,6 @@ describe("bot chat row projection", () => {
     };
     const input = {
       bot,
-      bots: [bot],
       runs: [{ id: RunId.make("run"), status: "running" as const }],
       messages: [message, { ...message, id: MessageId.make("second"), text: "Second" }, assistant],
       turnItems: [],
@@ -346,7 +253,6 @@ describe("bot chat row projection", () => {
     const project = createBotChatProjector();
     const input = {
       bot,
-      bots: [bot],
       detail: null,
       runs: [],
       messages: [message, { ...message, id: MessageId.make("second"), text: "Second" }],
@@ -382,7 +288,6 @@ describe("bot chat row projection", () => {
     const project = createBotChatProjector();
     const input = {
       bot,
-      bots: [bot],
       messages: [
         message,
         { ...message, id: MessageId.make("queued"), runId: RunId.make("queued-run") },

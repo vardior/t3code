@@ -1065,6 +1065,151 @@ it.effect.each(["cancelled", "interrupted", "completed"] as const)(
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
+it.effect.each(["mcp__t3-code__notify_owner", "t3-code.notify_owner"])(
+  "previews a background final reply only after %s completes",
+  (toolName) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-notified-reply-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(botDir, "bot.json"),
+        toJson({ name: "Helper", homeThreadId: "home" }),
+      );
+      yield* insertThread(sql, { id: "home", createdAt: "2026-10-01T00:00:00.000Z" });
+      yield* insertRun(sql, { id: "owner", threadId: "home", ordinal: 1, status: "completed" });
+      yield* insertMessage(sql, {
+        id: "owner-question",
+        threadId: "home",
+        runId: "owner",
+        createdAt: "2026-10-01T00:01:00.000Z",
+      });
+      yield* insertMessage(sql, {
+        id: "owner-reply",
+        threadId: "home",
+        runId: "owner",
+        role: "assistant",
+        text: "Older owner reply",
+        createdAt: "2026-10-01T00:02:00.000Z",
+      });
+      yield* insertRun(sql, { id: "poll", threadId: "home", ordinal: 2, status: "running" });
+      yield* insertMessage(sql, {
+        id: "poll-prompt",
+        threadId: "home",
+        runId: "poll",
+        scheduledTaskId: "poll-schedule",
+        createdAt: "2026-10-01T00:03:00.000Z",
+      });
+      yield* insertMessage(sql, {
+        id: "poll-progress",
+        threadId: "home",
+        runId: "poll",
+        role: "assistant",
+        text: "Preparing agenda",
+        createdAt: "2026-10-01T00:04:00.000Z",
+      });
+      yield* insertMessage(sql, {
+        id: "poll-final",
+        threadId: "home",
+        runId: "poll",
+        role: "assistant",
+        text: "Zoom agenda prepared",
+        createdAt: "2026-10-01T00:05:00.000Z",
+      });
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_turn_items (
+          turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json
+        ) VALUES (
+          'notification', 'home', 'poll', 1, 'dynamic_tool', 'completed',
+          '2026-10-01T00:04:30.000Z', ${toJson({ toolName })}
+        )
+      `;
+      const readReply = listBots({ baseDir }).pipe(
+        Effect.map((result) => result.bots[0]!.lastReply),
+      );
+      const ownerReply = { text: "Older owner reply", at: "2026-10-01T00:02:00.000Z" };
+      const notifiedReply = { text: "Zoom agenda prepared", at: "2026-10-01T00:05:00.000Z" };
+      expect(yield* readReply).toEqual(ownerReply);
+      yield* sql`UPDATE orchestration_v2_projection_runs SET status = 'completed' WHERE run_id = 'poll'`;
+      expect(yield* readReply).toEqual(notifiedReply);
+      for (const status of ["pending", "running", "failed", "interrupted"]) {
+        yield* sql`UPDATE orchestration_v2_projection_turn_items SET status = ${status} WHERE turn_item_id = 'notification'`;
+        expect(yield* readReply).toEqual(ownerReply);
+      }
+      yield* sql`UPDATE orchestration_v2_projection_turn_items SET status = 'completed' WHERE turn_item_id = 'notification'`;
+      for (const otherTool of [
+        "notify_owner",
+        "mcp__other__notify_owner",
+        "t3-code.notify_owner_extra",
+        "t3-code.thread_send",
+      ]) {
+        yield* sql`UPDATE orchestration_v2_projection_turn_items SET payload_json = ${toJson({ toolName: otherTool })} WHERE turn_item_id = 'notification'`;
+        expect(yield* readReply).toEqual(ownerReply);
+      }
+      yield* sql`UPDATE orchestration_v2_projection_turn_items SET payload_json = ${toJson({ toolName })} WHERE turn_item_id = 'notification'`;
+      for (const [column, value] of [
+        ["thread_id", "other-thread"],
+        ["run_id", "owner"],
+      ] as const) {
+        yield* sql`UPDATE orchestration_v2_projection_turn_items SET ${sql.update({ [column]: value })} WHERE turn_item_id = 'notification'`;
+        expect(yield* readReply).toEqual(ownerReply);
+        yield* sql`UPDATE orchestration_v2_projection_turn_items SET thread_id = 'home', run_id = 'poll' WHERE turn_item_id = 'notification'`;
+      }
+      for (const [ordinal, incoming] of [
+        { scheduledTaskId: "newer-poll" },
+        { createdBy: "agent" as const, creationSource: "server" },
+        { createdBy: "agent" as const, senderThreadId: "other-bot" },
+      ].entries()) {
+        const runId = `unnotified-${ordinal}`;
+        yield* insertRun(sql, {
+          id: runId,
+          threadId: "home",
+          ordinal: ordinal + 3,
+          status: "completed",
+        });
+        yield* insertMessage(sql, {
+          id: `${runId}-prompt`,
+          threadId: "home",
+          runId,
+          createdAt: "2026-10-01T00:06:00.000Z",
+          ...incoming,
+        });
+        yield* insertMessage(sql, {
+          id: `${runId}-reply`,
+          threadId: "home",
+          runId,
+          role: "assistant",
+          text: "Unnotified newer reply",
+          createdAt: "2026-10-01T00:07:00.000Z",
+        });
+        expect(yield* readReply).toEqual(notifiedReply);
+      }
+      yield* insertMessage(sql, {
+        id: "poll-streaming",
+        threadId: "home",
+        runId: "poll",
+        role: "assistant",
+        streaming: true,
+        text: "Streaming reply",
+        createdAt: "2026-10-01T00:08:00.000Z",
+      });
+      expect(yield* readReply).toEqual(notifiedReply);
+      yield* insertMessage(sql, {
+        id: "compact-prompt",
+        threadId: "home",
+        runId: "poll",
+        createdBy: "agent",
+        creationSource: "server",
+        text: "/compact",
+        createdAt: "2026-10-01T00:09:00.000Z",
+      });
+      expect(yield* readReply).toEqual(ownerReply);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
 it.effect("reports a held queue only while held runs remain queued", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

@@ -9,12 +9,12 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
   type OrchestrationV2ThreadProjection,
-  type ScheduledTaskId,
 } from "@t3tools/contracts";
 import {
   usageLimitBlockedRun,
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
+import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
@@ -55,16 +55,6 @@ export type BotChatItem =
     }
   | { readonly kind: "bot"; readonly id: string; readonly at: number; readonly text: string }
   | { readonly kind: "compaction"; readonly id: string; readonly at: number; readonly text: string }
-  | {
-      readonly kind: "wake";
-      readonly id: string;
-      readonly at: number;
-      readonly senderThreadId: ThreadId | null;
-      readonly scheduledTaskId: ScheduledTaskId | null;
-      readonly text: string;
-      readonly reply: string | null;
-      readonly runStatus: OrchestrationV2Run["status"] | null;
-    }
   | {
       readonly kind: "worker";
       readonly id: string;
@@ -287,7 +277,18 @@ export function buildBotChat(input: {
       message.scheduledTaskId === undefined,
   );
   const ownerRunIds = new Set(ownerMessages.flatMap((message) => message.runId ?? []));
-  const ownerMessageIds = new Set(ownerMessages.map((message) => message.id));
+  const compactRunIds = new Set(
+    input.messages.flatMap((message) =>
+      message.role === "user" && message.text === "/compact" ? (message.runId ?? []) : [],
+    ),
+  );
+  const notifiedRunIds = input.turnItems.flatMap((item) =>
+    item.type === "dynamic_tool" &&
+    item.status === "completed" &&
+    isNotifyOwnerToolName(item.toolName)
+      ? (item.runId ?? [])
+      : [],
+  );
   const runStatusById = new Map(input.runs.map((run) => [run.id, run.status]));
   const activeRunIds = new Set(
     input.runs.filter((run) => isActiveRunStatus(run.status)).map((run) => run.id),
@@ -297,19 +298,9 @@ export function buildBotChat(input: {
     if (message.role !== "assistant" || message.streaming || message.runId === null) continue;
     if (!activeRunIds.has(message.runId)) finalReplyByRun.set(message.runId, message);
   }
-  const replies = [...ownerRunIds].flatMap((runId) => finalReplyByRun.get(runId) ?? []);
-  const wakesBySender = new Map<string, ChatMessage[]>();
-  for (const message of incoming) {
-    if (ownerMessageIds.has(message.id)) continue;
-    const key = JSON.stringify([
-      message.runId ?? message.id,
-      message.senderThreadId,
-      message.scheduledTaskId,
-    ]);
-    const wakes = wakesBySender.get(key);
-    if (wakes) wakes.push(message);
-    else wakesBySender.set(key, [message]);
-  }
+  const replies = [...new Set([...ownerRunIds, ...notifiedRunIds])].flatMap((runId) =>
+    compactRunIds.has(runId) ? [] : (finalReplyByRun.get(runId) ?? []),
+  );
 
   const dmSends = input.turnItems.flatMap((item) => {
     if (item.type !== "command_execution" || item.status !== "completed") return [];
@@ -317,7 +308,6 @@ export function buildBotChat(input: {
     const text = slackTextFromCommand(item.input);
     return text === null ? [] : [{ item, text }];
   });
-  const dmSendRunIds = new Set<string>(dmSends.flatMap(({ item }) => item.runId ?? []));
 
   const items: BotChatItem[] = [
     ...ownerMessages.map((message) => ({
@@ -349,27 +339,6 @@ export function buildBotChat(input: {
           id: `compaction:${item.id}`,
           at: DateTime.toEpochMillis(item.completedAt ?? item.updatedAt),
           text: `Context reset${sizes}`,
-        },
-      ];
-    }),
-    ...Array.from(wakesBySender.values()).flatMap((wakes) => {
-      const first = wakes[0]!;
-      const runId = first.runId;
-      if (first.senderThreadId === undefined && runId !== null && dmSendRunIds.has(runId))
-        return [];
-      return [
-        {
-          kind: "wake" as const,
-          id: `wake:${first.id}`,
-          at: DateTime.toEpochMillis(first.createdAt),
-          senderThreadId: first.senderThreadId ?? null,
-          scheduledTaskId: first.scheduledTaskId ?? null,
-          text: wakes.map((wake) => wake.text).join("\n\n"),
-          reply:
-            runId === null || ownerRunIds.has(runId)
-              ? null
-              : (finalReplyByRun.get(runId)?.text ?? null),
-          runStatus: runId === null ? null : (runStatusById.get(runId) ?? null),
         },
       ];
     }),
