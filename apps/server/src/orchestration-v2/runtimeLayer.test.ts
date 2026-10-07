@@ -1606,6 +1606,126 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       }),
   );
 
+  it.effect("queues an auto-delivered message behind a running compaction", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const threadId = ThreadId.make("runtime-compaction-intent");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-compaction-intent-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-compaction-intent-project"),
+        title: "Compaction intent",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-compaction-intent-compact"),
+        threadId,
+        messageId: MessageId.make("runtime-compaction-intent-compact"),
+        text: "/compact",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+      });
+      const initial = yield* orchestrator.getThreadProjection(threadId);
+      const run = initial.runs[0]!;
+      const providerThread = initial.providerThreads[0]!;
+      const now = yield* DateTime.now;
+      const providerSession = {
+        id: providerThread.providerSessionId!,
+        driver,
+        providerInstanceId: modelSelection.instanceId,
+        status: "running" as const,
+        cwd: process.cwd(),
+        model: modelSelection.model,
+        capabilities: CodexProviderCapabilitiesV2,
+        createdAt: now,
+        updatedAt: now,
+        lastError: null,
+      };
+      yield* eventSink.write({
+        commandId: CommandId.make("runtime-compaction-intent-running"),
+        events: [
+          {
+            id: EventId.make("runtime-compaction-intent-run-event"),
+            type: "run.updated",
+            threadId,
+            runId: run.id,
+            occurredAt: now,
+            payload: { ...run, status: "running", startedAt: now },
+          },
+          {
+            id: EventId.make("runtime-compaction-intent-session-event"),
+            type: "provider-session.attached",
+            threadId,
+            occurredAt: now,
+            payload: providerSession,
+          },
+          {
+            id: EventId.make("runtime-compaction-intent-turn-event"),
+            type: "provider-turn.updated",
+            threadId,
+            runId: run.id,
+            occurredAt: now,
+            payload: {
+              id: ProviderTurnId.make("runtime-compaction-intent-turn"),
+              providerThreadId: providerThread.id,
+              nodeId: run.rootNodeId!,
+              runAttemptId: run.activeAttemptId,
+              nativeTurnRef: null,
+              ordinal: 1,
+              status: "running",
+              startedAt: now,
+              completedAt: null,
+            },
+          },
+        ],
+      });
+      const sessionSpy = vi.spyOn(sessions, "get").mockReturnValue(
+        Effect.succeedSome({
+          providerSession,
+        } as ProviderAdapter.ProviderAdapterV2SessionRuntime),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(() => sessionSpy.mockRestore()));
+
+      const answerCommandId = CommandId.make("runtime-compaction-intent-auto");
+      const answerMessageId = MessageId.make("runtime-compaction-intent-auto");
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: answerCommandId,
+        threadId,
+        messageId: answerMessageId,
+        text: "Re: Show bot workers?: Show them",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        deliveryIntent: "auto",
+      });
+      const queued = yield* orchestrator.getThreadProjection(threadId);
+      assert.lengthOf(queued.runs, 2);
+      assert.notEqual(
+        queued.messages.find((message) => message.id === answerMessageId)?.runId,
+        run.id,
+      );
+      assert.notInclude(
+        (yield* outbox.listByCommandId(answerCommandId)).map((effect) => effect.request.type),
+        "provider-turn.steer",
+      );
+    }),
+  );
+
   it.effect("answers an async question after its provider exits and commits the answer once", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
