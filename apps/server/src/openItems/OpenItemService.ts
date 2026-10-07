@@ -29,9 +29,6 @@ const isOpenItemError = Schema.is(OpenItemError);
 const clip = (text: string, length: number) =>
   text.length > length ? `${text.slice(0, length - 1).trimEnd()}…` : text;
 
-const openItemReplyText = (item: Pick<OpenItem, "title">, answer: string) =>
-  `Re: ${item.title}: ${answer}`;
-
 export class OpenItemService extends Context.Service<
   OpenItemService,
   {
@@ -162,40 +159,62 @@ const make = Effect.gen(function* () {
     }));
   });
 
-  const answer = Effect.fn("OpenItemService.answer")(function* (input: OpenItemAnswerInput) {
+  const ownerReply = Effect.fn("OpenItemService.ownerReply")(function* (
+    input: OpenItemReopenInput,
+    text: (item: OpenItem) => string,
+  ) {
     const thread = yield* readThread(input.threadId);
     const existing = (thread.openItems ?? []).find((item) => item.id === input.itemId);
     if (existing === undefined) return yield* new OpenItemError({ reason: "not_found" });
-    const messageId = MessageId.make(`open-item-answer:${yield* randomUuidV4}`);
-    return yield* apply(
-      input.threadId,
-      { type: "resolve", itemId: input.itemId, status: "answered", answer: input.answer },
-      (commandId) => ({
-        type: "thread.open-item.resolve",
-        commandId,
-        threadId: input.threadId,
-        itemId: input.itemId,
-        status: "answered",
-        answer: input.answer,
-        reply: {
-          messageId,
-          text: openItemReplyText(existing, input.answer),
-          creationSource: input.creationSource ?? "web",
-        },
-      }),
+    return {
+      messageId: MessageId.make(`open-item-reply:${yield* randomUuidV4}`),
+      text: text(existing),
+      creationSource: input.creationSource ?? "web",
+    };
+  });
+
+  const ownerResolve = (
+    input: OpenItemDropInput,
+    resolution: { readonly status: OpenItemResolvedStatus; readonly answer?: string | undefined },
+    text: (item: OpenItem) => string,
+  ) =>
+    Effect.gen(function* () {
+      const reply = yield* ownerReply(input, text);
+      return yield* apply(
+        input.threadId,
+        { type: "resolve", itemId: input.itemId, ...resolution },
+        (commandId) => ({
+          type: "thread.open-item.resolve",
+          commandId,
+          threadId: input.threadId,
+          itemId: input.itemId,
+          status: resolution.status,
+          ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
+          reply,
+        }),
+      );
+    });
+
+  const answer = Effect.fn("OpenItemService.answer")(function* (input: OpenItemAnswerInput) {
+    return yield* ownerResolve(
+      input,
+      { status: "answered", answer: input.answer },
+      (item) => `Re: ${item.title}: ${input.answer}`,
     );
   });
 
   const drop = Effect.fn("OpenItemService.drop")(function* (input: OpenItemDropInput) {
-    return yield* resolve(input.threadId, input.itemId, { status: "dropped" });
+    return yield* ownerResolve(input, { status: "dropped" }, (item) => `Dropped: ${item.title}`);
   });
 
   const reopen = Effect.fn("OpenItemService.reopen")(function* (input: OpenItemReopenInput) {
+    const reply = yield* ownerReply(input, (item) => `Reopened: ${item.title}`);
     return yield* apply(input.threadId, { type: "reopen", itemId: input.itemId }, (commandId) => ({
       type: "thread.open-item.reopen",
       commandId,
       threadId: input.threadId,
       itemId: input.itemId,
+      reply,
     }));
   });
 

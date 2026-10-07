@@ -120,12 +120,15 @@ export class OpenItemError extends Schema.TaggedError<OpenItemError>()("OpenItem
   }
 }
 
-const OpenItemTarget = { threadId: ThreadId, itemId: OpenItemId };
+const OpenItemTarget = {
+  threadId: ThreadId,
+  itemId: OpenItemId,
+  creationSource: Schema.optional(Schema.Literals(["web", "mobile"])),
+};
 
 export const OpenItemAnswerInput = Schema.Struct({
   ...OpenItemTarget,
   answer: OpenItemAnswer,
-  creationSource: Schema.optional(Schema.Literals(["web", "mobile"])),
 });
 export type OpenItemAnswerInput = typeof OpenItemAnswerInput.Type;
 

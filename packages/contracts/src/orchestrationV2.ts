@@ -3422,6 +3422,12 @@ export const OrchestrationV2Command = Schema.Union([
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
+const OpenItemReply = Schema.Struct({
+  messageId: MessageId,
+  text: Schema.String,
+  creationSource: OrchestrationV2CreationSource,
+});
+
 // Excluded from dispatchCommand so only the server can send these.
 const OrchestrationV2InternalCommand = Schema.Union([
   // Guest share commands the server issues after checking T3 Connect and the guest token.
@@ -3477,19 +3483,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
     itemId: OpenItemId,
     status: OpenItemResolvedStatus,
     answer: Schema.optional(OpenItemAnswer),
-    reply: Schema.optional(
-      Schema.Struct({
-        messageId: MessageId,
-        text: Schema.String,
-        creationSource: OrchestrationV2CreationSource,
-      }),
-    ),
+    reply: Schema.optional(OpenItemReply),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.open-item.reopen"),
     commandId: CommandId,
     threadId: ThreadId,
     itemId: OpenItemId,
+    reply: Schema.optional(OpenItemReply),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),

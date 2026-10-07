@@ -261,7 +261,7 @@ it.layer(layerTest)("OpenItemService", (it) => {
     }),
   );
 
-  it.effect("answers with a message to the agent, then drops and reopens without one", () =>
+  it.effect("tells the agent when the owner answers, drops or reopens, not when it resolves", () =>
     Effect.gen(function* () {
       const openItems = yield* OpenItemService.OpenItemService;
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -320,9 +320,15 @@ it.layer(layerTest)("OpenItemService", (it) => {
       assert.equal(agentResolved.answer, "Found it in the runbook: eu-west.");
 
       const final = yield* orchestrator.getThreadProjection(threadId);
-      assert.lengthOf(
-        final.messages.filter((message) => message.role === "user"),
-        1,
+      assert.sameDeepMembers(
+        final.messages
+          .filter((message) => message.role === "user")
+          .map((message) => [message.text, message.creationSource]),
+        [
+          ["Re: Which region?: eu-west", "mobile"],
+          ["Dropped: Rotate the token", "web"],
+          ["Reopened: Which region?", "web"],
+        ],
       );
       assert.deepEqual(
         (yield* openItems.list(threadId, { includeResolved: true })).map((item) => [
