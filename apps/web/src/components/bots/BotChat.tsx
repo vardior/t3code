@@ -10,6 +10,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  AuthOrchestrationOperateScope,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type BotSummary,
@@ -49,6 +50,13 @@ import {
   refreshEnvironmentThread,
   threadEnvironment,
 } from "../../state/threads";
+import { isCommandPaletteOpen } from "../../commandPaletteBus";
+import { resolveShortcutCommand } from "../../keybindings";
+import { isEditableFocused } from "../../lib/editableFocus";
+import { getTerminalFocusOwner } from "../../lib/terminalFocus";
+import { isModelPickerOpen } from "../../modelPickerVisibility";
+import { readEnvironmentScope } from "../../state/session";
+import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../../terminalUiStateStore";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   awaitAttachmentUploads,
@@ -266,6 +274,38 @@ export function BotChat(props: {
       setStopping(false);
     }
   };
+  const stopKeybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const onStopKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      isCommandPaletteOpen() ||
+      !canInterrupt ||
+      !readEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope)
+    )
+      return;
+    const terminalOpen = selectThreadTerminalUiState(
+      useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+      scopeThreadRef(props.environmentId, props.bot.homeThreadId),
+    ).terminalOpen;
+    const command = resolveShortcutCommand(event, stopKeybindings, {
+      context: {
+        terminalFocus: getTerminalFocusOwner() !== null,
+        terminalOpen,
+        editableFocus: isEditableFocused(event.target),
+        modelPickerOpen: isModelPickerOpen(),
+        turnRunning: working,
+      },
+    });
+    if (command !== "thread.stop") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) void stop();
+  });
+  useEffect(() => {
+    window.addEventListener("keydown", onStopKeyDown, true);
+    return () => window.removeEventListener("keydown", onStopKeyDown, true);
+  }, []);
   useLayoutEffect(() => {
     const container = scrollContainer.current;
     if (!container) return;

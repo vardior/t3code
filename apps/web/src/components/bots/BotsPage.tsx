@@ -19,6 +19,7 @@ import { refreshEnvironmentBots } from "./useEnvironmentBots";
 import { useBotsData } from "./BotsDataProvider";
 import { BotsState } from "./BotsState";
 import { BotChat } from "./BotChat";
+import { BotThreadTools } from "./BotThreadTools";
 import { BotInfoSheet } from "./BotInfoSheet";
 import { BotBrowserButton } from "./BotBrowserButton";
 
@@ -132,12 +133,17 @@ export function BotsPage({
 
         <div className="flex min-h-0 flex-1">
           {selected && environmentId ? (
-            <BotChat
+            <BotThreadTools
               key={`${environmentId}:${selected.id}`}
-              bot={selected}
               environmentId={environmentId}
-              onRunSettled={selection!.refresh}
-            />
+              threadId={selected.homeThreadId}
+            >
+              <BotChat
+                bot={selected}
+                environmentId={environmentId}
+                onRunSettled={selection!.refresh}
+              />
+            </BotThreadTools>
           ) : (
             <div className="flex min-w-0 flex-1 items-center justify-center">
               {bots.length > 0 && !botId ? (
