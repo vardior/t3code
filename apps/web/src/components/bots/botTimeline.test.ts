@@ -1,5 +1,6 @@
 import type { VisibleBotChatItem } from "@t3tools/client-runtime/state/bot-chat-rows";
-import { MessageId, RunId } from "@t3tools/contracts";
+import { MessageId, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { TimelineEntry } from "../../session-logic";
@@ -36,6 +37,40 @@ const workEntry: TimelineEntry = {
   entry: { id: "tool", createdAt: at, label: "Ran rg", tone: "tool" },
 };
 
+function interruption(runId: string): TimelineEntry {
+  const id = TurnItemId.make(`interrupt-${runId}`);
+  const threadId = ThreadId.make("home");
+  return {
+    id,
+    kind: "event",
+    createdAt: at,
+    projectedItem: {
+      position: 0,
+      visibility: "local",
+      sourceThreadId: threadId,
+      sourceItemId: id,
+      item: {
+        id,
+        threadId,
+        runId: RunId.make(runId),
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 0,
+        status: "completed",
+        title: null,
+        startedAt: null,
+        completedAt: null,
+        updatedAt: DateTime.makeUnsafe(at),
+        type: "run_interrupt_result",
+        message: "Stopped",
+      },
+    },
+  };
+}
+
 const you = (id: string): VisibleBotChatItem => ({
   kind: "you",
   id,
@@ -64,6 +99,19 @@ describe("botTimelineEntries", () => {
       [owner, wake, workEntry, progress, reply, unsent],
     );
     expect(entries).toEqual([owner, reply, unsent]);
+  });
+
+  it("keeps the interruption marker of an owner run only", () => {
+    const owner = messageEntry("owner", "user", "user");
+    const partial = messageEntry("partial", "assistant");
+    const ownerStop = interruption("run");
+    const wakeStop = interruption("wake-run");
+    expect(
+      botTimelineEntries(
+        [you("message:owner"), bot("message:partial")],
+        [owner, partial, ownerStop, wakeStop],
+      ),
+    ).toEqual([owner, partial, ownerStop]);
   });
 
   it("renders Slack items that have no thread message", () => {

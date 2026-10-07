@@ -27,25 +27,35 @@ function syntheticEntry(item: VisibleBotChatItem): TimelineEntry {
   return entry;
 }
 
+function isOwnerRunInterruption(entry: TimelineEntry, ownerRunIds: ReadonlySet<string | null>) {
+  return (
+    entry.kind === "event" &&
+    entry.projectedItem.item.type === "run_interrupt_result" &&
+    ownerRunIds.has(entry.projectedItem.item.runId)
+  );
+}
+
 export function botTimelineEntries(
   items: ReadonlyArray<VisibleBotChatItem>,
   entries: ReadonlyArray<TimelineEntry>,
 ): ReadonlyArray<TimelineEntry> {
-  const messageEntries = new Map<string, TimelineEntry>();
-  const unsent: TimelineEntry[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== "message") continue;
-    messageEntries.set(`message:${entry.message.id}`, entry);
-    if (entry.message.role === "user" && entry.message.createdBy === undefined) unsent.push(entry);
+  const visibleIds = new Set(items.map((item) => item.id));
+  const ownerRunIds = new Set(
+    items.flatMap((item) => (item.kind === "you" && item.runId !== null ? [item.runId] : [])),
+  );
+  const result = entries.filter((entry) =>
+    entry.kind === "message"
+      ? visibleIds.has(`message:${entry.message.id}`) ||
+        (entry.message.role === "user" && entry.message.createdBy === undefined)
+      : isOwnerRunInterruption(entry, ownerRunIds),
+  );
+  for (const item of items) {
+    if (item.id.startsWith("message:")) continue;
+    const entry = syntheticEntry(item);
+    const index = result.findIndex((candidate) => candidate.createdAt > entry.createdAt);
+    result.splice(index === -1 ? result.length : index, 0, entry);
   }
-  return [
-    ...items.flatMap((item) => {
-      const entry = messageEntries.get(item.id);
-      if (entry) return [entry];
-      return item.id.startsWith("message:") ? [] : [syntheticEntry(item)];
-    }),
-    ...unsent,
-  ];
+  return result;
 }
 
 function sameEntries(

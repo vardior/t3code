@@ -8,7 +8,7 @@ import {
   setActivePreviewTab,
   useThreadPreviewState,
 } from "../../previewStateStore";
-import { useRightPanelStore } from "../../rightPanelStore";
+import { selectActiveRightPanel, useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentScope } from "../../state/session";
 import { usePreviewSession } from "../preview/usePreviewSession";
 import { Button } from "../ui/button";
@@ -29,7 +29,10 @@ function OpenBotBrowserButton(props: {
   const threadRef = scopeThreadRef(props.environmentId, props.threadId);
   usePreviewSession(threadRef);
   const preview = useThreadPreviewState(threadRef);
-  if (preview.activeTabId === null) return null;
+  const browserOpen = useRightPanelStore(
+    (state) => selectActiveRightPanel(state.byThreadKey, threadRef) === "preview",
+  );
+  if (preview.activeTabId === null || browserOpen) return null;
 
   const openBrowser = () => {
     const tabId = readThreadPreviewState(threadRef).activeTabId;
