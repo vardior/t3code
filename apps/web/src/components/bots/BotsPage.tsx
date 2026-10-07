@@ -29,7 +29,7 @@ export function BotsPage({
   readonly environmentId: string | undefined;
 }) {
   useEscapeToGoBack();
-  const { isMobile, setOpen, setOpenMobile } = useSidebar();
+  const { isMobile, open, setOpen, setOpenMobile } = useSidebar();
   const { environments, isReady } = useEnvironments();
   const { bots, queries } = useBotsData();
   useEffect(() => {
@@ -141,16 +141,18 @@ export function BotsPage({
                   <p className="text-sm text-muted-foreground">
                     Pick a bot to see your conversation.
                   </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (isMobile) setOpenMobile(true);
-                      else setOpen(true);
-                    }}
-                  >
-                    Choose a bot
-                  </Button>
+                  {isMobile || !open ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (isMobile) setOpenMobile(true);
+                        else setOpen(true);
+                      }}
+                    >
+                      Choose a bot
+                    </Button>
+                  ) : null}
                 </div>
               ) : (
                 pageState
