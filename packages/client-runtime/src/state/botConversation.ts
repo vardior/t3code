@@ -553,6 +553,23 @@ function tokenizeShell(input: string): ShellToken[] | null {
   return tokens;
 }
 
+export type PendingBotOrder = {
+  readonly ids: ReadonlyArray<string>;
+  readonly source: ReadonlyArray<BotSummary>;
+};
+
+export function resolveBotListOrder(
+  bots: ReadonlyArray<BotSummary>,
+  pending: PendingBotOrder | null,
+  saving: boolean,
+) {
+  if (!pending || (!saving && pending.source !== bots)) return bots.map((bot) => bot.id);
+  return [
+    ...pending.ids.filter((id) => bots.some((bot) => bot.id === id)),
+    ...bots.filter((bot) => !pending.ids.includes(bot.id)).map((bot) => bot.id),
+  ];
+}
+
 const THREAD_LINK_PATTERN = /t3-thread:\/\/v1\/([^/\s)>\]?#]+)\/([^/\s)>\]?#]+)/g;
 const THREAD_LINK_HREF_PATTERN = new RegExp(`^${THREAD_LINK_PATTERN.source}$`);
 

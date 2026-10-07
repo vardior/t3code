@@ -44,8 +44,10 @@ import {
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { BotAvatar } from "./BotAvatar";
 import {
+  resolveBotListOrder,
   botThreadShellStatus,
   botThreadShellStatusLabel,
+  type PendingBotOrder,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import { BotChat } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
@@ -316,7 +318,7 @@ function BotListItem(props: {
       ref={setNodeRef}
       style={{
         transform: CSS.Translate.toString(transform),
-        transition: transition,
+        transition,
       }}
       className={cn("flex items-center", isDragging && "relative z-10 bg-background shadow-md")}
     >
@@ -373,10 +375,7 @@ function SortableBotList(props: {
   readonly selectedId: string | undefined;
   readonly onSelect: (entry: ReturnType<typeof useEnvironmentBots>["bots"][number]) => void;
 }) {
-  const [pending, setPending] = useState<{
-    names: ReadonlyArray<string>;
-    source: ReadonlyArray<BotSummary>;
-  } | null>(null);
+  const [pendingOrder, setPendingOrder] = useState<PendingBotOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
   const reorder = useAtomCommand(serverEnvironment.bots.reorder, "Reorder bots");
@@ -384,13 +383,7 @@ function SortableBotList(props: {
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const order =
-    pending && (saving || pending.source === props.bots)
-      ? [
-          ...pending.names.filter((id) => props.bots.some((bot) => bot.id === id)),
-          ...props.bots.filter((bot) => !pending.names.includes(bot.id)).map((bot) => bot.id),
-        ]
-      : props.bots.map((bot) => bot.id);
+  const order = resolveBotListOrder(props.bots, pendingOrder, saving);
   const byId = new Map(props.bots.map((bot) => [bot.id, bot]));
   const handleDragEnd = async (event: DragEndEvent) => {
     if (busy.current || event.over === null || event.active.id === event.over.id) return;
@@ -400,12 +393,12 @@ function SortableBotList(props: {
     const names = arrayMove([...order], from, to);
     busy.current = true;
     setSaving(true);
-    setPending({ names, source: props.bots });
+    setPendingOrder({ ids: names, source: props.bots });
     try {
       const result = await reorder({ environmentId: props.environmentId, input: { names } });
-      if (result._tag === "Failure") setPending(null);
+      if (result._tag === "Failure") setPendingOrder(null);
     } catch {
-      setPending(null);
+      setPendingOrder(null);
     } finally {
       setSaving(false);
       busy.current = false;

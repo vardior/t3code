@@ -1,3 +1,7 @@
+import {
+  resolveBotListOrder,
+  type PendingBotOrder,
+} from "@t3tools/client-runtime/state/bot-conversation";
 import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, type LayoutRectangle } from "react-native";
@@ -12,10 +16,7 @@ export function SortableBotList(props: {
   readonly bots: ReadonlyArray<BotSummary>;
   readonly renderBot: (bot: BotSummary) => ReactNode;
 }) {
-  const [pending, setPending] = useState<{
-    names: ReadonlyArray<string>;
-    source: ReadonlyArray<BotSummary>;
-  } | null>(null);
+  const [pendingOrder, setPendingOrder] = useState<PendingBotOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
   const [drag, setDrag] = useState<{
@@ -28,13 +29,7 @@ export function SortableBotList(props: {
   } | null>(null);
   const layouts = useRef(new Map<string, LayoutRectangle>());
   const reorder = useAtomCommand(serverEnvironment.bots.reorder, "Reorder bots");
-  const order =
-    pending && (saving || pending.source === props.bots)
-      ? [
-          ...pending.names.filter((id) => props.bots.some((bot) => bot.id === id)),
-          ...props.bots.filter((bot) => !pending.names.includes(bot.id)).map((bot) => bot.id),
-        ]
-      : props.bots.map((bot) => bot.id);
+  const order = resolveBotListOrder(props.bots, pendingOrder, saving);
   const version = JSON.stringify(order);
   const byId = new Map(props.bots.map((bot) => [bot.id, bot]));
   const active = drag?.version === version ? drag : null;
@@ -46,12 +41,12 @@ export function SortableBotList(props: {
     names.splice(to, 0, id);
     busy.current = true;
     setSaving(true);
-    setPending({ names, source: props.bots });
+    setPendingOrder({ ids: names, source: props.bots });
     try {
       const result = await reorder({ environmentId: props.environmentId, input: { names } });
-      if (result._tag === "Failure") setPending(null);
+      if (result._tag === "Failure") setPendingOrder(null);
     } catch {
-      setPending(null);
+      setPendingOrder(null);
     } finally {
       setSaving(false);
       busy.current = false;
