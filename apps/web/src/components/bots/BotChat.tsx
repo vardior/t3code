@@ -18,7 +18,7 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { ArrowUpIcon, BotIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
@@ -30,7 +30,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type MouseEvent,
 } from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
@@ -40,6 +39,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useClientSettings } from "../../hooks/useSettings";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { useEnvironmentIds } from "../../state/environments";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentQuery } from "../../state/query";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
@@ -71,9 +71,8 @@ import {
   botConversationStatus,
   botWakeSenderLabel,
   isBotQueueHeld,
-  rewriteThreadLinks,
+  parseThreadLink,
   shouldLoadEarlierBotChatHistory,
-  threadIdFromHref,
   type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
 
@@ -284,18 +283,6 @@ export function BotChat(props: {
     [navigate, props.environmentId],
   );
 
-  const interceptThreadLinks = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const anchor = (event.target as HTMLElement).closest("a");
-    const threadId = anchor
-      ? threadIdFromHref(anchor.href, window.location.origin, props.environmentId)
-      : null;
-    if (threadId === null) return;
-    event.preventDefault();
-    event.stopPropagation();
-    openThread(threadId);
-  };
-
   return (
     <section
       aria-label={`Conversation with ${props.bot.name}`}
@@ -304,7 +291,6 @@ export function BotChat(props: {
       <div
         ref={scrollContainer}
         className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
-        onClickCapture={interceptThreadLinks}
         onScroll={(event) => {
           const container = event.currentTarget;
           followEnd.current =
@@ -499,11 +485,27 @@ const ChatRow = memo(function ChatRow(props: {
 });
 
 function BotMarkdown(props: { readonly text: string; readonly environmentId: EnvironmentId }) {
+  const knownEnvironmentIds = useEnvironmentIds();
   return (
     <ChatMarkdown
       cwd={undefined}
       environmentId={props.environmentId}
-      text={rewriteThreadLinks(props.text, window.location.origin)}
+      text={props.text}
+      renderThreadLink={(href, children) => {
+        const target = parseThreadLink(href);
+        if (
+          !target ||
+          (target.environmentId !== props.environmentId &&
+            !knownEnvironmentIds.includes(target.environmentId))
+        ) {
+          return <span>{children}</span>;
+        }
+        return (
+          <Link to="/$environmentId/$threadId" params={target}>
+            {children}
+          </Link>
+        );
+      }}
     />
   );
 }

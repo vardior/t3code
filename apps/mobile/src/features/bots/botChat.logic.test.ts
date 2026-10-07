@@ -118,12 +118,17 @@ describe("bot chat end following after disclosure", () => {
 
 describe("bot thread links", () => {
   it("resolves known cross-environment targets and rejects unknown or malformed links", () => {
-    expect(
-      botThreadLinkTarget("https://t3.invalid/remote/thread%201", ["local", "remote"]),
-    ).toEqual({ environmentId: "remote", threadId: "thread 1" });
-    expect(botThreadLinkTarget("https://t3.invalid/unknown/thread", ["local"])).toBeNull();
+    expect(botThreadLinkTarget("t3-thread://v1/remote/thread%201", ["local", "remote"])).toEqual({
+      environmentId: "remote",
+      threadId: "thread 1",
+    });
+    expect(botThreadLinkTarget("https://t3.invalid/remote/mcp%3Areviewer", ["remote"])).toEqual({
+      environmentId: "remote",
+      threadId: "mcp:reviewer",
+    });
+    expect(botThreadLinkTarget("t3-thread://v1/unknown/thread", ["local"])).toBeNull();
     expect(botThreadLinkTarget("https://example.com/local/thread", ["local"])).toBeNull();
-    expect(botThreadLinkTarget("https://t3.invalid/local/%ZZ", ["local"])).toBeNull();
+    expect(botThreadLinkTarget("t3-thread://v1/local/%ZZ", ["local"])).toBeNull();
   });
 
   it("renders unknown thread links as their text while retaining known and external links", () => {

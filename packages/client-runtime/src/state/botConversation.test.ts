@@ -20,6 +20,8 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  parseThreadLink,
+  rewriteThreadLinks,
   botChatHistoryStart,
   botChatRunStatusLabel,
   botConversationStatus,
@@ -1150,5 +1152,39 @@ describe("bot auxiliary history", () => {
     }).filter((item) => item.kind === "you");
     expect(slid.map((item) => item.id)).toEqual(full.slice(1).map((item) => item.id));
     expect(new Set(full.map((item) => item.id)).size).toBe(3);
+  });
+});
+
+describe("parseThreadLink", () => {
+  it("preserves environment and MCP thread ids on repeated parses", () => {
+    const href =
+      "t3-thread://v1/1d3b0db4-c92d-4f53-b04c-8d4d03f283c8/mcp:af3ed104-7f1f-4632-b11f-2f3b91543d29";
+    const target = {
+      environmentId: "1d3b0db4-c92d-4f53-b04c-8d4d03f283c8",
+      threadId: "mcp:af3ed104-7f1f-4632-b11f-2f3b91543d29",
+    };
+    expect(parseThreadLink(href)).toEqual(target);
+    expect(parseThreadLink(href)).toEqual(target);
+    expect(parseThreadLink("t3-thread://v1/remote/thread%201")).toEqual({
+      environmentId: "remote",
+      threadId: "thread 1",
+    });
+    expect(rewriteThreadLinks(`[Thread](${href})`, "https://t3.invalid")).toBe(
+      `[Thread](https://t3.invalid/${target.environmentId}/mcp%3Aaf3ed104-7f1f-4632-b11f-2f3b91543d29)`,
+    );
+  });
+
+  it.each([
+    "https://example.com/env/thread",
+    "t3-thread://v2/env/thread",
+    "t3-thread://v1/env",
+    "t3-thread://v1//thread",
+    "t3-thread://v1/env/thread/extra",
+    "t3-thread://v1/env/%ZZ",
+    "t3-thread://v1/env/thread#fragment",
+    "t3-thread://v1/env/thread?query",
+    "t3-thread://v1/env/%2F",
+  ])("rejects malformed href %s", (href) => {
+    expect(parseThreadLink(href)).toBeNull();
   });
 });

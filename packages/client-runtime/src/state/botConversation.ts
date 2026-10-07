@@ -1,4 +1,5 @@
 import {
+  EnvironmentId,
   ThreadId,
   type RunId,
   type BotDetail,
@@ -557,27 +558,41 @@ function tokenizeShell(input: string): ShellToken[] | null {
   return tokens;
 }
 
-const THREAD_LINK_PATTERN = /t3-thread:\/\/v1\/([^/\s)>\]]+)\/([^/\s)>\]]+)/g;
+const THREAD_LINK_PATTERN = /t3-thread:\/\/v1\/([^/\s)>\]?#]+)\/([^/\s)>\]?#]+)/g;
+const THREAD_LINK_HREF_PATTERN = new RegExp(`^${THREAD_LINK_PATTERN.source}$`);
 
-export function rewriteThreadLinks(text: string, origin: string): string {
-  return text.replace(THREAD_LINK_PATTERN, (_, environmentId: string, threadId: string) =>
-    [origin, environmentId, threadId].join("/"),
-  );
-}
-
-export function threadIdFromHref(
-  href: string,
-  origin: string,
-  environmentId: string,
-): ThreadId | null {
-  let url: URL;
+export function parseThreadLink(href: string, rewrittenOrigin?: string) {
+  if (rewrittenOrigin && !href.startsWith("t3-thread://")) {
+    try {
+      const url = new URL(href);
+      if (url.origin !== rewrittenOrigin || url.search || url.hash) return null;
+      href = `t3-thread://v1${url.pathname}`;
+    } catch {
+      return null;
+    }
+  }
+  const match = THREAD_LINK_HREF_PATTERN.exec(href);
+  if (!match) return null;
   try {
-    url = new URL(href);
+    const environmentId = decodeURIComponent(match[1]!);
+    const threadId = decodeURIComponent(match[2]!);
+    if (!environmentId || !threadId || /[/\s]/.test(environmentId)) return null;
+    if (threadId.includes("/")) return null;
+    return { environmentId: EnvironmentId.make(environmentId), threadId: ThreadId.make(threadId) };
   } catch {
     return null;
   }
-  if (url.origin !== origin) return null;
-  const segments = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  if (segments.length !== 2 || segments[0] !== environmentId) return null;
-  return ThreadId.make(segments[1]!);
+}
+
+export function rewriteThreadLinks(text: string, origin: string): string {
+  return text.replace(THREAD_LINK_PATTERN, (href) => {
+    const target = parseThreadLink(href);
+    return target
+      ? [
+          origin,
+          encodeURIComponent(target.environmentId),
+          encodeURIComponent(target.threadId),
+        ].join("/")
+      : href;
+  });
 }

@@ -245,6 +245,7 @@ interface ChatMarkdownProps {
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   /** Keep one list per configuration (a module constant): it keys the shared parse cache. */
   extraRemarkPlugins?: NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
+  renderThreadLink?: ((href: string, children: ReactNode) => ReactNode) | undefined;
   renderContextReference?: ((reference: ChatMarkdownContextReference) => ReactNode) | undefined;
   /** Loads media a source control host keeps behind a credential through the server, which holds
       `cwd`'s; without it a private repository's uploads load unauthenticated and 404. */
@@ -496,6 +497,7 @@ function useChatMarkdownState({
   workspaceMutationId,
   onImageExpand,
   renderContextReference,
+  renderThreadLink,
   headingLevelOffset = 0,
   sourceControlMedia = false,
   sourceControlMediaRepository,
@@ -898,6 +900,7 @@ function useChatMarkdownState({
     sourceControlMedia,
     sourceControlMediaRepository,
     renderContextReference,
+    renderThreadLink,
     headingLevelOffset,
     imageBaseDir,
     workspaceMutationId,
@@ -1079,8 +1082,12 @@ const CHAT_MARKDOWN_COMPONENTS = {
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
+      renderThreadLink,
     } = use(ChatMarkdownRendererContext);
     const text = use(ChatMarkdownTextContext);
+    if (href?.startsWith("t3-thread://") && renderThreadLink) {
+      return renderThreadLink(href, children);
+    }
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
     const threadLink = href ? parseThreadLinkHref(href) : null;

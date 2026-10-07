@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { parseThreadLink } from "@t3tools/client-runtime/state/bot-conversation";
 import { Atom } from "effect/reactivity";
 
 export function botStatusLabel(
@@ -86,15 +86,8 @@ export function botChatScrollReducer(
 }
 
 export function botThreadLinkTarget(href: string, knownEnvironmentIds: ReadonlyArray<string>) {
-  try {
-    const url = new URL(href);
-    if (url.origin !== "https://t3.invalid") return null;
-    const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-    if (parts.length !== 2 || !knownEnvironmentIds.includes(parts[0]!)) return null;
-    return { environmentId: EnvironmentId.make(parts[0]!), threadId: ThreadId.make(parts[1]!) };
-  } catch {
-    return null;
-  }
+  const target = parseThreadLink(href, "https://t3.invalid");
+  return target && knownEnvironmentIds.includes(target.environmentId) ? target : null;
 }
 
 export function botMarkdownThreadLinks(
@@ -102,7 +95,7 @@ export function botMarkdownThreadLinks(
   knownEnvironmentIds: ReadonlyArray<string>,
 ) {
   return markdown.replace(
-    /\[([^\]]+)\]\((https:\/\/t3\.invalid\/[^\s)]+)\)/g,
+    /\[([^\]]+)\]\(((?:t3-thread:\/\/|https:\/\/t3\.invalid\/)[^\s)]+)\)/g,
     (link, label: string, href: string) =>
       botThreadLinkTarget(href, knownEnvironmentIds) ? link : label,
   );

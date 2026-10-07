@@ -236,7 +236,7 @@ export const BotMarkdown = memo(function BotMarkdown(props: {
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const styles = useMarkdownPreviewStyles();
-  const knownEnvironmentIds = useWorkspaceEnvironmentIds();
+  const knownEnvironmentIds = [props.environmentId, ...useWorkspaceEnvironmentIds()];
   const markdown = botMarkdownThreadLinks(
     rewriteThreadLinks(props.text, "https://t3.invalid"),
     knownEnvironmentIds,
