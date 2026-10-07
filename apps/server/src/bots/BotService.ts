@@ -71,6 +71,22 @@ const replyPreview = (text: string) => {
 };
 
 const decodeOwnerNotification = Schema.decodeEffect(RelayOwnerNotification);
+const MAX_OWNER_NOTIFICATION_BODY_LENGTH = 300;
+
+const foldOwnerNotifications = (
+  notifications: ReadonlyArray<RelayOwnerNotification>,
+): RelayOwnerNotification | undefined => {
+  if (notifications.length <= 1) return notifications[0];
+  const body = notifications
+    .map(({ title, body }) => (title === undefined || title === body ? body : `${title}: ${body}`))
+    .join("\n");
+  return {
+    body:
+      body.length > MAX_OWNER_NOTIFICATION_BODY_LENGTH
+        ? `${body.slice(0, MAX_OWNER_NOTIFICATION_BODY_LENGTH - 1).trimEnd()}…`
+        : body,
+  };
+};
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
 const isBotError = Schema.is(BotError);
 const BotOrder = Schema.fromJsonString(Schema.Array(Schema.String));
@@ -117,7 +133,7 @@ export const layer = Layer.effect(
     const changes = yield* PubSub.sliding<{}>(1);
     const ownerNotifications = new Map<
       ThreadId,
-      { readonly runId: RunId; readonly notification: RelayOwnerNotification }
+      { readonly runId: RunId; readonly notifications: ReadonlyArray<RelayOwnerNotification> }
     >();
     const workerLookupLock = yield* Semaphore.make(1);
     const workerIds = new Map<ThreadId, ReadonlyArray<string>>();
@@ -516,14 +532,18 @@ export const layer = Layer.effect(
       if (runId == null || shell?.archivedAt !== null || shell.deletedAt !== null) {
         return yield* new BotError({ message: "notify_owner requires an active bot run." });
       }
-      ownerNotifications.set(threadId, { runId, notification });
+      const earlier = ownerNotifications.get(threadId);
+      ownerNotifications.set(threadId, {
+        runId,
+        notifications: [...(earlier?.runId === runId ? earlier.notifications : []), notification],
+      });
       return { runId };
     });
 
     const getOwnerNotification = (threadId: ThreadId, runId: RunId) =>
       Effect.sync(() => {
         const request = ownerNotifications.get(threadId);
-        return request?.runId === runId ? request.notification : undefined;
+        return request?.runId === runId ? foldOwnerNotifications(request.notifications) : undefined;
       });
 
     const setBotScheduleEnabled = (id: ScheduledTaskId, enabled: boolean) =>

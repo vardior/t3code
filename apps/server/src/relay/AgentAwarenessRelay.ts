@@ -609,10 +609,16 @@ export const make = Effect.gen(function* () {
     if (notificationsSuppressed && !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)) {
       return;
     }
+    const stoppedWithOwnerNotification =
+      ownerNotification !== undefined &&
+      threadShell?.activityRunStatus == null &&
+      (threadShell?.status === "interrupted" || threadShell?.status === "cancelled");
     const thread =
       threadShell === null || threadShell.archivedAt !== null || notificationsSuppressed
         ? Option.none<AgentAwarenessThread>()
-        : Option.some(threadShell);
+        : Option.some<AgentAwarenessThread>(
+            stoppedWithOwnerNotification ? { ...threadShell, status: "completed" } : threadShell,
+          );
     const project = Option.isSome(thread)
       ? yield* projects.getById(thread.value.projectId)
       : Option.none<Project>();
@@ -622,7 +628,10 @@ export const make = Effect.gen(function* () {
       project,
       pendingSubagentRequest: yield* currentSubagentRequestFor(threadId),
     });
-    if (snapshot.state?.phase === "completed" && ownerNotification !== undefined) {
+    if (
+      (snapshot.state?.phase === "completed" || snapshot.state?.phase === "failed") &&
+      ownerNotification !== undefined
+    ) {
       snapshot = { ...snapshot, state: { ...snapshot.state, ownerNotification } };
     }
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state, snapshot.subagentWait);

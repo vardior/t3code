@@ -546,6 +546,47 @@ describe("AgentAwarenessRelay", () => {
     }),
   );
 
+  it.effect.each([
+    { status: "failed", phase: "failed" },
+    { status: "interrupted", phase: "completed" },
+    { status: "cancelled", phase: "completed" },
+  ] as const)("pushes the requested notification when a run ends $status", ({ status, phase }) =>
+    Effect.gen(function* () {
+      const ownerNotification = { title: "Merge?", body: "CI is green." };
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        homeThread: true,
+        scheduledWake: true,
+        ownerNotification,
+      });
+      yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run"), status }));
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications[1]?.state?.phase, phase);
+      assert.deepStrictEqual(publications[1]?.state?.ownerNotification, ownerNotification);
+    }),
+  );
+
+  it.effect("clears a stopped run without a requested notification", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        homeThread: true,
+        scheduledWake: true,
+      });
+      yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({ latestRunId: RunId.make("latest-run"), status: "interrupted" }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.deepStrictEqual(
+        publications.map(({ state }) => state?.phase ?? null),
+        ["running"],
+      );
+    }),
+  );
+
   it.effect("automatic compaction overrides explicit notification and failure", () =>
     Effect.gen(function* () {
       const { relay, currentShell, publications } = yield* makeTestRelay({

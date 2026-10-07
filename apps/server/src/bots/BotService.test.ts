@@ -2286,112 +2286,118 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
-it.effect("notify_owner validates its caller and marks only the current bot run", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bot-notify-" });
-    yield* fs.makeDirectory(path.join(baseDir, "bots", "helper"), { recursive: true });
-    yield* fs.writeFileString(
-      path.join(baseDir, "bots", "helper", "bot.json"),
-      toJson({ name: "Helper", homeThreadId: "home" }),
-    );
-    let activeRunId: RunId | null = RunId.make("wake-run");
-    yield* withBots(
-      {
-        baseDir,
-        readShell: () =>
-          Effect.succeed({
-            activeRunId,
-            archivedAt: null,
-            deletedAt: null,
-          } as OrchestrationV2ThreadShell),
-      },
-      Effect.gen(function* () {
-        const bots = yield* BotService.BotService;
-        const server = yield* McpServer.McpServer;
-        const scope: McpInvocationContext.McpInvocationScope = {
-          environmentId: EnvironmentId.make("test-environment"),
-          issuedAt: 0,
-          requestNamespace: "test-session",
-          capabilities: new Set(["orchestration"]),
-          client: undefined,
-          thread: {
-            threadId: ThreadId.make("home"),
-            providerSessionId: "session",
-            providerInstanceId: ProviderInstanceId.make("codex"),
-          },
-        };
-        const client = McpSchema.McpServerClient.of({
-          clientId: 1,
-          protocolVersion: "2025-06-18",
-          clientCapabilities: {},
-          clientInfo: { name: "bot-notify-test", version: "1" },
-          initializePayload: {
+it.effect(
+  "notify_owner validates its caller and folds every notification of the current bot run",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bot-notify-" });
+      yield* fs.makeDirectory(path.join(baseDir, "bots", "helper"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(baseDir, "bots", "helper", "bot.json"),
+        toJson({ name: "Helper", homeThreadId: "home" }),
+      );
+      let activeRunId: RunId | null = RunId.make("wake-run");
+      yield* withBots(
+        {
+          baseDir,
+          readShell: () =>
+            Effect.succeed({
+              activeRunId,
+              archivedAt: null,
+              deletedAt: null,
+            } as OrchestrationV2ThreadShell),
+        },
+        Effect.gen(function* () {
+          const bots = yield* BotService.BotService;
+          const server = yield* McpServer.McpServer;
+          const scope: McpInvocationContext.McpInvocationScope = {
+            environmentId: EnvironmentId.make("test-environment"),
+            issuedAt: 0,
+            requestNamespace: "test-session",
+            capabilities: new Set(["orchestration"]),
+            client: undefined,
+            thread: {
+              threadId: ThreadId.make("home"),
+              providerSessionId: "session",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+            },
+          };
+          const client = McpSchema.McpServerClient.of({
+            clientId: 1,
             protocolVersion: "2025-06-18",
-            capabilities: {},
+            clientCapabilities: {},
             clientInfo: { name: "bot-notify-test", version: "1" },
-          },
-          getClient: Effect.die("unused"),
-        });
-        const call = (input: Record<string, unknown>, caller = scope) =>
-          server
-            .callTool({ name: "notify_owner", arguments: input })
-            .pipe(
-              Effect.provideService(McpInvocationContext.McpInvocationContext, caller),
-              Effect.provideService(McpSchema.McpServerClient, client),
-            );
-        const notification = { title: "Action needed", body: "Please review the deployment." };
-        expect((yield* call(notification)).isError).toBe(false);
-        expect(
-          yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("wake-run")),
-        ).toEqual(notification);
-        expect(
-          yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("next-run")),
-        ).toBeUndefined();
-        const outside = yield* call(
-          { body: "Notify" },
-          { ...scope, thread: { ...scope.thread!, threadId: ThreadId.make("worker") } },
-        );
-        expect(outside.isError).toBe(true);
-        expect(toJson(outside.content)).toContain("requires a bot home thread");
-        expect((yield* call({ body: "Notify" }, { ...scope, thread: undefined })).isError).toBe(
-          true,
-        );
-        expect(
-          (yield* call({ body: "Notify" }, { ...scope, capabilities: new Set() })).isError,
-        ).toBe(true);
-        expect(Exit.isFailure(yield* Effect.exit(call({ body: "x".repeat(301) })))).toBe(true);
-        expect(
-          Exit.isFailure(yield* Effect.exit(call({ title: "x".repeat(81), body: "Notify" }))),
-        ).toBe(true);
-        activeRunId = RunId.make("next-run");
-        expect((yield* call({ body: "Second notification" })).isError).toBe(false);
-        expect(
-          yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("wake-run")),
-        ).toBeUndefined();
-        expect(
-          yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("next-run")),
-        ).toEqual({ body: "Second notification" });
-        activeRunId = null;
-        expect((yield* call({ body: "Notify" })).isError).toBe(true);
-      }).pipe(
-        Effect.provide(
-          McpHttpServer.toolkitRegistration(OrchestratorToolkit, OrchestratorHandlers.layer).pipe(
-            Layer.provide(
-              Layer.mock(ThreadManagementService.ThreadManagementService)({
-                getThreadShell: (threadId) =>
-                  Effect.succeed(liveThreadShell(threadId, { activeRunId })),
-              }),
+            initializePayload: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "bot-notify-test", version: "1" },
+            },
+            getClient: Effect.die("unused"),
+          });
+          const call = (input: Record<string, unknown>, caller = scope) =>
+            server
+              .callTool({ name: "notify_owner", arguments: input })
+              .pipe(
+                Effect.provideService(McpInvocationContext.McpInvocationContext, caller),
+                Effect.provideService(McpSchema.McpServerClient, client),
+              );
+          const notification = { title: "Action needed", body: "Please review the deployment." };
+          expect((yield* call(notification)).isError).toBe(false);
+          expect(
+            yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("wake-run")),
+          ).toEqual(notification);
+          expect((yield* call({ title: "Merge?", body: "CI is green." })).isError).toBe(false);
+          expect(
+            yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("wake-run")),
+          ).toEqual({ body: "Action needed: Please review the deployment.\nMerge?: CI is green." });
+          expect(
+            yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("next-run")),
+          ).toBeUndefined();
+          const outside = yield* call(
+            { body: "Notify" },
+            { ...scope, thread: { ...scope.thread!, threadId: ThreadId.make("worker") } },
+          );
+          expect(outside.isError).toBe(true);
+          expect(toJson(outside.content)).toContain("requires a bot home thread");
+          expect((yield* call({ body: "Notify" }, { ...scope, thread: undefined })).isError).toBe(
+            true,
+          );
+          expect(
+            (yield* call({ body: "Notify" }, { ...scope, capabilities: new Set() })).isError,
+          ).toBe(true);
+          expect(Exit.isFailure(yield* Effect.exit(call({ body: "x".repeat(301) })))).toBe(true);
+          expect(
+            Exit.isFailure(yield* Effect.exit(call({ title: "x".repeat(81), body: "Notify" }))),
+          ).toBe(true);
+          activeRunId = RunId.make("next-run");
+          expect((yield* call({ body: "Second notification" })).isError).toBe(false);
+          expect(
+            yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("wake-run")),
+          ).toBeUndefined();
+          expect(
+            yield* bots.getOwnerNotification(ThreadId.make("home"), RunId.make("next-run")),
+          ).toEqual({ body: "Second notification" });
+          activeRunId = null;
+          expect((yield* call({ body: "Notify" })).isError).toBe(true);
+        }).pipe(
+          Effect.provide(
+            McpHttpServer.toolkitRegistration(OrchestratorToolkit, OrchestratorHandlers.layer).pipe(
+              Layer.provide(
+                Layer.mock(ThreadManagementService.ThreadManagementService)({
+                  getThreadShell: (threadId) =>
+                    Effect.succeed(liveThreadShell(threadId, { activeRunId })),
+                }),
+              ),
+              Layer.provideMerge(McpServer.McpServer.layer),
+              Layer.provide(Layer.mock(OrchestratorMcpService.OrchestratorMcpService)({})),
+              Layer.provide(Layer.mock(ThreadMetadataMcpService.ThreadMetadataMcpService)({})),
             ),
-            Layer.provideMerge(McpServer.McpServer.layer),
-            Layer.provide(Layer.mock(OrchestratorMcpService.OrchestratorMcpService)({})),
-            Layer.provide(Layer.mock(ThreadMetadataMcpService.ThreadMetadataMcpService)({})),
           ),
         ),
-      ),
-    );
-  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect("persists bot order across service restarts and appends new bots alphabetically", () =>
