@@ -3,6 +3,7 @@ import {
   botThreadShellStatusLabel,
   botNeedsYou,
 } from "@t3tools/client-runtime/state/bot-conversation";
+import { countOpenItems } from "@t3tools/client-runtime/state/open-items";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
@@ -103,11 +104,16 @@ function HomeBotRow(props: {
   const needsYou = botNeedsYou(bot, props.shell);
   const status = botThreadShellStatus(props.shell, bot);
   const working = status === "working";
+  const openItemCount = countOpenItems(props.shell?.openItems);
   const statusText = props.shell?.hasPendingApprovals
     ? "Needs approval"
     : props.shell?.hasPendingUserInput
       ? "Needs input"
-      : botThreadShellStatusLabel(status);
+      : openItemCount > 0
+        ? openItemCount === 1
+          ? "1 open item"
+          : `${openItemCount} open items`
+        : botThreadShellStatusLabel(status);
   useBotRunSettlement(working, refresh);
   const lastActivity = props.shell?.latestRun?.completedAt ?? props.shell?.updatedAt ?? null;
   const time = botStatusLabel({ working: false, paused: false, lastActivity }, props.now);
@@ -136,6 +142,13 @@ function HomeBotRow(props: {
             {bot.name}
           </Text>
           {needsYou ? <View className="size-2 rounded-full bg-primary" /> : null}
+          {openItemCount > 0 ? (
+            <View className="min-w-5 items-center rounded-full bg-primary px-1.5">
+              <Text className="text-xs font-t3-medium tabular-nums text-primary-foreground">
+                {openItemCount}
+              </Text>
+            </View>
+          ) : null}
           {bot.paused ? <Text className="text-xs text-foreground-muted">Paused</Text> : null}
           {lastActivity ? <Text className="text-xs text-foreground-muted">{time}</Text> : null}
         </View>

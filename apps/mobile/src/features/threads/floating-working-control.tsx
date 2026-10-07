@@ -26,6 +26,7 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { ControlPill } from "../../components/ui/ControlPill";
+import { cn } from "../../lib/cn";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { BrowserPreviewButton } from "../browser/browser-preview-button";
 import { DevicePreviewButton } from "../devices/device-preview-button";
@@ -78,6 +79,9 @@ export function FloatingWorkingControl(props: {
   readonly onOpenAgents: () => void;
   readonly queuedCount: number;
   readonly onOpenQueue: () => void;
+  readonly openItemCount: number;
+  readonly hasResolvedItems: boolean;
+  readonly onOpenItems: () => void;
   readonly lift?: SharedValue<number>;
 }) {
   const { width: windowWidth } = useWindowDimensions();
@@ -96,7 +100,10 @@ export function FloatingWorkingControl(props: {
       ? props.status.action
       : null;
   const [agentsWidth, setAgentsWidth] = useState(0);
+  const [openItemsWidth, setOpenItemsWidth] = useState(0);
   const hasQueue = props.queuedCount > 0;
+  const hasWaitingItems = props.openItemCount > 0;
+  const hasOpenItems = hasWaitingItems || props.hasResolvedItems;
   const hasPreview = props.devicePreview !== null || props.browserPreview !== null;
   const [previewWidth, setPreviewWidth] = useState(0);
   const agents = props.agents;
@@ -109,6 +116,7 @@ export function FloatingWorkingControl(props: {
       reservedWidth -
       (action !== null ? actionWidth : 0) -
       (hasQueue ? queueWidth : 0) -
+      (hasOpenItems ? openItemsWidth : 0) -
       (hasAgents ? agentsWidth : 0) -
       (hasPreview ? previewWidth : 0),
   );
@@ -147,7 +155,7 @@ export function FloatingWorkingControl(props: {
     capsuleWidth.set(first ? width : withTiming(width, CONTROL_TIMING));
   };
   const hasStatus = props.status !== null;
-  const hasCapsule = hasStatus || hasQueue || hasAgents || hasPreview;
+  const hasCapsule = hasStatus || hasQueue || hasAgents || hasPreview || hasOpenItems;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the Reanimated capsule width value and measured width when the status goes away
   useEffect(() => {
     if (!hasStatus) {
@@ -170,6 +178,7 @@ export function FloatingWorkingControl(props: {
     hasStatus ||
     hasAgents ||
     hasQueue ||
+    hasOpenItems ||
     (props.devicePreview !== null && props.browserPreview !== null);
   const statusInteractive =
     props.status?.kind === "connection" ||
@@ -182,7 +191,8 @@ export function FloatingWorkingControl(props: {
     action !== null ||
     hasQueue ||
     hasAgents ||
-    hasPreview;
+    hasPreview ||
+    hasOpenItems;
   const statusContent =
     props.status !== null ? (
       <View
@@ -295,6 +305,38 @@ export function FloatingWorkingControl(props: {
           <SymbolView name="list.number" size={13} tintColorClassName="accent-foreground" />
           <Text className="shrink font-t3-medium text-xs tabular-nums" numberOfLines={1}>
             {props.queuedCount} queued
+          </Text>
+        </Pressable>
+      ) : null}
+      {hasOpenItems ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            hasWaitingItems
+              ? `Open items, ${props.openItemCount} waiting on you`
+              : "Open items, all resolved"
+          }
+          accessibilityHint="Opens what the agent is waiting on you for"
+          onPress={props.onOpenItems}
+          onLayout={(event) => setOpenItemsWidth(event.nativeEvent.layout.width)}
+          className="h-11 flex-row items-center gap-2 px-3 active:opacity-70"
+        >
+          {hasStatus || hasPreview || hasAgents || hasQueue ? (
+            <View className="mr-1 h-4 w-px bg-border" />
+          ) : null}
+          <SymbolView
+            name="checkmark.circle"
+            size={13}
+            tintColorClassName={hasWaitingItems ? "accent-primary-text" : "accent-foreground-muted"}
+          />
+          <Text
+            className={cn(
+              "font-t3-medium text-xs tabular-nums",
+              !hasWaitingItems && "text-foreground-muted",
+            )}
+            numberOfLines={1}
+          >
+            {hasWaitingItems ? `${props.openItemCount} open` : "Resolved"}
           </Text>
         </Pressable>
       ) : null}

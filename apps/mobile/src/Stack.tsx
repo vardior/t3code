@@ -3,6 +3,7 @@ import { ComponentCatalogScreen } from "./features/development/ComponentCatalogS
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
 import { PullRequestDiscussionScreen } from "./features/pull-requests/PullRequestDiscussionScreen";
+import { BotInfoSheet } from "./features/bots/BotInfoSheet";
 import { BotChatRouteScreen } from "./features/bots/BotChatRouteScreen";
 import { createWorkspaceStackNavigator } from "./features/layout/createWorkspaceStackNavigator";
 import {
@@ -65,6 +66,7 @@ import { ThreadPullRequestsSheet } from "./features/threads/ThreadPullRequestsSh
 import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { ThreadBackgroundWorkSheet } from "./features/threads/ThreadBackgroundWorkSheet";
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
+import { ThreadOpenItemsSheet } from "./features/threads/ThreadOpenItemsSheet";
 import {
   FullscreenThreadRouteScreen,
   ThreadRouteScreen,
@@ -678,6 +680,24 @@ const RootStackConfig = createWorkspaceStackNavigator({
     ThreadBackgroundWork: createNativeStackScreen({
       screen: ThreadBackgroundWorkSheet,
       options: sheetRoute({ detent: 0.5, androidMaxDetent: 0.9 }),
+    }),
+    ThreadOpenItems: createNativeStackScreen({
+      screen: ThreadOpenItemsSheet,
+      options: {
+        ...HORIZONTAL_FORM_SHEET_OPTIONS,
+        headerShown: false,
+        sheetAllowedDetents: formSheetDetents(0.65, 0.95),
+        sheetGrabberVisible: true,
+      },
+    }),
+    BotInfo: createNativeStackScreen({
+      screen: BotInfoSheet,
+      options: {
+        ...HORIZONTAL_FORM_SHEET_OPTIONS,
+        headerShown: false,
+        sheetAllowedDetents: formSheetDetents(0.5, 0.9),
+        sheetGrabberVisible: true,
+      },
     }),
     ThreadAgents: createNativeStackScreen({
       screen: ThreadAgentsSheet,

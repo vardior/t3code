@@ -9,11 +9,19 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Dialog from "../../components/ui/Dialog";
+import {
+  countOpenItems,
+  hasRecentlyResolvedOpenItem,
+} from "@t3tools/client-runtime/state/open-items";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
-import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
+import {
+  useChildThreadInputs,
+  useThreadReportedModelSelection,
+  useThreadShell,
+} from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
@@ -1630,6 +1638,18 @@ function ThreadDetailBody(
                     onOpenQueue={() => {
                       Keyboard.dismiss();
                       navigation.navigate("ThreadQueue", {
+                        environmentId: props.environmentId,
+                        threadId: props.selectedThread.id,
+                      });
+                    }}
+                    openItemCount={countOpenItems(props.selectedThread.openItems)}
+                    hasResolvedItems={hasRecentlyResolvedOpenItem(
+                      props.selectedThread.openItems,
+                      Date.now(),
+                    )}
+                    onOpenItems={() => {
+                      Keyboard.dismiss();
+                      navigation.navigate("ThreadOpenItems", {
                         environmentId: props.environmentId,
                         threadId: props.selectedThread.id,
                       });
