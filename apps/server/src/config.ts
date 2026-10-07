@@ -268,9 +268,21 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
 export const layerTest = (cwd: string, baseDirOrPrefix: string | { readonly prefix: string }) =>
   Layer.effect(ServerConfig, makeTest(cwd, baseDirOrPrefix));
 
-export const resolveStaticDir = Effect.fn(function* () {
+export const resolveStaticDir = Effect.fn(function* (externalDir?: string) {
   const { join, resolve } = yield* Path.Path;
   const { exists } = yield* FileSystem.FileSystem;
+  if (externalDir) {
+    const externalClient = resolve(externalDir);
+    const externalIndexExists = yield* exists(join(externalClient, "index.html")).pipe(
+      Effect.orElseSucceed(() => false),
+    );
+    if (externalIndexExists) {
+      return externalClient;
+    }
+    yield* Effect.logWarning(
+      "T3CODE_STATIC_DIR has no index.html; falling back to the bundled web client.",
+    );
+  }
   const bundledClient = resolve(join(import.meta.dirname, "client"));
   const bundledStat = yield* exists(join(bundledClient, "index.html")).pipe(
     Effect.orElseSucceed(() => false),

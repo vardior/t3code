@@ -30,7 +30,7 @@ import {
   SERVICE_LAUNCHER_CONTEXT_ENV,
   SERVICE_LAUNCHER_PROTOCOL,
 } from "../cloud/serviceProtocol.ts";
-import { deriveServerPaths } from "../config.ts";
+import { deriveServerPaths, resolveStaticDir } from "../config.ts";
 import { resolveServerConfig } from "./config.ts";
 
 const deriveExplicitServerPaths = (baseDir: string, devUrl: URL | undefined) =>
@@ -212,6 +212,45 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         expect(String(error)).toContain(`pid ${child.pid}`);
         expect(yield* fs.exists(cwd)).toBe(false);
       }),
+  );
+
+  it.effect("resolves external static clients with fallback and ignores them in dev mode", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-static-dir-" });
+      const validDir = path.join(root, "client");
+      const invalidDir = path.join(root, "invalid-client");
+      yield* fs.makeDirectory(validDir);
+      yield* fs.makeDirectory(invalidDir);
+      yield* fs.writeFileString(path.join(validDir, "index.html"), "<html>external client</html>");
+      const fallback = yield* resolveStaticDir();
+
+      for (const [externalDir, devUrl, expected] of [
+        [validDir, undefined, validDir],
+        [invalidDir, undefined, fallback],
+        [undefined, undefined, fallback],
+        ["", undefined, fallback],
+        [validDir, new URL("http://127.0.0.1:5173"), undefined],
+      ] as const) {
+        const config = yield* resolveServerConfig(
+          { ...minimalWebFlags(root), devUrl: Option.fromUndefinedOr(devUrl) },
+          Option.none(),
+        ).pipe(
+          Effect.provide(
+            Layer.merge(
+              NetService.layer,
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({
+                  env: externalDir === undefined ? {} : { T3CODE_STATIC_DIR: externalDir },
+                }),
+              ),
+            ),
+          ),
+        );
+        expect(config.staticDir).toBe(expected);
+      }
+    }),
   );
 
   it.effect("enables a trimmed reusable auth token only for web dev mode", () =>
