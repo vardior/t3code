@@ -278,6 +278,8 @@ import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
 import { useSideChat } from "./chat/useSideChat";
+import type { ChatViewPresentation } from "./chatViewPresentation";
+import { hasUnseenOpenItem, openItemIds } from "@t3tools/client-runtime/state/open-items";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -382,8 +384,10 @@ const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_TURN_ITEMS: ThreadStructure["turnItems"] = [];
 const EMPTY_AUTO_UPDATE_ENVIRONMENTS: ReadonlyArray<EnvironmentPresentation> = [];
 const EMPTY_COMPOSER_BANNER_ITEMS: ReadonlyArray<ComposerBannerStackItem> = [];
+const seenOpenItemIdsByThreadKey = new Map<string, ReadonlySet<string>>();
 
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
+const EMPTY_BOT_TURN_DIFF_SUMMARIES: readonly never[] = [];
 
 type ChatViewProps =
   | {
@@ -394,6 +398,7 @@ type ChatViewProps =
       forceExpandedMobileComposer?: boolean;
       /** A side chat in its parent's right panel; the parent keeps the keyboard and workspace UI. */
       embedded?: SideChatParentPanel;
+      presentation?: ChatViewPresentation;
       routeKind: "server";
       draftId?: never;
     }
@@ -404,6 +409,7 @@ type ChatViewProps =
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
       embedded?: never;
+      presentation?: ChatViewPresentation;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -419,6 +425,7 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
     embedded: parentPanel,
+    presentation,
   } = props;
   const embedded = parentPanel !== undefined;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
@@ -2370,6 +2377,26 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     closeRightPanelSurface,
   });
+  const addOpenItemsSurface = () => {
+    if (!activeThreadRef || !isServerThread) return;
+    useRightPanelStore.getState().open(activeThreadRef, "open-items");
+  };
+  const addOpenItemsSurfaceStable = useStableCallback(addOpenItemsSurface);
+  const activeOpenItems = activeThreadShell?.openItems;
+  useEffect(() => {
+    if (activeThreadKey === null || activeThreadRef === null || activeOpenItems === undefined) {
+      return;
+    }
+    const seenIds = seenOpenItemIdsByThreadKey.get(activeThreadKey) ?? new Set<string>();
+    seenOpenItemIdsByThreadKey.set(activeThreadKey, openItemIds(activeOpenItems));
+    if (shouldUsePlanSidebarSheet || !hasUnseenOpenItem(seenIds, activeOpenItems)) return;
+    const panels = useRightPanelStore.getState();
+    panels.openProactive(
+      activeThreadRef,
+      { id: "open-items", kind: "open-items" },
+      panels.getUserActionRevision(activeThreadRef),
+    );
+  }, [activeOpenItems, activeThreadKey, activeThreadRef, shouldUsePlanSidebarSheet]);
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
   const {
     acknowledgeActiveThreadWoke,
@@ -3303,6 +3330,7 @@ export default function ChatView(props: ChatViewProps) {
             ) : null}
             {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
             {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
+            {presentation?.header ?? (
             <ChatHeader
               activeThreadEnvironmentId={activeThread.environmentId}
               activeThreadId={activeThread.id}
@@ -3319,6 +3347,7 @@ export default function ChatView(props: ChatViewProps) {
                 : {})}
               {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
             />
+            )}
           </header>
         )}
 
@@ -3411,6 +3440,8 @@ export default function ChatView(props: ChatViewProps) {
                   isPreparingWorktree={isPreparingWorktree}
                   footer={timelineFooter}
                   listRef={legendListRef}
+                  {...(presentation ? { mapEntries: presentation.timelineEntries } : {})}
+                  workingLabel={presentation?.workingLabel ?? null}
                   runs={serverProjection?.runs ?? []}
                   latestRun={activeActivityRun}
                   announcedRun={announcedRun(activeActivityRun, serverProjection?.runs ?? [])}
@@ -3419,7 +3450,7 @@ export default function ChatView(props: ChatViewProps) {
                     activeThreadShell?.latestRun ?? null,
                   )}
                   runningRunId={activeRunningTurnId}
-                  turnDiffSummaries={turnDiffSummaries}
+                  turnDiffSummaries={presentation ? EMPTY_BOT_TURN_DIFF_SUMMARIES : turnDiffSummaries}
                   activeThreadEnvironmentId={
                     displayedThreadRef?.environmentId ?? activeThread.environmentId
                   }
@@ -3963,6 +3994,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurfaceStable}
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
+          onAddOpenItems={addOpenItemsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
@@ -3971,6 +4003,7 @@ export default function ChatView(props: ChatViewProps) {
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
+          openItemsAvailable={isServerThread}
           deviceAvailable={activeThreadRef !== null}
           sideChatAvailable={sideChat.available}
           sideChatDisabledReason={sideChatDisabledReason}
