@@ -11,6 +11,7 @@ import {
 import {
   botChatHistoryStart,
   botConversationStatus,
+  botWorkingLabel,
   botVisitWatermark,
   isBotQueueHeld,
   shouldLoadEarlierBotChatHistory,
@@ -243,6 +244,7 @@ function BotConversation(props: {
     [projection],
   );
   const working = status.kind === "working";
+  const workingLabel = useMemo(() => botWorkingLabel(projection), [projection]);
   const canInterrupt = useMemo(
     () => projection !== null && threadRuntimeHasInterruptibleRun(deriveThreadRuntime(projection)),
     [projection],
@@ -531,6 +533,15 @@ function BotConversation(props: {
                 {historyError ? (
                   <Text className="text-sm text-danger-foreground">{historyError}</Text>
                 ) : null}
+              </View>
+            ) : undefined
+          }
+          ListFooterComponent={
+            conversationShown && workingLabel !== null ? (
+              <View className="max-w-[85%] self-start px-3.5 py-2">
+                <Text numberOfLines={1} className="text-sm text-foreground-muted">
+                  {workingLabel}
+                </Text>
               </View>
             ) : undefined
           }

@@ -74,6 +74,8 @@ export function createBotChatProjector() {
       const existing = previous.get(item.id);
       return [existing && botChatItemsEqual(existing, visible) ? existing : visible];
     });
+    if (items.length === result.length && items.every((item, index) => item === result[index]))
+      return result;
     previous = new Map(items.map((item) => [item.id, item]));
     result = items;
     return result;

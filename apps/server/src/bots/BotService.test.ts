@@ -157,6 +157,9 @@ const insertMessage = (
     threadId: string;
     createdAt: string;
     senderThreadId?: string;
+    scheduledTaskId?: string;
+    createdBy?: "user" | "agent";
+    creationSource?: string;
     runId?: string;
     role?: string;
     streaming?: boolean;
@@ -169,7 +172,13 @@ const insertMessage = (
     ${message.id}, ${message.threadId}, ${message.runId ?? null}, NULL,
     ${message.role ?? "user"}, ${message.streaming ? 1 : 0},
     ${message.createdAt}, ${message.createdAt},
-    ${toJson({ text: message.text ?? "", createdBy: "user", senderThreadId: message.senderThreadId })}
+    ${toJson({
+      text: message.text ?? "",
+      createdBy: message.createdBy ?? "user",
+      creationSource: message.creationSource,
+      senderThreadId: message.senderThreadId,
+      scheduledTaskId: message.scheduledTaskId,
+    })}
   )
 `;
 
@@ -961,9 +970,99 @@ it.effect("previews only the latest settled final assistant reply, as bounded pl
     const preview = yield* readReply;
     expect(preview).toEqual({ text: `${"word ".repeat(39)}word…`, at: "2026-10-01T00:07:00.000Z" });
     expect(preview!.text).toHaveLength(200);
+    for (const [ordinal, command] of [
+      { status: "completed", input: "printf '%s' 'Sent reply' | bin/dm-send", exitCode: 0 },
+      { status: "completed", input: "grep dm-send log.md", exitCode: 0 },
+      { status: "completed", input: "printf '%s' 'Failed send' | bin/dm-send", exitCode: 1 },
+      { status: "running", input: "printf '%s' 'Pending send' | bin/dm-send", exitCode: 0 },
+    ].entries()) {
+      const at = `2026-10-01T00:${String(8 + ordinal).padStart(2, "0")}:00.000Z`;
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_turn_items (
+          turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json
+        ) VALUES (
+          ${`send-${ordinal}`}, 'home', 'active', ${ordinal + 1}, 'command_execution',
+          ${command.status}, ${at}, ${toJson({ input: command.input, exitCode: command.exitCode, completedAt: at })}
+        )
+      `;
+      expect(yield* readReply).toEqual({ text: "Sent reply", at: "2026-10-01T00:08:00.000Z" });
+    }
     const { lastReply: _, ...oldBot } = (yield* listBots({ baseDir })).bots[0]!;
     expect((yield* decodeBot(oldBot)).lastReply).toBeUndefined();
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect.each(["cancelled", "interrupted", "completed"] as const)(
+  "keeps the visible owner reply when a hidden wake is %s, including restart continuation",
+  (status) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-visible-reply-" });
+      const botDir = path.join(baseDir, "bots", "helper");
+      yield* fs.makeDirectory(botDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(botDir, "bot.json"),
+        toJson({ name: "Helper", homeThreadId: "home" }),
+      );
+      yield* insertThread(sql, { id: "home", createdAt: "2026-10-01T00:00:00.000Z" });
+      yield* insertRun(sql, { id: "owner", threadId: "home", ordinal: 1, status });
+      yield* insertMessage(sql, {
+        id: "owner-question",
+        threadId: "home",
+        runId: "owner",
+        createdAt: "2026-10-01T00:01:00.000Z",
+      });
+      yield* insertMessage(sql, {
+        id: "owner-progress",
+        threadId: "home",
+        runId: "owner",
+        role: "assistant",
+        text: "Checking",
+        createdAt: "2026-10-01T00:02:00.000Z",
+      });
+      yield* insertMessage(sql, {
+        id: "owner-reply",
+        threadId: "home",
+        runId: "owner",
+        role: "assistant",
+        text: "Visible owner reply",
+        createdAt: "2026-10-01T00:03:00.000Z",
+      });
+      const readReply = listBots({ baseDir }).pipe(
+        Effect.map((result) => result.bots[0]!.lastReply),
+      );
+      const visible = { text: "Visible owner reply", at: "2026-10-01T00:03:00.000Z" };
+      expect(yield* readReply).toEqual(visible);
+      for (const [ordinal, incoming] of [
+        { createdBy: "agent" as const, senderThreadId: "worker" },
+        { createdBy: "agent" as const, scheduledTaskId: "schedule" },
+        { createdBy: "agent" as const, creationSource: "server" },
+      ].entries()) {
+        const runId = `hidden-${ordinal}`;
+        yield* insertRun(sql, { id: runId, threadId: "home", ordinal: ordinal + 2, status });
+        if (incoming.creationSource === "server") {
+          yield* sql`UPDATE orchestration_v2_projection_runs SET payload_json = ${toJson({ restartContinuationOfRunId: "owner" })} WHERE run_id = ${runId}`;
+        }
+        yield* insertMessage(sql, {
+          id: `${runId}-incoming`,
+          threadId: "home",
+          runId,
+          createdAt: "2026-10-01T00:04:00.000Z",
+          ...incoming,
+        });
+        yield* insertMessage(sql, {
+          id: `${runId}-progress`,
+          threadId: "home",
+          runId,
+          role: "assistant",
+          text: "Hidden intermediate progress",
+          createdAt: "2026-10-01T00:05:00.000Z",
+        });
+        expect(yield* readReply).toEqual(visible);
+      }
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect("reports a held queue only while held runs remain queued", () =>

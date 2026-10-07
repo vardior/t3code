@@ -26,51 +26,15 @@ import {
   botChatHistoryStart,
   botChatRunStatusLabel,
   botConversationStatus,
+  botWorkingLabel,
   botThreadShellStatus,
   botThreadShellStatusLabel,
   isBotQueueHeld,
   isBotWorking,
   buildBotChat,
   slackMarkupToMarkdown,
-  slackTextFromCommand,
   shouldLoadEarlierBotChatHistory,
 } from "./botConversation.ts";
-
-describe("slackTextFromCommand", () => {
-  it("reads the text piped from printf into dm-send", () => {
-    expect(
-      slackTextFromCommand(
-        `cd ~/bots && printf '%s' 'Deploy is live. It'"'"'s green.' | bin/dm-send --thread 1.2 >/dev/null && echo sent`,
-      ),
-    ).toBe("Deploy is live. It's green.");
-  });
-
-  it("reads double-quoted escapes and single-quoted text", () => {
-    expect(slackTextFromCommand(`printf '%s' "Say \\"hi\\"" | dm-send`)).toBe('Say "hi"');
-    expect(slackTextFromCommand(`printf '%s' 'Line one\nLine two' | /x/bin/dm-send 2>&1`)).toBe(
-      "Line one\nLine two",
-    );
-  });
-
-  it("unwraps the shell -c wrapper some providers add", () => {
-    expect(
-      slackTextFromCommand(`/bin/zsh -lc "printf '%s' 'Wrapped hello' | /x/bin/dm-send"`),
-    ).toBe("Wrapped hello");
-  });
-
-  it("reads heredoc bodies fed to dm-send or piped from cat", () => {
-    expect(slackTextFromCommand("bin/dm-send --long <<'EOF'\nFirst\nSecond\nEOF\necho done")).toBe(
-      "First\nSecond",
-    );
-    expect(slackTextFromCommand("cat <<EOF | dm-send\nHello\nEOF")).toBe("Hello");
-  });
-
-  it("ignores commands that only mention dm-send", () => {
-    expect(slackTextFromCommand("bin/dm-send --help 2>&1 | head -5")).toBeNull();
-    expect(slackTextFromCommand(`grep -n "dm-send" log.md; bin/dm-send --check`)).toBeNull();
-    expect(slackTextFromCommand(`printf '%s' "unterminated | dm-send`)).toBeNull();
-  });
-});
 
 describe("slackMarkupToMarkdown", () => {
   it("turns Slack links into Markdown links", () => {
@@ -718,6 +682,58 @@ describe("botConversationStatus", () => {
     createdAt: at("2026-10-01T00:01:00Z"),
     resolvedAt: null,
   };
+
+  it("shows one working line from the latest active assistant message, including streaming updates", () => {
+    const progress = {
+      ...message({
+        id: "progress",
+        role: "assistant",
+        runId: "run",
+        createdAt: "2026-10-01T00:01:00Z",
+        text: "  Fixing the\n sidebar crash  ",
+      }),
+      threadId: v2ThreadShell.id,
+      nodeId: null,
+      updatedAt: at("2026-10-01T00:01:00Z"),
+    };
+    const projection = { ...v2Projection, runs: [run], messages: [progress] };
+    expect(botWorkingLabel(projection)).toBe("Working… · Fixing the sidebar crash");
+    expect(
+      botWorkingLabel({
+        ...projection,
+        messages: [
+          progress,
+          { ...progress, id: MessageId.make("new"), streaming: true, text: "Testing" },
+        ],
+      }),
+    ).toBe("Working… · Testing");
+    expect(
+      botWorkingLabel({
+        ...projection,
+        messages: [progress, { ...progress, id: MessageId.make("empty"), text: " \n " }],
+      }),
+    ).toBe("Working… · Fixing the sidebar crash");
+    expect(
+      botWorkingLabel({
+        ...projection,
+        messages: [progress, { ...progress, runId: RunId.make("old"), text: "Old reply" }],
+      }),
+    ).toBe("Working… · Fixing the sidebar crash");
+    expect(botWorkingLabel({ ...projection, messages: [] })).toBe("Working…");
+    expect(botWorkingLabel({ ...projection, runs: [{ ...run, status: "queued" }] })).toBe(
+      "Working…",
+    );
+    expect(botWorkingLabel({ ...projection, runs: [{ ...run, status: "completed" }] })).toBeNull();
+    expect(botWorkingLabel({ ...projection, runs: [{ ...run, status: "cancelled" }] })).toBeNull();
+    expect(
+      botWorkingLabel({ ...projection, runs: [{ ...run, status: "interrupted" }] }),
+    ).toBeNull();
+    expect(
+      botWorkingLabel({ ...projection, runs: [{ ...run, status: "queued", queueHeld: true }] }),
+    ).toBeNull();
+    expect(botWorkingLabel({ ...projection, runtimeRequests: [request] })).toBeNull();
+    expect(botWorkingLabel(null)).toBeNull();
+  });
 
   it("keeps held messages idle and exposes failures before newer held wakes", () => {
     const queued = {

@@ -73,6 +73,7 @@ import {
   botChatHistoryStart,
   botChatRunStatusLabel,
   botConversationStatus,
+  botWorkingLabel,
   botVisitWatermark,
   isBotQueueHeld,
   parseThreadLink,
@@ -235,6 +236,7 @@ export function BotChat(props: {
     [projection],
   );
   const working = status.kind === "working";
+  const workingLabel = useMemo(() => botWorkingLabel(projection), [projection]);
   const canInterrupt = useMemo(
     () => projection !== null && threadRuntimeHasInterruptibleRun(deriveThreadRuntime(projection)),
     [projection],
@@ -408,6 +410,14 @@ export function BotChat(props: {
               threadId={props.bot.homeThreadId}
             />
           ))}
+          {workingLabel !== null ? (
+            <div
+              role="status"
+              className="max-w-[85%] self-start truncate px-3.5 py-2 text-sm text-muted-foreground"
+            >
+              {workingLabel}
+            </div>
+          ) : null}
           {status.kind === "needs-attention" ? (
             <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
               <p>{status.request === "approval" ? "Needs your approval" : "Needs your input"}</p>

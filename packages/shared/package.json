@@ -11,6 +11,10 @@
       "types": "./src/authScopeOptions.ts",
       "import": "./src/authScopeOptions.ts"
     },
+    "./slackTextFromCommand": {
+      "types": "./src/slackTextFromCommand.ts",
+      "import": "./src/slackTextFromCommand.ts"
+    },
     "./orchestrationV2ThreadError": {
       "types": "./src/orchestrationV2ThreadError.ts",
       "import": "./src/orchestrationV2ThreadError.ts"

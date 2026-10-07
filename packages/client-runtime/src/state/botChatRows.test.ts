@@ -251,6 +251,71 @@ describe("bot chat row projection", () => {
     expect(settled[1]).toMatchObject({ kind: "bot", text: "Done" });
   });
 
+  it("keeps the visible list stable while settled intermediate progress updates", () => {
+    const project = createBotChatProjector();
+    const input = {
+      bot,
+      bots: [bot],
+      runs: [{ id: message.runId, status: "running" as const }],
+      messages: [message],
+      turnItems: [],
+    };
+    const initial = project(input);
+    const progress = {
+      ...message,
+      id: MessageId.make("progress"),
+      role: "assistant" as const,
+      text: "Checking",
+    };
+    expect(project({ ...input, messages: [message, progress] })).toBe(initial);
+    expect(project({ ...input, messages: [message, { ...progress, text: "Fixing" }] })).toBe(
+      initial,
+    );
+  });
+
+  it.each(["completed", "cancelled", "interrupted"] as const)(
+    "shows the latest settled owner reply and hides server restart replies when %s",
+    (status) => {
+      const reply = {
+        ...message,
+        id: MessageId.make("reply"),
+        role: "assistant" as const,
+        text: "Visible reply",
+      };
+      const hiddenRunId = RunId.make("restart");
+      const items = createBotChatProjector()({
+        bot,
+        bots: [bot],
+        messages: [
+          message,
+          { ...reply, id: MessageId.make("progress"), text: "Checking" },
+          reply,
+          {
+            ...message,
+            id: MessageId.make("restart-prompt"),
+            runId: hiddenRunId,
+            createdBy: "agent",
+            creationSource: "server",
+          },
+          {
+            ...reply,
+            id: MessageId.make("restart-progress"),
+            runId: hiddenRunId,
+            text: "Hidden progress",
+          },
+        ],
+        runs: [
+          { id: message.runId, status },
+          { id: hiddenRunId, status },
+        ],
+        turnItems: [],
+      });
+      expect(items.filter((item) => item.kind === "bot")).toMatchObject([
+        { text: "Visible reply" },
+      ]);
+    },
+  );
+
   it("preserves every unchanged row when only the streaming last message changes", () => {
     const project = createBotChatProjector();
     const assistant = {

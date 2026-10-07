@@ -12,6 +12,7 @@ import {
   type BotSummary,
 } from "@t3tools/contracts";
 import { RelayOwnerNotification } from "@t3tools/contracts/relay";
+import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -268,34 +269,50 @@ export const layer = Layer.effect(
       });
 
     const readLastReply = (homeThreadId: ThreadId) =>
-      sql<{ readonly text: string; readonly at: string }>`
-        SELECT json_extract(m.payload_json, '$.text') AS text, m.created_at AS at
-        FROM orchestration_v2_projection_messages m
-        WHERE m.thread_id = ${homeThreadId}
-          AND m.role = 'assistant' AND m.streaming = 0 AND m.run_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM orchestration_v2_projection_runs r
-            WHERE r.run_id = m.run_id
-              AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
-          )
-          AND EXISTS (
-            SELECT 1 FROM orchestration_v2_projection_messages incoming
-            WHERE incoming.run_id = m.run_id AND incoming.role = 'user'
-              AND NOT (
-                json_extract(incoming.payload_json, '$.createdBy') IS 'agent'
-                AND (
-                  json_extract(incoming.payload_json, '$.senderThreadId') IS ${homeThreadId}
-                  OR json_extract(incoming.payload_json, '$.creationSource') IS 'server'
-                )
-                AND json_extract(incoming.payload_json, '$.text') IS '/compact'
-              )
-          )
-        ORDER BY m.created_at DESC, m.message_id DESC
-        LIMIT 1
+      sql<{ readonly kind: "assistant" | "command"; readonly text: string; readonly at: string }>`
+        WITH owner_reply AS (
+          SELECT json_extract(m.payload_json, '$.text') AS text, m.created_at AS at,
+            m.message_id AS id
+          FROM orchestration_v2_projection_messages m
+          WHERE m.thread_id = ${homeThreadId}
+            AND m.role = 'assistant' AND m.streaming = 0 AND m.run_id IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runs r
+              WHERE r.run_id = m.run_id
+                AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
+            )
+            AND EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_messages incoming
+              WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
+                AND incoming.role = 'user'
+                AND json_extract(incoming.payload_json, '$.createdBy') IS 'user'
+                AND json_extract(incoming.payload_json, '$.senderThreadId') IS NULL
+                AND json_extract(incoming.payload_json, '$.scheduledTaskId') IS NULL
+            )
+          ORDER BY m.created_at DESC, m.message_id DESC
+          LIMIT 1
+        )
+        SELECT 'assistant' AS kind, text, at, id, 0 AS ordinal FROM owner_reply
+        UNION ALL
+        SELECT 'command' AS kind, json_extract(i.payload_json, '$.input') AS text,
+          COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at) AS at,
+          i.turn_item_id AS id, i.ordinal
+        FROM orchestration_v2_projection_turn_items i
+        WHERE i.thread_id = ${homeThreadId} AND i.type = 'command_execution'
+          AND i.status = 'completed'
+          AND (json_extract(i.payload_json, '$.exitCode') IS NULL
+            OR json_extract(i.payload_json, '$.exitCode') = 0)
+          AND json_extract(i.payload_json, '$.input') LIKE '%dm-send%'
+          AND COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at)
+            >= COALESCE((SELECT at FROM owner_reply), '')
+        ORDER BY at DESC, kind DESC, ordinal DESC, id DESC
       `.pipe(
         Effect.map((rows) => {
-          const reply = rows[0];
-          return reply ? { text: replyPreview(reply.text), at: reply.at } : null;
+          for (const row of rows) {
+            const text = row.kind === "command" ? slackTextFromCommand(row.text) : row.text;
+            if (text !== null) return { text: replyPreview(text), at: row.at };
+          }
+          return null;
         }),
       );
 
