@@ -20,8 +20,25 @@ import * as DateTime from "effect/DateTime";
 import * as Hash from "effect/Hash";
 
 import type { EnvironmentThreadShell } from "./models.ts";
+
 import { derivePendingThreadRequests } from "./threadRequests.ts";
 import type { ThreadHistoryMeta } from "./threadHistoryMerge.ts";
+
+export function threadsWithoutBotHomes<
+  T extends { readonly environmentId: EnvironmentId; readonly id: ThreadId },
+>(
+  threads: ReadonlyArray<T>,
+  bots: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly bot: Pick<BotSummary, "homeThreadId">;
+  }>,
+) {
+  if (bots.length === 0) return threads;
+  const homes = new Set(
+    bots.map(({ environmentId, bot }) => `${environmentId}:${bot.homeThreadId}`),
+  );
+  return threads.filter((thread) => !homes.has(`${thread.environmentId}:${thread.id}`));
+}
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
 

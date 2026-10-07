@@ -20,6 +20,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  threadsWithoutBotHomes,
   parseThreadLink,
   rewriteThreadLinks,
   botChatHistoryStart,
@@ -1175,5 +1176,60 @@ describe("parseThreadLink", () => {
     "t3-thread://v1/env/%2F",
   ])("rejects malformed href %s", (href) => {
     expect(parseThreadLink(href)).toBeNull();
+  });
+});
+
+describe("home bot threads", () => {
+  const environmentId = EnvironmentId.make("environment-local");
+  const otherEnvironmentId = EnvironmentId.make("environment-remote");
+  const homeThreadId = ThreadId.make("bot-home");
+  const bot = {
+    id: "chief-of-staff",
+    name: "Chief of staff",
+    homeThreadId,
+    scheduledTaskIds: [],
+    paused: false,
+  };
+  const home = {
+    environmentId,
+    id: homeThreadId,
+    title: bot.name,
+  };
+
+  it("moves only the bot home out of the ordinary list, preserving workers and order", () => {
+    const worker = {
+      environmentId,
+      id: ThreadId.make("worker"),
+      title: "Worker",
+    };
+    const ordinary = {
+      environmentId,
+      id: ThreadId.make("ordinary"),
+      title: "Task",
+    };
+    const subagent = {
+      ...worker,
+      id: ThreadId.make("subagent"),
+      lineage: { relationshipToParent: "subagent" },
+    };
+    expect(
+      threadsWithoutBotHomes([worker, home, subagent, ordinary], [{ environmentId, bot }]),
+    ).toEqual([worker, subagent, ordinary]);
+  });
+
+  it("keeps a matching thread ID from another environment", () => {
+    const otherHome = {
+      environmentId: otherEnvironmentId,
+      id: homeThreadId,
+      title: "Another task",
+    };
+    expect(threadsWithoutBotHomes([home, otherHome], [{ environmentId, bot }])).toEqual([
+      otherHome,
+    ]);
+  });
+
+  it("keeps the ordinary list when no bot summaries are available", () => {
+    const threads = [home];
+    expect(threadsWithoutBotHomes(threads, [])).toBe(threads);
   });
 });

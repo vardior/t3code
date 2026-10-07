@@ -6,10 +6,8 @@ import { useCallback } from "react";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { serverEnvironment } from "../../state/server";
 import { resolveThreadDestination } from "./botNavigation";
-import { useEnvironmentBots } from "./useEnvironmentBots";
 
 export function useThreadDestination() {
-  useEnvironmentBots();
   return useCallback((threadRef: ScopedThreadRef) => {
     const result = appAtomRegistry.get(
       serverEnvironment.bots.list({ environmentId: threadRef.environmentId, input: {} }),

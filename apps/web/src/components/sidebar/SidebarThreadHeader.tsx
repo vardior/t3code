@@ -23,6 +23,7 @@ export interface SidebarThreadHeaderProps {
   showNewThreadInProjectHint: boolean;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
+  searchLabel?: string;
   onSearchQueryChange: (value: string) => void;
   onSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
   isSearching: boolean;
@@ -42,6 +43,7 @@ export function SidebarThreadHeader({
   showNewThreadInProjectHint,
   searchInputRef,
   searchQuery,
+  searchLabel = "Search threads",
   onSearchQueryChange,
   onSearchKeyDown,
   isSearching,
@@ -68,7 +70,7 @@ export function SidebarThreadHeader({
           onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
           onKeyDown={onSearchKeyDown}
           placeholder="Search"
-          aria-label="Search threads"
+          aria-label={searchLabel}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={resultsVisible}
@@ -86,7 +88,9 @@ export function SidebarThreadHeader({
             size="icon-micro"
             variant="ghost-muted"
             className="shrink-0"
-            aria-label="Clear thread search"
+            aria-label={
+              searchLabel === "Search threads" ? "Clear thread search" : "Clear bot search"
+            }
             onClick={() => {
               onClearSearch();
               searchInputRef.current?.focus();
