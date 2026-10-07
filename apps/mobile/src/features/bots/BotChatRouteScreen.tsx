@@ -11,6 +11,7 @@ import {
 import {
   botChatHistoryStart,
   botConversationStatus,
+  botVisitWatermark,
   isBotQueueHeld,
   shouldLoadEarlierBotChatHistory,
 } from "@t3tools/client-runtime/state/bot-conversation";
@@ -152,10 +153,13 @@ function BotConversation(props: {
   }, []);
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const lastVisit = useRef({ watermark: "", at: 0 });
-  const updatedAt = projection ? DateTime.formatIso(projection.thread.updatedAt) : null;
+  const lastReplyAt = bot.lastReply?.at;
+  const updatedAt = botVisitWatermark(
+    projection ? DateTime.formatIso(projection.thread.updatedAt) : null,
+    lastReplyAt,
+  );
   const visitedAt = projection?.thread.lastVisitedAt;
   const lastVisitedAt = visitedAt ? DateTime.formatIso(visitedAt) : visitedAt;
-  const lastReplyAt = bot.lastReply?.at;
   useEffect(() => {
     if (!focused || !appActive) {
       lastVisit.current = { watermark: "", at: 0 };

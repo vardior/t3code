@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { botNeedsYou } from "./botConversation.ts";
+import { botNeedsYou, botVisitWatermark } from "./botConversation.ts";
 
 const reply = { lastReply: { text: "Can you review this?", at: "2026-10-07T10:00:00.000Z" } };
 const shell = {
@@ -54,5 +54,29 @@ describe("botNeedsYou", () => {
 
   it("ignores a reply with an invalid timestamp", () => {
     expect(botNeedsYou({ lastReply: { text: "Hello", at: "invalid" } }, shell)).toBe(false);
+  });
+});
+
+describe("botVisitWatermark", () => {
+  it("visits at the latest reply when the thread timestamp lags", () => {
+    expect(botVisitWatermark("2026-10-07T09:00:00.000Z", "2026-10-07T10:00:00.000Z")).toBe(
+      "2026-10-07T10:00:00.000Z",
+    );
+    expect(
+      botNeedsYou(reply, {
+        ...shell,
+        lastVisitedAt: botVisitWatermark("2026-10-07T09:00:00.000Z", reply.lastReply.at),
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the thread timestamp when it is newer or there is no reply", () => {
+    expect(botVisitWatermark("2026-10-07T11:00:00.000Z", "2026-10-07T10:00:00.000Z")).toBe(
+      "2026-10-07T11:00:00.000Z",
+    );
+    expect(botVisitWatermark("2026-10-07T11:00:00.000Z", undefined)).toBe(
+      "2026-10-07T11:00:00.000Z",
+    );
+    expect(botVisitWatermark(null, "2026-10-07T10:00:00.000Z")).toBeNull();
   });
 });

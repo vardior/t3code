@@ -73,6 +73,7 @@ import {
   botChatHistoryStart,
   botChatRunStatusLabel,
   botConversationStatus,
+  botVisitWatermark,
   isBotQueueHeld,
   parseThreadLink,
   shouldLoadEarlierBotChatHistory,
@@ -95,10 +96,13 @@ export function BotChat(props: {
   const projection = Option.getOrNull(thread.data);
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const lastVisit = useRef({ watermark: "", at: 0 });
-  const updatedAt = projection ? DateTime.formatIso(projection.thread.updatedAt) : null;
+  const lastReplyAt = props.bot.lastReply?.at;
+  const updatedAt = botVisitWatermark(
+    projection ? DateTime.formatIso(projection.thread.updatedAt) : null,
+    lastReplyAt,
+  );
   const visitedAt = projection?.thread.lastVisitedAt;
   const lastVisitedAt = visitedAt ? DateTime.formatIso(visitedAt) : visitedAt;
-  const lastReplyAt = props.bot.lastReply?.at;
   useEffect(() => {
     if (thread.status !== "live" || updatedAt === null || lastVisitedAt === undefined) return;
     const visitedMs = lastVisitedAt ? Date.parse(lastVisitedAt) : NaN;

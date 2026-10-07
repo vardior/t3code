@@ -623,3 +623,11 @@ export function rewriteThreadLinks(text: string, origin: string): string {
       : href;
   });
 }
+
+export function botVisitWatermark(
+  threadUpdatedAt: string | null,
+  lastReplyAt: string | undefined,
+): string | null {
+  if (threadUpdatedAt === null || lastReplyAt === undefined) return threadUpdatedAt;
+  return Date.parse(lastReplyAt) > Date.parse(threadUpdatedAt) ? lastReplyAt : threadUpdatedAt;
+}
