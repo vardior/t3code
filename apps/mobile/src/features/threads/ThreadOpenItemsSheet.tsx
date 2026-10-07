@@ -64,8 +64,8 @@ export function ThreadOpenItemsSheet({ route }: StaticScreenProps<OpenItemsTarge
             input: { ...input, answer: action.answer, creationSource: "mobile" },
           })
         : action.type === "drop"
-          ? drop({ environmentId, input })
-          : reopen({ environmentId, input }));
+          ? drop({ environmentId, input: { ...input, creationSource: "mobile" } })
+          : reopen({ environmentId, input: { ...input, creationSource: "mobile" } }));
       return result._tag === "Success";
     } finally {
       busyRef.current = false;
