@@ -182,7 +182,7 @@ const bootstrap = Effect.gen(function* () {
     scheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
     ...(environment.isDevelopment
       ? { targetOrigin: Option.getOrThrow(environment.devServerUrl) }
-      : { assetDirectory: environment.clientAssetsDir }),
+      : { assetDirectory: yield* DesktopEnvironment.resolveClientAssetsDir(environment) }),
     clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
   });
   yield* installDesktopIpcHandlers();

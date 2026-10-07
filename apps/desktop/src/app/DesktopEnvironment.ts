@@ -7,6 +7,7 @@ import type {
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -57,6 +58,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly serverRoot: string;
     readonly backendEntryPath: string;
     readonly clientAssetsDir: string;
+    readonly staticDirOverride: Option.Option<string>;
     readonly backendCwd: string;
     readonly preloadPath: string;
     readonly compileCachePath: string;
@@ -209,6 +211,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     serverRoot,
     backendEntryPath: path.join(serverRoot, "apps/server/dist/bin.mjs"),
     clientAssetsDir: path.join(serverRoot, "apps/server/dist/client"),
+    staticDirOverride: input.isPackaged ? config.staticDirOverride : Option.none(),
     backendCwd: input.isPackaged ? homeDirectory : appRoot,
     preloadPath: path.join(input.dirname, "preload.cjs"),
     compileCachePath: path.join(input.dirname, "compileCache.cjs"),
@@ -276,3 +279,24 @@ const make = Effect.fn("desktop.environment.make")(function* (
 
 export const layer = (input: MakeDesktopEnvironmentInput) =>
   Layer.effect(DesktopEnvironment, make(input));
+
+export const resolveClientAssetsDir = Effect.fn("desktop.environment.resolveClientAssetsDir")(
+  function* (
+    environment: Pick<
+      DesktopEnvironment["Service"],
+      "path" | "clientAssetsDir" | "staticDirOverride"
+    >,
+  ) {
+    if (Option.isNone(environment.staticDirOverride)) return environment.clientAssetsDir;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const externalDir = environment.path.resolve(environment.staticDirOverride.value);
+    const hasIndex = yield* fileSystem
+      .exists(environment.path.join(externalDir, "index.html"))
+      .pipe(Effect.orElseSucceed(() => false));
+    if (hasIndex) return externalDir;
+    yield* Effect.logWarning(
+      "T3CODE_STATIC_DIR has no index.html; serving the bundled web client.",
+    );
+    return environment.clientAssetsDir;
+  },
+);

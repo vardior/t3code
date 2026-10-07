@@ -2,6 +2,7 @@ import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -57,6 +58,48 @@ describe("DesktopEnvironment", () => {
         environment.clientAssetsDir,
         "/install/resources/server.asar/apps/server/dist/client",
       );
+    }),
+  );
+
+  it.effect("serves a packaged client from T3CODE_STATIC_DIR only when it holds index.html", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-desktop-static-" });
+      yield* fileSystem.makeDirectory(`${root}/client`);
+      yield* fileSystem.makeDirectory(`${root}/empty`);
+      yield* fileSystem.writeFileString(`${root}/client/index.html`, "<html></html>");
+      const packaged = { isPackaged: true };
+
+      for (const [overrides, staticDir, expected] of [
+        [packaged, `${root}/client`, `${root}/client`],
+        [
+          packaged,
+          `${root}/empty`,
+          "/Applications/T3 Code.app/Contents/Resources/app.asar/apps/server/dist/client",
+        ],
+        [
+          packaged,
+          undefined,
+          "/Applications/T3 Code.app/Contents/Resources/app.asar/apps/server/dist/client",
+        ],
+        [{}, `${root}/client`, "/repo/apps/server/dist/client"],
+      ] as const) {
+        const environment = yield* makeEnvironment(overrides, { T3CODE_STATIC_DIR: staticDir });
+        assert.equal(yield* DesktopEnvironment.resolveClientAssetsDir(environment), expected);
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("uses the stable desktop entry as the packaged Linux portal identity", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "linux",
+        isPackaged: true,
+        appPath: "/tmp/.mount_t3code/resources/app.asar",
+        resourcesPath: "/tmp/.mount_t3code/resources",
+      });
+
+      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.desktop");
     }),
   );
 
