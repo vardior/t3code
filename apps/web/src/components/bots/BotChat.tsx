@@ -20,7 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import { ArrowUpIcon, BotIcon, PaperclipIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -38,7 +38,7 @@ import { composerSubmissionIntentForKey } from "../../composer-logic";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useClientSettings } from "../../hooks/useSettings";
 import { newMessageId, randomUUID } from "../../lib/utils";
-import { useServerConfigs, useThreadShell } from "../../state/entities";
+import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentIds } from "../../state/environments";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentQuery } from "../../state/query";
@@ -64,16 +64,17 @@ import { readFileAsDataUrl } from "../ChatView.logic";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
+import {
+  createBotChatProjector,
+  type VisibleBotChatItem,
+} from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
   botChatHistoryStart,
   botChatRunStatusLabel,
   botConversationStatus,
-  botWakeSenderLabel,
   isBotQueueHeld,
   parseThreadLink,
   shouldLoadEarlierBotChatHistory,
-  type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
 
 const EMPTY_IMAGES: ReadonlyArray<ComposerImageAttachment> = [];
@@ -107,8 +108,8 @@ export function BotChat(props: {
       input: { threadId: props.bot.homeThreadId },
     });
   }, [loadEarlierHistory, props.environmentId, props.bot.homeThreadId]);
-  const tasksQuery = useEnvironmentQuery(
-    serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
+  const bots = useEnvironmentQuery(
+    serverEnvironment.bots.list({ environmentId: props.environmentId, input: {} }),
   );
   const projectChat = useMemo(() => createBotChatProjector(), []);
   const threadError = Option.getOrNull(thread.error);
@@ -153,6 +154,7 @@ export function BotChat(props: {
     () =>
       projectChat({
         bot: props.bot,
+        bots: bots.data?.bots ?? [],
         detail: detail.data,
         since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
         messages: projection?.messages ?? [],
@@ -162,6 +164,7 @@ export function BotChat(props: {
     [
       projectChat,
       props.bot,
+      bots.data,
       detail.data,
       thread.history.hasMoreHistory,
       projection?.messages,
@@ -363,14 +366,6 @@ export function BotChat(props: {
               item={item}
               environmentId={props.environmentId}
               threadId={props.bot.homeThreadId}
-              onOpenThread={openThread}
-              scheduleTitle={
-                item.kind === "wake"
-                  ? (tasksQuery.data?.tasks.find((task) => task.id === item.scheduledTaskId)
-                      ?.title ?? null)
-                  : null
-              }
-              botName={props.bot.name}
             />
           ))}
           {status.kind === "needs-attention" ? (
@@ -436,45 +431,17 @@ export function BotChat(props: {
 }
 
 const ChatRow = memo(function ChatRow(props: {
-  readonly item: BotChatItem;
+  readonly item: VisibleBotChatItem;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  readonly onOpenThread: (threadId: ThreadId) => void;
-  readonly scheduleTitle: string | null;
-  readonly botName: string;
 }) {
   const { item } = props;
-  if (item.kind === "worker") {
-    return (
-      <WorkerChip
-        item={item}
-        environmentId={props.environmentId}
-        onOpenThread={props.onOpenThread}
-      />
-    );
-  }
   if (item.kind === "wake") {
-    return (
-      <WakeRow
-        item={item}
-        environmentId={props.environmentId}
-        scheduleTitle={props.scheduleTitle}
-        botName={props.botName}
-      />
-    );
+    return <WakeRow item={item} environmentId={props.environmentId} />;
   }
   if (item.kind === "you") {
     return (
       <YourMessage item={item} environmentId={props.environmentId} threadId={props.threadId} />
-    );
-  }
-  if (item.kind === "compaction") {
-    return (
-      <div className="my-2 flex items-center gap-3 text-muted-foreground text-xs">
-        <span className="h-px flex-1 bg-border" />
-        <span>{item.text}</span>
-        <span className="h-px flex-1 bg-border" />
-      </div>
     );
   }
   return (
@@ -511,7 +478,7 @@ function BotMarkdown(props: { readonly text: string; readonly environmentId: Env
 }
 
 function YourMessage(props: {
-  readonly item: Extract<BotChatItem, { readonly kind: "you" }>;
+  readonly item: Extract<VisibleBotChatItem, { readonly kind: "you" }>;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
@@ -575,22 +542,11 @@ function YourMessage(props: {
 }
 
 const WakeRow = memo(function WakeRow(props: {
-  readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
+  readonly item: Extract<VisibleBotChatItem, { readonly kind: "wake" }>;
   readonly environmentId: EnvironmentId;
-  readonly scheduleTitle: string | null;
-  readonly botName: string;
 }) {
   const { item } = props;
   const [expanded, setExpanded] = useState(false);
-  const sender = useThreadShell(
-    item.senderThreadId ? scopeThreadRef(props.environmentId, item.senderThreadId) : null,
-  );
-  const from = botWakeSenderLabel({
-    senderTitle: sender?.title ?? null,
-    scheduleTitle: props.scheduleTitle,
-    botName: props.botName,
-    scheduled: item.scheduledTaskId !== null,
-  });
   const replyPreview =
     botChatRunStatusLabel(item.runStatus) ??
     item.reply
@@ -606,7 +562,7 @@ const WakeRow = memo(function WakeRow(props: {
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full border border-border/70 px-3 py-1.5 hover:bg-accent/60 hover:text-foreground">
         <span className="flex min-w-0 items-center gap-1">
           <span className="shrink-0">From</span>
-          <span className="truncate">{from}</span>
+          <span className="truncate">{item.senderName}</span>
         </span>
         <span
           className={
@@ -631,27 +587,6 @@ const WakeRow = memo(function WakeRow(props: {
     </details>
   );
 });
-
-function WorkerChip(props: {
-  readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
-  readonly environmentId: EnvironmentId;
-  readonly onOpenThread: (threadId: ThreadId) => void;
-}) {
-  const { item } = props;
-  const shell = useThreadShell(scopeThreadRef(props.environmentId, item.threadId));
-  const status = shell?.latestRun?.status ?? item.status;
-  return (
-    <button
-      type="button"
-      className="my-1 flex max-w-[85%] items-center gap-2 self-start rounded-full border border-border/70 px-3 py-1.5 text-left text-muted-foreground text-xs hover:bg-accent/60 hover:text-foreground"
-      onClick={() => props.onOpenThread(item.threadId)}
-    >
-      <BotIcon className="size-3.5 shrink-0" />
-      <span className="truncate">Started {shell?.title ?? item.title}</span>
-      {status ? <span className="shrink-0 opacity-70">· {status}</span> : null}
-    </button>
-  );
-}
 
 function BotComposer(props: {
   readonly bot: BotSummary;

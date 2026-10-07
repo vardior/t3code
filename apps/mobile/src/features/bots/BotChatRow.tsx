@@ -1,9 +1,7 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type { VisibleBotChatItem } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
-  botWakeSenderLabel,
   botChatRunStatusLabel,
   rewriteThreadLinks,
-  type BotChatItem,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { memo, useState } from "react";
@@ -19,34 +17,21 @@ import {
 } from "../../native/SelectableMarkdownText";
 import { useWorkspaceEnvironmentIds } from "../../state/workspace";
 import { botMarkdownThreadLinks, botThreadLinkTarget } from "./botChat.logic";
-import { useThreadShell } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 import { ThreadMarkdownImage } from "../threads/ThreadMarkdownImage";
 
 export const BotChatRow = memo(function BotChatRow(props: {
-  readonly item: BotChatItem;
-  readonly botName: string;
+  readonly item: VisibleBotChatItem;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  readonly scheduleTitle: string | undefined;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onPreview: (source: FilePreviewSource) => void;
   readonly onDisclosureToggle: (itemId: string) => void;
 }) {
   const { item } = props;
-  if (item.kind === "worker")
-    return (
-      <WorkerRow
-        item={item}
-        environmentId={props.environmentId}
-        onOpenThread={props.onOpenThread}
-      />
-    );
   if (item.kind === "wake") return <WakeRow {...props} item={item} />;
-  if (item.kind === "compaction")
-    return <Text className="py-3 text-center text-xs text-foreground-muted">{item.text}</Text>;
   return (
     <View
       className={
@@ -85,7 +70,7 @@ export const BotChatRow = memo(function BotChatRow(props: {
 });
 
 function OwnerMessageStatus(props: {
-  readonly item: Extract<BotChatItem, { readonly kind: "you" }>;
+  readonly item: Extract<VisibleBotChatItem, { readonly kind: "you" }>;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
@@ -134,49 +119,13 @@ function OwnerMessageStatus(props: {
   );
 }
 
-function WorkerRow(props: {
-  readonly item: Extract<BotChatItem, { readonly kind: "worker" }>;
-  readonly environmentId: EnvironmentId;
-  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
-}) {
-  const shell = useThreadShell(scopeThreadRef(props.environmentId, props.item.threadId));
-  const title = shell?.title ?? props.item.title;
-  const status = shell?.latestRun?.status ?? props.item.status;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${title}`}
-      onPress={() => props.onOpenThread(props.item.threadId)}
-      className="max-w-[85%] self-start rounded-full border border-border-subtle px-3 py-2 active:opacity-70"
-    >
-      <Text className="text-xs text-foreground-muted">
-        Started {title}
-        {status ? ` · ${status}` : ""}
-      </Text>
-    </Pressable>
-  );
-}
-
 function WakeRow(props: {
   readonly onDisclosureToggle: (itemId: string) => void;
-  readonly item: Extract<BotChatItem, { readonly kind: "wake" }>;
-  readonly botName: string;
+  readonly item: Extract<VisibleBotChatItem, { readonly kind: "wake" }>;
   readonly environmentId: EnvironmentId;
-  readonly scheduleTitle: string | undefined;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const sender = useThreadShell(
-    props.item.senderThreadId
-      ? scopeThreadRef(props.environmentId, props.item.senderThreadId)
-      : null,
-  );
-  const from = botWakeSenderLabel({
-    senderTitle: sender?.title,
-    scheduleTitle: props.scheduleTitle,
-    botName: props.botName,
-    scheduled: props.item.scheduledTaskId !== null,
-  });
   const preview =
     botChatRunStatusLabel(props.item.runStatus) ??
     props.item.reply
@@ -203,7 +152,7 @@ function WakeRow(props: {
               : "text-xs text-foreground-muted"
           }
         >
-          From {from} · {preview}
+          From {props.item.senderName} · {preview}
         </Text>
       </Pressable>
       {expanded ? (

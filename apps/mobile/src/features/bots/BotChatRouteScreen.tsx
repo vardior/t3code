@@ -49,8 +49,6 @@ import {
 } from "../../state/composer-attachment-uploads";
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { useEnvironmentQuery } from "../../state/query";
-import { serverEnvironment } from "../../state/server";
 import { useEnvironmentThread, environmentThreads, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChatRow } from "./BotChatRow";
@@ -120,6 +118,7 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
     <BotConversation
       key={bot.homeThreadId}
       bot={bot}
+      bots={bots.data?.bots ?? []}
       environmentId={props.environmentId}
       refresh={bots.refresh}
       connected={connected}
@@ -131,6 +130,7 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
 
 function BotConversation(props: {
   readonly bot: BotSummary;
+  readonly bots: ReadonlyArray<BotSummary>;
   readonly environmentId: EnvironmentId;
   readonly refresh: () => void;
   readonly connected: boolean;
@@ -168,21 +168,19 @@ function BotConversation(props: {
           : projection === null
             ? "Loading this bot's home thread…"
             : null);
-  const schedules = useEnvironmentQuery(
-    serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
-  );
   const projectChat = useMemo(() => createBotChatProjector(), []);
   const items = useMemo(
     () =>
       projectChat({
         bot,
+        bots: props.bots,
         detail: detail.data,
         since: botChatHistoryStart(projection?.messages ?? [], thread.history.hasMoreHistory),
         messages: projection?.messages ?? [],
         runs: projection?.runs ?? [],
         turnItems: projection?.turnItems ?? [],
       }),
-    [projectChat, bot, detail.data, projection, thread.history.hasMoreHistory],
+    [projectChat, bot, props.bots, detail.data, projection, thread.history.hasMoreHistory],
   );
   const status = useMemo(
     () => (projection === null ? { kind: "idle" as const } : botConversationStatus(projection)),
@@ -194,10 +192,6 @@ function BotConversation(props: {
     [projection],
   );
   const queueHeld = isBotQueueHeld(projection?.runs ?? []);
-  const scheduleTitles = useMemo(
-    () => new Map(schedules.data?.tasks.map((task) => [task.id, task.title]) ?? []),
-    [schedules.data],
-  );
   const refreshBots = props.refresh;
   const refreshDetail = detail.refresh;
   const refresh = useCallback(() => {
@@ -427,19 +421,12 @@ function BotConversation(props: {
           key={listMountKey}
           ref={listRef}
           data={conversationShown ? items : []}
-          extraData={scheduleTitles}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <BotChatRow
               item={item}
-              botName={bot.name}
               environmentId={environmentId}
               threadId={bot.homeThreadId}
-              scheduleTitle={
-                item.kind === "wake" && item.scheduledTaskId !== null
-                  ? scheduleTitles.get(item.scheduledTaskId)
-                  : undefined
-              }
               onOpenThread={openThread}
               onPreview={setPreview}
               onDisclosureToggle={onDisclosureToggle}

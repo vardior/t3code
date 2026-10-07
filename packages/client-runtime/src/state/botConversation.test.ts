@@ -29,7 +29,6 @@ import {
   botThreadShellStatusLabel,
   isBotQueueHeld,
   isBotWorking,
-  botWakeSenderLabel,
   buildBotChat,
   slackMarkupToMarkdown,
   slackTextFromCommand,
@@ -626,6 +625,27 @@ describe("buildBotChat wake rows", () => {
     expect(items.map((item) => item.kind)).toEqual(["bot"]);
   });
 
+  it("keeps an incoming thread message when its run also sends a Slack DM", () => {
+    const items = buildBotChat({
+      bot: botWithoutHistory,
+      messages: [
+        message({
+          id: "bot-message",
+          role: "user",
+          runId: "run-wake",
+          createdAt: "2026-10-01T00:01:00.000Z",
+          text: "Check this build",
+          createdBy: "agent",
+          senderThreadId: "chief-of-staff",
+        }),
+      ],
+      runs: [{ id: RunId.make("run-wake"), status: "completed" }],
+      turnItems: [dmSend],
+    });
+    expect(items.map((item) => item.kind)).toEqual(["wake", "bot"]);
+    expect(items[0]).toMatchObject({ senderThreadId: "chief-of-staff", text: "Check this build" });
+  });
+
   it("keeps a wake when its run did not send a Slack DM", () => {
     const items = buildBotChat({
       bot: botWithoutHistory,
@@ -964,37 +984,6 @@ describe("botConversationStatus", () => {
         turnItems: [],
       }),
     ).toEqual({ kind: "failed", error: null });
-  });
-});
-
-describe("botWakeSenderLabel", () => {
-  const input = { botName: "Helper", scheduled: false };
-
-  it("names a known sender before considering schedule metadata", () => {
-    expect(
-      botWakeSenderLabel({
-        ...input,
-        senderTitle: " Release coordinator ",
-        scheduleTitle: "bot Helper Check",
-      }),
-    ).toBe("Release coordinator");
-  });
-
-  it("falls back to another thread without exposing identifiers", () => {
-    expect(botWakeSenderLabel(input)).toBe("another thread");
-    expect(botWakeSenderLabel({ ...input, senderTitle: " " })).toBe("another thread");
-  });
-
-  it("keeps scheduled wake labels readable", () => {
-    expect(
-      botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: "bot Helper Check builds" }),
-    ).toBe("Check builds");
-    expect(botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: " " })).toBe(
-      "a scheduled task",
-    );
-    expect(botWakeSenderLabel({ ...input, scheduled: true, scheduleTitle: "Daily update" })).toBe(
-      "Daily update",
-    );
   });
 });
 

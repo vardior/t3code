@@ -178,22 +178,6 @@ export function botConversationStatus(
   return { kind: "failed", error: error?.type === "error" ? error.failure.message : sessionError };
 }
 
-export function botWakeSenderLabel(input: {
-  readonly senderTitle?: string | null;
-  readonly scheduleTitle?: string | null;
-  readonly botName: string;
-  readonly scheduled: boolean;
-}): string {
-  const senderTitle = input.senderTitle?.trim();
-  if (senderTitle) return senderTitle;
-  const prefix = `bot ${input.botName} `;
-  const scheduleTitle = input.scheduleTitle?.trim();
-  const scheduleName = scheduleTitle?.startsWith(prefix)
-    ? scheduleTitle.slice(prefix.length).trim()
-    : scheduleTitle;
-  return scheduleName || (input.scheduled ? "a scheduled task" : "another thread");
-}
-
 export function botChatHistoryStart(
   messages: ReadonlyArray<ChatMessage>,
   hasMoreHistory: boolean,
@@ -252,6 +236,7 @@ export function buildBotChat(input: {
       message.scheduledTaskId === undefined,
   );
   const ownerRunIds = new Set(ownerMessages.flatMap((message) => message.runId ?? []));
+  const ownerMessageIds = new Set(ownerMessages.map((message) => message.id));
   const runStatusById = new Map(input.runs.map((run) => [run.id, run.status]));
   const activeRunIds = new Set(
     input.runs.filter((run) => isActiveRunStatus(run.status)).map((run) => run.id),
@@ -262,12 +247,17 @@ export function buildBotChat(input: {
     if (!activeRunIds.has(message.runId)) finalReplyByRun.set(message.runId, message);
   }
   const replies = [...ownerRunIds].flatMap((runId) => finalReplyByRun.get(runId) ?? []);
-  const wakesByRun = new Map<string, ChatMessage[]>();
+  const wakesBySender = new Map<string, ChatMessage[]>();
   for (const message of incoming) {
-    if (message.runId === null || ownerRunIds.has(message.runId)) continue;
-    const wakes = wakesByRun.get(message.runId);
+    if (ownerMessageIds.has(message.id)) continue;
+    const key = JSON.stringify([
+      message.runId ?? message.id,
+      message.senderThreadId,
+      message.scheduledTaskId,
+    ]);
+    const wakes = wakesBySender.get(key);
     if (wakes) wakes.push(message);
-    else wakesByRun.set(message.runId, [message]);
+    else wakesBySender.set(key, [message]);
   }
 
   const dmSends = input.turnItems.flatMap((item) => {
@@ -311,19 +301,24 @@ export function buildBotChat(input: {
         },
       ];
     }),
-    ...Array.from(wakesByRun).flatMap(([runId, wakes]) => {
-      if (dmSendRunIds.has(runId)) return [];
+    ...Array.from(wakesBySender.values()).flatMap((wakes) => {
       const first = wakes[0]!;
+      const runId = first.runId;
+      if (first.senderThreadId === undefined && runId !== null && dmSendRunIds.has(runId))
+        return [];
       return [
         {
           kind: "wake" as const,
-          id: `wake:${runId}`,
+          id: `wake:${first.id}`,
           at: DateTime.toEpochMillis(first.createdAt),
           senderThreadId: first.senderThreadId ?? null,
           scheduledTaskId: first.scheduledTaskId ?? null,
           text: wakes.map((wake) => wake.text).join("\n\n"),
-          reply: finalReplyByRun.get(runId)?.text ?? null,
-          runStatus: runStatusById.get(first.runId!) ?? null,
+          reply:
+            runId === null || ownerRunIds.has(runId)
+              ? null
+              : (finalReplyByRun.get(runId)?.text ?? null),
+          runStatus: runId === null ? null : (runStatusById.get(runId) ?? null),
         },
       ];
     }),

@@ -1,4 +1,21 @@
+import type { BotSummary, ThreadId } from "@t3tools/contracts";
 import { buildBotChat, type BotChatItem } from "./botConversation.ts";
+
+export type VisibleBotChatItem =
+  | Extract<BotChatItem, { readonly kind: "you" | "bot" }>
+  | (Extract<BotChatItem, { readonly kind: "wake" }> & { readonly senderName: string });
+
+export function visibleBotChatItem(
+  item: BotChatItem,
+  bots: ReadonlyArray<Pick<BotSummary, "homeThreadId" | "name">>,
+  homeThreadId: ThreadId,
+): VisibleBotChatItem | null {
+  if (item.kind === "you" || item.kind === "bot") return item;
+  if (item.kind !== "wake" || item.scheduledTaskId !== null || item.senderThreadId === homeThreadId)
+    return null;
+  const sender = bots.find((bot) => bot.homeThreadId === item.senderThreadId);
+  return sender ? { ...item, senderName: sender.name } : null;
+}
 
 export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolean {
   if (left.kind !== right.kind) return false;
@@ -17,10 +34,13 @@ export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolea
 }
 
 export function createBotChatProjector() {
-  let previous = new Map<string, BotChatItem>();
-  let previousInput: Parameters<typeof buildBotChat>[0] | null = null;
-  let result: BotChatItem[] = [];
-  return (input: Parameters<typeof buildBotChat>[0]) => {
+  type Input = Parameters<typeof buildBotChat>[0] & {
+    readonly bots: ReadonlyArray<BotSummary>;
+  };
+  let previous = new Map<string, VisibleBotChatItem>();
+  let previousInput: Input | null = null;
+  let result: VisibleBotChatItem[] = [];
+  return (input: Input) => {
     const messages = input.messages.filter(
       (message) => message.role !== "assistant" || !message.streaming,
     );
@@ -32,6 +52,7 @@ export function createBotChatProjector() {
     if (
       previousInput !== null &&
       previousInput.bot === input.bot &&
+      previousInput.bots === input.bots &&
       previousInput.detail === input.detail &&
       previousInput.since === input.since &&
       messages.length === previousInput.messages.length &&
@@ -47,9 +68,11 @@ export function createBotChatProjector() {
     )
       return result;
     previousInput = { ...input, messages, turnItems };
-    const items = buildBotChat(previousInput).map((item) => {
+    const items = buildBotChat(previousInput).flatMap((item) => {
+      const visible = visibleBotChatItem(item, input.bots, input.bot.homeThreadId);
+      if (visible === null) return [];
       const existing = previous.get(item.id);
-      return existing && botChatItemsEqual(existing, item) ? existing : item;
+      return [existing && botChatItemsEqual(existing, visible) ? existing : visible];
     });
     previous = new Map(items.map((item) => [item.id, item]));
     result = items;
