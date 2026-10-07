@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
   StackActions,
   useFocusEffect,
@@ -12,13 +13,15 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  AuthOrchestrationOperateScope,
   EnvironmentId,
+  type ModelSelection,
   type BotSummary,
   type ScheduledTask,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,7 +31,22 @@ import { AppText as Text } from "../../components/AppText";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
-import { useThreadShell } from "../../state/entities";
+import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
+import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
+import { scopedThreadKey } from "../../lib/scopedEntities";
+import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
+import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
+import { updateComposerDraftSettings } from "../../state/use-composer-drafts";
+import {
+  rememberModelOptions,
+  withRememberedModelOptions,
+} from "../../state/use-model-option-memory";
+import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
+import {
+  useExistingThreadSettingsRoutePresentation,
+  type ExistingThreadSettingsRouteSession,
+} from "../threads/ThreadSettingsSheet";
+import { useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -114,6 +132,152 @@ export function BotInfoSheet({
     <View collapsable={false} className="flex-1 bg-sheet">
       <AndroidSheetHeader title="About bot" onBack={() => navigation.goBack()} />
       {content}
+    </View>
+  );
+}
+
+function BotModelPicker(props: {
+  readonly bot: BotSummary;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { bot, environmentId } = props;
+  const shell = useThreadShell(scopeThreadRef(environmentId, bot.homeThreadId));
+  const thread = useAtomValue(
+    environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, bot.homeThreadId)),
+  );
+  const config = useEnvironmentServerConfig(environmentId);
+  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
+  const setRuntimeMode = useAtomCommand(threadEnvironment.setRuntimeMode, { reportFailure: false });
+  const navigation = useNavigation();
+  const {
+    present,
+    clear,
+    session: presentedSession,
+  } = useExistingThreadSettingsRoutePresentation();
+  const ownerId = scopedThreadKey(environmentId, bot.homeThreadId);
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selection = shell?.modelSelection ?? null;
+  const canSwitchProvider = threadAllowsProviderSwitch({
+    thread: shell,
+    projection: thread?.projection,
+  });
+  const models = useMemo(
+    () =>
+      buildModelOptions(config, selection, canSwitchProvider ? undefined : selection?.instanceId),
+    [config, selection, canSwitchProvider],
+  );
+  const providerGroups = useMemo(() => groupByProvider(models), [models]);
+  const selectedOption = models.find(
+    (option) =>
+      option.selection.instanceId === selection?.instanceId &&
+      option.selection.model === selection.model,
+  );
+  const optionDescriptors = useMemo(
+    () =>
+      resolveProviderOptionDescriptors({
+        capabilities: selectedOption?.capabilities,
+        selections: selection?.options,
+      }),
+    [selectedOption?.capabilities, selection?.options],
+  );
+  const session = useMemo(() => {
+    const save = async (modelSelection: ModelSelection) => {
+      if (pending.current || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope))
+        return;
+      pending.current = true;
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await updateMetadata({
+          environmentId,
+          input: { threadId: bot.homeThreadId, modelSelection },
+        });
+        if (result._tag === "Success") {
+          updateComposerDraftSettings(ownerId, { modelSelection });
+        } else if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          setError(failure instanceof Error ? failure.message : String(failure));
+        }
+      } finally {
+        pending.current = false;
+        setBusy(false);
+      }
+    };
+
+    return shell && selection
+      ? ({
+          ownerId,
+          environmentId,
+          providerInstanceId: selection.instanceId,
+          providerGroups,
+          selectedModel: selection,
+          onSelectModel: (option) => void save(withRememberedModelOptions(option.selection)),
+          optionDescriptors,
+          onUpdateOptionSelections: (options) => {
+            rememberModelOptions(selection.instanceId, selection.model, options);
+            void save({ ...selection, options });
+          },
+          runtimeMode: shell.runtimeMode,
+          onUpdateRuntimeMode: (runtimeMode) => {
+            if (
+              pending.current ||
+              !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
+            )
+              return;
+            void setRuntimeMode({
+              environmentId,
+              input: { threadId: bot.homeThreadId, runtimeMode },
+            }).then((result) => {
+              if (result._tag === "Success") updateComposerDraftSettings(ownerId, { runtimeMode });
+              else if (!isAtomCommandInterrupted(result)) {
+                const failure = squashAtomCommandFailure(result);
+                setError(failure instanceof Error ? failure.message : String(failure));
+              }
+            });
+          },
+        } satisfies ExistingThreadSettingsRouteSession)
+      : null;
+  }, [
+    shell,
+    selection,
+    ownerId,
+    environmentId,
+    providerGroups,
+    optionDescriptors,
+    updateMetadata,
+    setRuntimeMode,
+    bot.homeThreadId,
+  ]);
+  const presentedOwnerId = presentedSession?.ownerId;
+  useEffect(() => {
+    if (session && presentedOwnerId === ownerId) present(session);
+  }, [session, presentedOwnerId, ownerId, present]);
+  useEffect(() => () => clear(ownerId), [ownerId, clear]);
+  return (
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Choose bot model and effort"
+        disabled={!selection || !config || !canOperate || busy}
+        className="px-4 py-3 active:opacity-70 disabled:opacity-50"
+        onPress={() => {
+          if (!session) return;
+          present(session);
+          navigation.dispatch(StackActions.push("ThreadSettingsSheet"));
+        }}
+      >
+        <Text className="text-base text-foreground">
+          {selectedOption?.label ?? selection?.model ?? "Model unavailable"}
+        </Text>
+      </Pressable>
+      {error ? (
+        <Text accessibilityRole="alert" className="px-4 pb-3 text-sm text-danger-foreground">
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -212,6 +376,9 @@ function BotInfo(props: {
           {paused ? " · Paused" : ""}
         </Text>
       </View>
+      <SettingsSection title="Model">
+        <BotModelPicker bot={bot} environmentId={environmentId} />
+      </SettingsSection>
       <SettingsSection title="Schedule">
         {schedules.error ? (
           <Text accessibilityRole="alert" className="p-4 text-sm text-danger-foreground">
@@ -233,7 +400,8 @@ function BotInfo(props: {
               >
                 <Text className="text-base font-t3-medium text-foreground">{task.title}</Text>
                 <Text className="text-sm text-foreground-muted">
-                  {describeSchedule(task)} · {task.modelSelection.model}
+                  {describeSchedule(task)}
+                  {task.threadId === null ? ` · ${task.modelSelection.model}` : ""}
                   {!task.enabled
                     ? " · Paused"
                     : task.nextRunAt

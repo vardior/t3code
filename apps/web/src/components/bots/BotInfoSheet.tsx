@@ -1,13 +1,39 @@
+import { useAtomValue } from "@effect/atom-react";
+import { threadSupportsProviderHandoff } from "@t3tools/client-runtime/state/thread-workflows";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { BotSummary, EnvironmentId, ScheduledTask, ThreadId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type BotSummary,
+  type EnvironmentId,
+  type ModelSelection,
+  type ScheduledTask,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
-import { useThreadShell } from "../../state/entities";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
+import {
+  getCustomModelOptionsByInstance,
+  resolveAppModelSelectionForInstance,
+} from "../../modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+} from "../../providerInstances";
+import { useEnvironmentScope } from "../../state/session";
+import { threadEnvironment } from "../../state/threads";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { getStartedThreadModelChangeBlockReason } from "../ChatView.logic";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
+import { useThreadProjection, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -67,6 +93,9 @@ export function BotInfoSheet(props: {
           </SheetDescription>
         </SheetHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6 text-sm">
+          <InfoSection title="Model">
+            <BotModelPicker bot={props.bot} environmentId={props.environmentId} />
+          </InfoSection>
           <InfoSection title="Schedule">
             {tasksQuery.error !== null ? (
               <p className="text-destructive">Could not load schedules: {tasksQuery.error}</p>
@@ -136,6 +165,136 @@ export function BotInfoSheet(props: {
         </div>
       </SheetPopup>
     </Sheet>
+  );
+}
+
+function BotModelPicker(props: {
+  readonly bot: BotSummary;
+  readonly environmentId: EnvironmentId;
+}) {
+  const threadRef = scopeThreadRef(props.environmentId, props.bot.homeThreadId);
+  const shell = useThreadShell(threadRef);
+  const thread = useThreadProjection(threadRef);
+  const config = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
+  const settings = useEnvironmentSettings(props.environmentId);
+  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
+  const updateMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
+    label: "bot model selection",
+    reportFailure: false,
+  });
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const providers = config?.providers ?? [];
+  const selection = shell?.modelSelection;
+  const instanceEntries = useMemo(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
+      ),
+    [providers, settings],
+  );
+  const modelOptions = useMemo(
+    () =>
+      getCustomModelOptionsByInstance(settings, providers, selection?.instanceId, selection?.model),
+    [settings, providers, selection],
+  );
+  const supportsHandoff = threadSupportsProviderHandoff(thread?.projection);
+  const getDisabledReason = (instanceId: ModelSelection["instanceId"], model: string) => {
+    if (!shell) return null;
+    const reason = getStartedThreadModelChangeBlockReason({
+      providers,
+      hasStartedSession: shell.runtime !== null,
+      supportsProviderSwitchingViaHandoff: supportsHandoff,
+      currentModelSelection: shell.modelSelection,
+      currentProviderInstanceId: shell.runtime?.providerInstanceId,
+      nextModelSelection: { instanceId, model },
+    });
+    return reason?.description ?? null;
+  };
+  const save = async (modelSelection: ModelSelection) => {
+    if (
+      !canOperate ||
+      pending.current ||
+      getDisabledReason(modelSelection.instanceId, modelSelection.model)
+    )
+      return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await updateMetadata({
+        environmentId: props.environmentId,
+        input: { threadId: props.bot.homeThreadId, modelSelection },
+      });
+      if (result._tag === "Success") {
+        useComposerDraftStore.getState().setModelSelection(threadRef, modelSelection, {
+          explicit: true,
+          replaceOptions: true,
+        });
+      } else if (!isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  const hasStarted =
+    shell !== null &&
+    (shell.runtime !== null || shell.latestRun !== null || shell.latestUserMessageAt !== null);
+  if (!selection || !config) return <p className="text-muted-foreground">Model unavailable.</p>;
+  const provider = providers.find((entry) => entry.instanceId === selection.instanceId);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ProviderModelPicker
+        activeInstanceId={selection.instanceId}
+        model={selection.model}
+        lockedProvider={supportsHandoff || !hasStarted ? null : (provider?.driver ?? null)}
+        lockedContinuationGroupKey={
+          supportsHandoff || !hasStarted ? null : (provider?.continuation?.groupKey ?? null)
+        }
+        instanceEntries={instanceEntries}
+        modelOptionsByInstance={modelOptions}
+        disabled={busy || !canOperate}
+        getModelDisabledReason={getDisabledReason}
+        onInstanceModelChange={(instanceId, model) => {
+          const resolvedModel = resolveAppModelSelectionForInstance(
+            instanceId,
+            settings,
+            providers,
+            model,
+          );
+          if (!resolvedModel) return;
+          const options =
+            useComposerDraftStore.getState().stickyOptionsByModelByProvider[instanceId]?.[
+              resolvedModel
+            ];
+          void save({ instanceId, model: resolvedModel, ...(options ? { options } : {}) });
+        }}
+      />
+      {provider ? (
+        <TraitsPicker
+          provider={provider.driver}
+          instanceId={selection.instanceId}
+          models={provider.models}
+          model={selection.model}
+          modelOptions={selection.options}
+          prompt=""
+          onPromptChange={() => {}}
+          allowPromptInjectedEffort={false}
+          planModeEnabled={settings.planModeEnabled}
+          disabled={busy || !canOperate}
+          onModelOptionsChange={(options) => void save({ ...selection, options: options ?? [] })}
+        />
+      ) : null}
+      {error ? (
+        <p role="alert" className="w-full text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -236,7 +395,8 @@ function ScheduleRow(props: {
       >
         <span className="truncate font-medium">{props.task.title}</span>
         <span className="truncate text-muted-foreground text-xs">
-          {scheduleLabel(props.task.schedule)} · {props.task.modelSelection.model} ·{" "}
+          {scheduleLabel(props.task.schedule)}
+          {props.task.threadId === null ? ` · ${props.task.modelSelection.model}` : ""} ·{" "}
           {scheduleStatus(props.task)}
         </span>
         {props.task.lastRunStatus === "failed" || props.task.lastRunError ? (
