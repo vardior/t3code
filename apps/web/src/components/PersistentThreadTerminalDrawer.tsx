@@ -13,7 +13,7 @@ import {
   getTerminalLabel,
 } from "@t3tools/shared/terminalLabels";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { memo, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
@@ -429,75 +429,90 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
     [onAddTerminalContext, visible],
   );
 
-  const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (!active || isCommandPaletteOpen()) return;
-    if (
-      preventRepeatedTerminalCloseShortcut(event, keybindings) ||
-      (isTerminalCloseConfirmPending() && preventTerminalCloseShortcut(event, keybindings))
-    ) {
-      event.stopPropagation();
-      return;
-    }
-    if (event.defaultPrevented && getTerminalFocusOwner() === null) return;
-    const command = resolveShortcutCommand(event, keybindings, {
-      context: {
-        terminalFocus: getTerminalFocusOwner() !== null,
-        terminalOpen: visible,
-        previewFocus: false,
-        previewOpen: false,
-        editableFocus: isEditableFocused(event.target),
-        modelPickerOpen: isModelPickerOpen(),
-        isWeb: !isElectron,
-        isDesktop: isElectron,
-      },
-    });
-    const action = terminalShortcutAction(command, {
-      terminalOpen: visible,
-      canReadTerminal,
-      canOperateTerminal,
-    });
-    if (action === null) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const store = useTerminalUiStateStore.getState();
-    if (action === "toggle") {
-      if (!visible && hasTerminalWriteAccess() && terminalUiState.terminalIds.length === 0) {
-        createNewTerminal();
-      } else {
-        store.setTerminalOpen(threadRef, !visible);
-      }
-      return;
-    }
-    if (action === "close") {
-      if (!visible) return;
-      const terminalId = terminalUiState.activeTerminalId;
-      const label = terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
-      void confirmTerminalClose([label]).then((confirmed) => {
-        if (confirmed && hasTerminalWriteAccess()) closeTerminal(terminalId);
-      });
-      return;
-    }
-    store.setTerminalOpen(threadRef, true);
-    if (action === "new") {
-      createNewTerminal();
-      return;
-    }
-    const group =
-      terminalUiState.terminalGroups.find(
-        (entry) => entry.id === terminalUiState.activeTerminalGroupId,
-      ) ??
-      terminalUiState.terminalGroups.find((entry) =>
-        entry.terminalIds.includes(terminalUiState.activeTerminalId),
-      );
-    if ((group?.terminalIds.length ?? 0) >= MAX_TERMINALS_PER_GROUP) return;
-    if (action === "splitVertical") splitTerminalVertical();
-    else splitTerminal();
-  });
   useEffect(() => {
     if (!handleShortcuts) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!active || isCommandPaletteOpen()) return;
+      if (
+        preventRepeatedTerminalCloseShortcut(event, keybindings) ||
+        (isTerminalCloseConfirmPending() && preventTerminalCloseShortcut(event, keybindings))
+      ) {
+        event.stopPropagation();
+        return;
+      }
+      if (event.defaultPrevented && getTerminalFocusOwner() === null) return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: {
+          terminalFocus: getTerminalFocusOwner() !== null,
+          terminalOpen: visible,
+          previewFocus: false,
+          previewOpen: false,
+          editableFocus: isEditableFocused(event.target),
+          modelPickerOpen: isModelPickerOpen(),
+          isWeb: !isElectron,
+          isDesktop: isElectron,
+        },
+      });
+      const action = terminalShortcutAction(command, {
+        terminalOpen: visible,
+        canReadTerminal,
+        canOperateTerminal,
+      });
+      if (action === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const store = useTerminalUiStateStore.getState();
+      if (action === "toggle") {
+        if (!visible && hasTerminalWriteAccess() && terminalUiState.terminalIds.length === 0) {
+          createNewTerminal();
+        } else {
+          store.setTerminalOpen(threadRef, !visible);
+        }
+        return;
+      }
+      if (action === "close") {
+        if (!visible) return;
+        const terminalId = terminalUiState.activeTerminalId;
+        const label = terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
+        void confirmTerminalClose([label]).then((confirmed) => {
+          if (confirmed && hasTerminalWriteAccess()) closeTerminal(terminalId);
+        });
+        return;
+      }
+      store.setTerminalOpen(threadRef, true);
+      if (action === "new") {
+        createNewTerminal();
+        return;
+      }
+      const group =
+        terminalUiState.terminalGroups.find(
+          (entry) => entry.id === terminalUiState.activeTerminalGroupId,
+        ) ??
+        terminalUiState.terminalGroups.find((entry) =>
+          entry.terminalIds.includes(terminalUiState.activeTerminalId),
+        );
+      if ((group?.terminalIds.length ?? 0) >= MAX_TERMINALS_PER_GROUP) return;
+      if (action === "splitVertical") splitTerminalVertical();
+      else splitTerminal();
+    };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [handleShortcuts]);
+  }, [
+    handleShortcuts,
+    active,
+    keybindings,
+    visible,
+    canReadTerminal,
+    canOperateTerminal,
+    hasTerminalWriteAccess,
+    terminalUiState,
+    terminalLabelsById,
+    createNewTerminal,
+    closeTerminal,
+    splitTerminal,
+    splitTerminalVertical,
+    threadRef,
+  ]);
 
   const shortcutOptions = { context: { terminalFocus: true, terminalOpen: visible } };
   const drawerShortcutLabel = (
