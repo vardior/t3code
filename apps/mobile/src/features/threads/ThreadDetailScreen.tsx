@@ -1488,7 +1488,7 @@ function ThreadDetailBody(
                   contentPresentation={props.contentPresentation}
                   threadTitle={props.selectedThread.title}
                   latestRun={props.activityRun}
-                  activeWorkStartedAt={props.activeWorkStartedAt}
+                  activeWorkStartedAt={props.workingLabel ? null : props.activeWorkStartedAt}
                   runlessWorkActive={props.runlessWorkActive ?? false}
                   listRef={listRef}
                   freeze={freeze}

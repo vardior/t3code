@@ -5,6 +5,7 @@ import type { ThreadFeedEntry } from "../../lib/threadActivity";
 import { botMarkdownThreadLinks } from "./botChat.logic";
 
 type MessageEntry = Extract<ThreadFeedEntry, { readonly type: "message" }>;
+type ActivityGroupEntry = Extract<ThreadFeedEntry, { readonly type: "activity-group" }>;
 
 function sameEntries(
   previous: ReadonlyArray<ThreadFeedEntry>,
@@ -48,27 +49,48 @@ export function createBotFeedFilter(input: {
       },
     });
   };
+  const ownerRunIds = new Set(
+    input.items.flatMap((item) => (item.kind === "you" && item.runId !== null ? [item.runId] : [])),
+  );
+  const interruptions = new WeakMap<ActivityGroupEntry, ActivityGroupEntry | null>();
+  const ownerInterruption = (entry: ActivityGroupEntry): ActivityGroupEntry | null => {
+    const cached = interruptions.get(entry);
+    if (cached !== undefined) return cached;
+    const activities = entry.activities.filter(
+      (activity) =>
+        activity.projectedItem.item.type === "run_interrupt_result" &&
+        activity.runId !== null &&
+        ownerRunIds.has(activity.runId),
+    );
+    let next: ActivityGroupEntry | null;
+    if (activities.length === 0) next = null;
+    else if (activities.length === entry.activities.length) next = entry;
+    else next = { ...entry, activities };
+    interruptions.set(entry, next);
+    return next;
+  };
+  const kinds = new Map(input.items.map((item) => [item.id, item.kind]));
   let lastEntries: ReadonlyArray<ThreadFeedEntry> | null = null;
   let lastResult: ReadonlyArray<ThreadFeedEntry> | null = null;
   return (entries: ReadonlyArray<ThreadFeedEntry>) => {
     if (lastResult !== null && entries === lastEntries) return lastResult;
-    const messages = new Map<string, MessageEntry>();
-    const unsent: ThreadFeedEntry[] = [];
-    for (const entry of entries) {
-      if (entry.type !== "message") continue;
-      messages.set(`message:${entry.message.id}`, entry);
-      if (entry.message.role === "user" && entry.message.createdBy === undefined) {
-        unsent.push(entry);
+    const next = entries.flatMap((entry): ThreadFeedEntry[] => {
+      if (entry.type === "activity-group") {
+        const interruption = ownerInterruption(entry);
+        return interruption ? [interruption] : [];
       }
+      if (entry.type !== "message") return [];
+      const kind = kinds.get(`message:${entry.message.id}`);
+      if (kind === "bot") return [withLinks(entry, entry)];
+      if (kind === "you") return [entry];
+      return entry.message.role === "user" && entry.message.createdBy === undefined ? [entry] : [];
+    });
+    for (const item of input.items) {
+      if (item.id.startsWith("message:")) continue;
+      const entry = synthetic(item);
+      const index = next.findIndex((candidate) => candidate.createdAt > entry.createdAt);
+      next.splice(index === -1 ? next.length : index, 0, entry);
     }
-    const next = [
-      ...input.items.flatMap((item) => {
-        const entry = messages.get(item.id);
-        if (entry) return [item.kind === "bot" ? withLinks(entry, entry) : entry];
-        return item.id.startsWith("message:") ? [] : [synthetic(item)];
-      }),
-      ...unsent,
-    ];
     lastEntries = entries;
     if (lastResult === null || !sameEntries(lastResult, next)) lastResult = next;
     return lastResult;
