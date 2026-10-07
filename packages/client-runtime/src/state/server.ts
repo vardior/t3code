@@ -1605,6 +1605,30 @@ export function createServerEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.threadId, input.turnItemId]),
       },
     }),
+    answerOpenItem: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:open-items:answer",
+      tag: WS_METHODS.openItemsAnswer,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.itemId]),
+      },
+    }),
+    dropOpenItem: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:open-items:drop",
+      tag: WS_METHODS.openItemsDrop,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.itemId]),
+      },
+    }),
+    reopenOpenItem: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:open-items:reopen",
+      tag: WS_METHODS.openItemsReopen,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.itemId]),
+      },
+    }),
     refreshUsageRates: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-usage-rates",
       tag: WS_METHODS.serverRefreshUsageRates,

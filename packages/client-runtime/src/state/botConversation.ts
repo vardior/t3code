@@ -15,6 +15,7 @@ import {
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
+import { countOpenItems } from "./openItems.ts";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
@@ -79,11 +80,15 @@ export function isActiveRunStatus(status: string | null | undefined): boolean {
 export function botNeedsYou(
   bot: Pick<BotSummary, "lastReply">,
   shell:
-    | Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "lastVisitedAt">
+    | Pick<
+        EnvironmentThreadShell,
+        "hasPendingApprovals" | "hasPendingUserInput" | "lastVisitedAt" | "openItems"
+      >
     | null
     | undefined,
 ): boolean {
   if (shell?.hasPendingApprovals || shell?.hasPendingUserInput) return true;
+  if (countOpenItems(shell?.openItems) > 0) return true;
   if (!bot.lastReply) return false;
   const replyAt = Date.parse(bot.lastReply.at);
   if (!Number.isFinite(replyAt)) return false;

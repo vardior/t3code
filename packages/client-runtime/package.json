@@ -159,6 +159,10 @@
       "types": "./src/state/botChatRows.ts",
       "default": "./src/state/botChatRows.ts"
     },
+    "./state/open-items": {
+      "types": "./src/state/openItems.ts",
+      "default": "./src/state/openItems.ts"
+    },
     "./state/bot-conversation": {
       "types": "./src/state/botConversation.ts",
       "default": "./src/state/botConversation.ts"

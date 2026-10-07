@@ -1,3 +1,4 @@
+import { OpenItemId, ThreadId, type OpenItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { botNeedsYou, botVisitWatermark } from "./botConversation.ts";
@@ -7,7 +8,17 @@ const shell = {
   hasPendingApprovals: false,
   hasPendingUserInput: false,
   lastVisitedAt: "2026-10-07T10:01:00.000Z",
+  openItems: [] as ReadonlyArray<OpenItem>,
 };
+const openItem = (status: OpenItem["status"]): OpenItem => ({
+  id: OpenItemId.make(`item-${status}`),
+  threadId: ThreadId.make("bot-home"),
+  title: "Pick a release date",
+  status,
+  createdAt: "2026-10-07T09:00:00.000Z",
+  updatedAt: "2026-10-07T09:00:00.000Z",
+  resolvedAt: status === "open" ? null : "2026-10-07T09:30:00.000Z",
+});
 
 describe("botNeedsYou", () => {
   it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
@@ -17,6 +28,13 @@ describe("botNeedsYou", () => {
       expect(botNeedsYou({ lastReply: null }, { ...shell, [request]: true })).toBe(true);
     },
   );
+
+  it("needs the owner while an open item waits, even after a visit", () => {
+    expect(botNeedsYou({}, { ...shell, openItems: [openItem("open")] })).toBe(true);
+    expect(
+      botNeedsYou({}, { ...shell, openItems: [openItem("answered"), openItem("dropped")] }),
+    ).toBe(false);
+  });
 
   it("needs the owner when the latest reply is newer than the visit", () => {
     expect(botNeedsYou(reply, { ...shell, lastVisitedAt: "2026-10-07T09:59:00.000Z" })).toBe(true);
@@ -41,9 +59,9 @@ describe("botNeedsYou", () => {
   );
 
   it("treats a reply as unread when the visit watermark is omitted", () => {
-    expect(botNeedsYou(reply, { hasPendingApprovals: false, hasPendingUserInput: false })).toBe(
-      true,
-    );
+    expect(
+      botNeedsYou(reply, { hasPendingApprovals: false, hasPendingUserInput: false, openItems: [] }),
+    ).toBe(true);
   });
 
   it("treats a reply as unread before its home thread shell arrives", () => {
