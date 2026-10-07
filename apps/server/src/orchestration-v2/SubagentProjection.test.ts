@@ -3,6 +3,7 @@ import {
   CommandId,
   type ModelSelection,
   NodeId,
+  OpenItemId,
   RunId,
   RunAttemptId,
   MessageId,
@@ -135,7 +136,18 @@ it.effect.each(["provider", "mcp"] as const)(
         pinnedAt: parentCreatedAt,
         pinOrderKey: "a0",
         autoSettleDisabledAt: parentCreatedAt,
-      };
+        openItems: [
+          {
+            id: OpenItemId.make("item-parent-ask"),
+            threadId: parentThreadId,
+            title: "Parent ask",
+            status: "open",
+            createdAt: "2026-07-24T09:00:00.000Z",
+            updatedAt: "2026-07-24T09:00:00.000Z",
+            resolvedAt: null,
+          },
+        ],
+      } satisfies OrchestrationV2AppThread;
       const childThread = makeSubagentChildThread({
         parentThread,
         childThreadId,
@@ -154,6 +166,7 @@ it.effect.each(["provider", "mcp"] as const)(
       assert.isNull(childThread.pinnedAt);
       assert.isNull(childThread.pinOrderKey);
       assert.isNull(childThread.autoSettleDisabledAt);
+      assert.deepEqual(childThread.openItems, []);
 
       for (const thread of [parentThread, childThread]) {
         yield* store.apply({

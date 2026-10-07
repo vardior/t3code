@@ -4,6 +4,7 @@ import {
   ContextTransferId,
   EnvironmentId,
   MessageId,
+  OpenItemId,
   type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2Run,
@@ -62,6 +63,17 @@ function makeSourceThread(): OrchestrationV2AppThread {
     snoozedUntil,
     snoozedAt,
     deletedAt: null,
+    openItems: [
+      {
+        id: OpenItemId.make("item-source-ask"),
+        threadId: sourceThreadId,
+        title: "Source ask",
+        status: "open",
+        createdAt: "2026-07-24T09:00:00.000Z",
+        updatedAt: "2026-07-24T09:00:00.000Z",
+        resolvedAt: null,
+      },
+    ],
   };
 }
 
@@ -134,7 +146,20 @@ const planFork = (
     });
   }).pipe(Effect.provide(ThreadForkService.layer));
 
-it.effect("resets a fork's pin, snooze, settle and delegation state but keeps its origin", () =>
+it("treats usage-limited and other provider-finished runs as forkable", () => {
+  assert.isTrue(ThreadForkService.isForkableSourceRunStatus("completed"));
+  assert.isTrue(ThreadForkService.isForkableSourceRunStatus("waiting"));
+  assert.isTrue(ThreadForkService.isForkableSourceRunStatus("failed"));
+  assert.isTrue(ThreadForkService.isForkableSourceRunStatus("interrupted"));
+  assert.isTrue(ThreadForkService.isForkableSourceRunStatus("cancelled"));
+  assert.isFalse(ThreadForkService.isForkableSourceRunStatus("running"));
+  assert.isFalse(ThreadForkService.isForkableSourceRunStatus("starting"));
+  assert.isFalse(ThreadForkService.isForkableSourceRunStatus("queued"));
+  assert.isFalse(ThreadForkService.isForkableSourceRunStatus("preparing"));
+  assert.isFalse(ThreadForkService.isForkableSourceRunStatus("rolled_back"));
+});
+
+it.effect("resets a fork's pin, snooze, settle, delegation and open items but keeps its origin", () =>
   Effect.gen(function* () {
     const linkOrigin = { sessionId: "mcp-session:fork-source", label: "Linked laptop" };
     const sourceThread: OrchestrationV2AppThread = {
@@ -170,6 +195,7 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
     assert.equal(result.targetThread.historyOrigin, "v1_import");
     assert.deepEqual(result.targetThread.linkOrigin, linkOrigin);
     assert.deepEqual(result.targetThread.tags, ["private"]);
+    assert.deepEqual(result.targetThread.openItems, []);
     assert.equal(result.targetThread.projectId, sourceThread.projectId);
     assert.equal(result.targetThread.providerInstanceId, sourceThread.providerInstanceId);
     assert.deepEqual(result.targetThread.modelSelection, sourceThread.modelSelection);
