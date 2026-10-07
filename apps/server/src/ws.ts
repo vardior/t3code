@@ -131,6 +131,7 @@ import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
 import * as Bots from "./bots/BotService.ts";
 import * as BotsRpc from "./bots/rpc.ts";
+import * as OpenItemService from "./openItems/OpenItemService.ts";
 import {
   bufferShellLiveStream,
   coalesceShellApplicationEvents,
@@ -1453,6 +1454,7 @@ export const layerWsRpc = (
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
       const bots = yield* Bots.BotService;
+      const openItems = yield* OpenItemService.OpenItemService;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -2396,6 +2398,18 @@ export const layerWsRpc = (
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
         ...BotsRpc.makeHandlers(bots),
+        [WS_METHODS.openItemsAnswer]: (input) =>
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.andThen(openItems.answer(input)),
+          ),
+        [WS_METHODS.openItemsDrop]: (input) =>
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.andThen(openItems.drop(input)),
+          ),
+        [WS_METHODS.openItemsReopen]: (input) =>
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.andThen(openItems.reopen(input)),
+          ),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({
@@ -3547,6 +3561,7 @@ export const layer = Layer.unwrap(
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
     const bots = yield* Bots.BotService;
+    const openItems = yield* OpenItemService.OpenItemService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3636,6 +3651,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(Layer.succeed(Bots.BotService, bots)),
+              Layer.provide(Layer.succeed(OpenItemService.OpenItemService, openItems)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

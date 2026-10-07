@@ -74,6 +74,7 @@ import {
   ThreadLinkedPullRequest,
   ThreadId,
   TurnItemId,
+  OpenItemError,
   TrimmedNonEmptyString,
   managedRuntimeModeCeilingMessage,
 } from "@t3tools/contracts";
@@ -154,6 +155,13 @@ import {
   threadsStartingWork,
 } from "./DispatchModeLimit.ts";
 import {
+  IdleCompactionAdmission,
+  IdleCompactionPauseGuard,
+  idleCompactionCandidate,
+  idleCompactionFields,
+  sameIdleCompactionCandidate,
+} from "./IdleCompactionPolicy.ts";
+import {
   applyToProjection,
   emptyProjection,
   threadShellFromProjection,
@@ -193,6 +201,7 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import { planOpenItemChange, type OpenItemChange } from "./OpenItems.ts";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -624,6 +633,10 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
       return command.parentThreadId;
     case "secret_request.record":
     case "link_request.record":
+    case "thread.open-item.add":
+    case "thread.open-item.update":
+    case "thread.open-item.resolve":
+    case "thread.open-item.reopen":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -3232,6 +3245,92 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
     },
   );
+
+  const dispatchOpenItem = Effect.fn("orchestrationV2.dispatch.openItem")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      {
+        readonly type:
+          | "thread.open-item.add"
+          | "thread.open-item.update"
+          | "thread.open-item.resolve"
+          | "thread.open-item.reopen";
+      }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) {
+    const thread = yield* projectionStore
+      .getThread(command.threadId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const change: OpenItemChange = (() => {
+      switch (command.type) {
+        case "thread.open-item.add":
+          return { type: "add", itemId: command.itemId, content: command.content };
+        case "thread.open-item.update":
+          return { type: "update", itemId: command.itemId, patch: command.patch };
+        case "thread.open-item.resolve":
+          return {
+            type: "resolve",
+            itemId: command.itemId,
+            status: command.status,
+            answer: command.answer,
+          };
+        case "thread.open-item.reopen":
+          return { type: "reopen", itemId: command.itemId };
+      }
+    })();
+    const reply =
+      command.type === "thread.open-item.resolve" || command.type === "thread.open-item.reopen"
+        ? command.reply
+        : undefined;
+    if (reply !== undefined && isProviderNativeSubagentThread(thread)) {
+      return yield* new OrchestratorSubagentThreadReadOnlyError({
+        commandId: command.commandId,
+        threadId: command.threadId,
+      });
+    }
+    const now = yield* DateTime.now;
+    const plan = planOpenItemChange(thread, change, DateTime.formatIso(now));
+    if (!plan.ok) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: new OpenItemError({ reason: plan.reason }),
+      });
+    }
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.open-items-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: now,
+      payload: { ...thread, openItems: plan.items, updatedAt: now },
+    });
+    if (reply === undefined) return;
+    yield* dispatchMessage(
+      {
+        type: "message.dispatch",
+        commandId: command.commandId,
+        threadId: command.threadId,
+        messageId: reply.messageId,
+        text: reply.text,
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        deliveryIntent: "auto",
+        createdBy: "user",
+        creationSource: reply.creationSource,
+      },
+      events,
+      effects,
+    );
+  });
 
   // Deleted after the share change commits: the files of waiting messages it dismissed or dropped.
   const releaseGuestAttachments = (
@@ -5949,6 +6048,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             turn.status === "completed"))
       ) {
         dispatchMode = { type: "start_immediately" };
+      } else if (
+        command.deliveryIntent === "auto" &&
+        projection.messages.some(
+          (message) =>
+            message.id === target?.userMessageId && isNativeMaintenanceCommand(message),
+        )
+      ) {
+        dispatchMode = { type: "queue_after_active" };
       }
     }
     // Stop leaves the run reading as running until its provider stops. A plain
@@ -13812,6 +13919,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
         break;
+      case "thread.open-item.add":
+      case "thread.open-item.update":
+      case "thread.open-item.resolve":
+      case "thread.open-item.reopen":
+        yield* dispatchOpenItem(command, events, effects);
+        break;
       default:
         return yield* dispatchUnsupported(command);
     }
@@ -13908,6 +14021,56 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .getThreadShell(threadId)
         .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
       if (shell !== null) yield* refuseAboveDispatchModeLimit(command, threadId, shell);
+    }
+
+    const idleCandidate = yield* IdleCompactionAdmission;
+    if (idleCandidate !== undefined) {
+      const current = yield* projectionStore
+        .getThreadRecords(commandThreadId(command), idleCompactionFields)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestratorProjectionError({ threadId: commandThreadId(command), cause }),
+          ),
+        );
+      const children = yield* Effect.forEach(
+        [
+          ...new Set(
+            current.subagents.flatMap((agent) =>
+              agent.childThreadId === null ? [] : [agent.childThreadId],
+            ),
+          ),
+        ],
+        (childId) =>
+          projectionStore
+            .getThreadShell(childId)
+            .pipe(
+              Effect.mapError(
+                (cause) => new OrchestratorProjectionError({ threadId: childId, cause }),
+              ),
+            ),
+      );
+      const childWorkPending = children.some(
+        (child) =>
+          child !== null &&
+          (child.activeRunId !== null ||
+            child.activityRunStatus != null ||
+            ["preparing", "queued", "starting", "running", "waiting"].includes(child.status) ||
+            child.pendingRuntimeRequest !== null ||
+            (child.pendingBackgroundTasks ?? []).length > 0),
+      );
+      if (
+        childWorkPending ||
+        (yield* (yield* IdleCompactionPauseGuard)(idleCandidate.threadId)) ||
+        command.type !== "message.dispatch" ||
+        command.text !== "/compact" ||
+        !sameIdleCompactionCandidate(
+          idleCandidate,
+          idleCompactionCandidate(current, DateTime.toEpochMillis(yield* DateTime.now)),
+        )
+      ) {
+        return { sequence: 0, storedEvents: [] };
+      }
     }
 
     const plan = yield* dispatchOnce(command, sideChatIds).pipe(

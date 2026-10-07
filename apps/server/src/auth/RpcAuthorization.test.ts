@@ -14,6 +14,9 @@ import {
   AuthSourceControlWriteScope,
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
+  AuthRelayReadScope,
+  AuthRelayWriteScope,
+  AuthPreviewOperateScope,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -42,6 +45,119 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.scheduledTasksRotateWebhookToken,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
+  it("requires operate scope to answer, drop, or reopen an open item", () => {
+    for (const method of [
+      WS_METHODS.openItemsAnswer,
+      WS_METHODS.openItemsDrop,
+      WS_METHODS.openItemsReopen,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
+  it("allows relay status reads without granting relay installation access", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.cloudGetRelayClientStatus)).toBe(
+      AuthRelayReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.cloudInstallRelayClient)).toBe(AuthRelayWriteScope);
+  });
+
+  it("requires permission to operate on a thread before uploading feedback", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.providerUploadFeedback)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("requires write access to import agent session history", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsScan)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsImport)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("separates ACP Registry discovery from provisioning", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverSearchAcpRegistry)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareAcpRegistryAgent)).toBe(
+      AuthProvidersManageScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverUninstallAcpRegistryManagedBinary)).toBe(
+      AuthProvidersManageScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverAcceptAcpRegistryUrlAuth)).toBe(
+      AuthProvidersManageScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverListAcpRegistrySessions)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverImportAcpRegistrySession)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverLogoutAcpRegistry)).toBe(
+      AuthProvidersManageScope,
+    );
+  });
+
+  it("reads the reviewer menu under the same scope as the pull request it belongs to", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsChecks)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsReviewerCandidates)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.pullRequestsDetail),
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsRequestReviewers)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.pullRequestsComment),
+    );
+  });
+
+  it("requires source control writes to start, retry, or cancel project clones", () => {
+    for (const method of [
+      WS_METHODS.projectCloneStart,
+      WS_METHODS.projectCloneRetry,
+      WS_METHODS.projectCloneCancel,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthSourceControlWriteScope);
+    }
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeProjectClones)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
+
+  it("separates viewing pull request file progress from writing it", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsFilesViewed)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsSetFilesViewed)).toBe(
+      AuthSourceControlWriteScope,
+    );
+  });
+
+  it("separates preview control from observation", () => {
+    for (const method of [
+      WS_METHODS.previewOpen,
+      WS_METHODS.previewNavigate,
+      WS_METHODS.previewResize,
+      WS_METHODS.previewRefresh,
+      WS_METHODS.previewClose,
+      WS_METHODS.previewReportStatus,
+      WS_METHODS.previewAdjust,
+      WS_METHODS.previewClearProfile,
+      WS_METHODS.previewReportProfiles,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthPreviewOperateScope);
+    }
+    for (const method of [
+      WS_METHODS.previewList,
+      WS_METHODS.subscribePreviewEvents,
+      WS_METHODS.subscribeDiscoveredLocalServers,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
     }
   });
 

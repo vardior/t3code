@@ -312,6 +312,8 @@ export const TurnItemId = makeEntityId("TurnItemId");
 export type TurnItemId = typeof TurnItemId.Type;
 export const RuntimeRequestId = makeEntityId("RuntimeRequestId");
 export type RuntimeRequestId = typeof RuntimeRequestId.Type;
+export const OpenItemId = makeEntityId("OpenItemId");
+export type OpenItemId = typeof OpenItemId.Type;
 export const ScheduledTaskId = makeEntityId("ScheduledTaskId");
 /** A one-use handle to a secret the user entered for an agent; the agent never sees the value. */
 export const SecretRef = makeEntityId("SecretRef");

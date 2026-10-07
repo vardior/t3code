@@ -42,6 +42,7 @@ export type T3McpToolSummaryAction =
   | "question-respond"
   | "secret-request"
   | "owner-notify"
+  | "open-item"
   | "worktree-handoff"
   | "worktree-list"
   | "worktree-status"
@@ -167,6 +168,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "owner-notify",
   ),
   request_secret: tool(["Ask for", "Asking for", "Asked for", "a secret"], "secret-request"),
+  open_item_add: tool(["Add", "Adding", "Added", "an open item"], "open-item"),
+  open_item_update: tool(["Update", "Updating", "Updated", "an open item"], "open-item"),
+  open_item_resolve: tool(["Resolve", "Resolving", "Resolved", "an open item"], "open-item"),
+  open_item_list: tool(["List", "Listing", "Listed", "open items"], "open-item"),
   create_threads: tool(["Create", "Creating", "Created", "T3 threads"], "thread-create"),
   t3_thread_start: tool(["Start", "Starting", "Started", "a T3 thread"], "thread-create"),
   t3_thread_list: tool(["List", "Listing", "Listed", "T3 threads"], "thread-list"),

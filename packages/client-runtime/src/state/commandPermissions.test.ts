@@ -381,6 +381,21 @@ it.effect.each(["commit", "push", "commit_push", "create_pr", "commit_push_pr"] 
         yield* command.authorize(registry, env, withThread);
       }),
     ),
+it.effect("gates open item answers on the target environment's operate grant", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const answer = createCommandPermissions(runtime, WS_METHODS.openItemsAnswer);
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect(registry.get(answer.permissionAtom(env))).toBe(false);
+      expect((yield* answer.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+        AuthOrchestrationOperateScope,
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(answer.permissionAtom(env))).toBe(true);
+      yield* answer.authorize(registry, env);
+    }),
+  ),
 );
 
 it.effect(

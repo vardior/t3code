@@ -385,6 +385,7 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import { BOT_WS_METHODS, BotsRpcGroup } from "./bots.ts";
+import { OPEN_ITEM_WS_METHODS, OpenItemsRpcGroup } from "./openItems.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -560,6 +561,7 @@ export const WS_METHODS = {
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
   ...BOT_WS_METHODS,
+  ...OPEN_ITEM_WS_METHODS,
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -2287,4 +2289,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribePromptSuggestionRpc,
 )
   .merge(BotsRpcGroup)
+  .merge(OpenItemsRpcGroup)
   .middleware(RpcScopeAuthorization);

@@ -21,6 +21,7 @@ import {
   MessageId,
   EnvironmentId,
   NodeId,
+  OpenItemId,
   ForwardCompatibleUnion,
   ForwardCompatibleUnionArray,
   hasUnknownUnionTag,
@@ -56,6 +57,13 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import {
+  OpenItem,
+  OpenItemAnswer,
+  OpenItemContent,
+  OpenItemPatch,
+  OpenItemResolvedStatus,
+} from "./openItems.ts";
 import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -455,6 +463,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  openItems: Schema.optional(Schema.Array(OpenItem)),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
@@ -1914,6 +1923,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.marked-unread",
       "thread.metadata-updated",
       "thread.pull-request-synced",
+      "thread.open-items-updated",
       "thread.runtime-mode-updated",
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
@@ -2110,6 +2120,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  openItems: Schema.optional(Schema.Array(OpenItem)),
   lineage: OrchestrationV2AppThreadLineage,
   forkedFrom: Schema.NullOr(OrchestrationV2AppThread.fields.forkedFrom),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
@@ -2805,6 +2816,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
+      "thread.open-items-updated",
       "thread.metadata-updated",
       "thread.runtime-mode-updated",
       "thread.interaction-mode-updated",
@@ -3443,6 +3455,41 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     projectId: ProjectId,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.open-item.add"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: OpenItemId,
+    content: OpenItemContent,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.open-item.update"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: OpenItemId,
+    patch: OpenItemPatch,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.open-item.resolve"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: OpenItemId,
+    status: OpenItemResolvedStatus,
+    answer: Schema.optional(OpenItemAnswer),
+    reply: Schema.optional(
+      Schema.Struct({
+        messageId: MessageId,
+        text: Schema.String,
+        creationSource: OrchestrationV2CreationSource,
+      }),
+    ),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.open-item.reopen"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    itemId: OpenItemId,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
