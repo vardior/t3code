@@ -68,6 +68,21 @@ export function isActiveRunStatus(status: string | null | undefined): boolean {
   return status != null && ACTIVE_RUN_STATUSES.has(status);
 }
 
+export function botNeedsYou(
+  bot: Pick<BotSummary, "lastReply">,
+  shell:
+    | Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "lastVisitedAt">
+    | null
+    | undefined,
+): boolean {
+  if (shell?.hasPendingApprovals || shell?.hasPendingUserInput) return true;
+  if (!bot.lastReply) return false;
+  const replyAt = Date.parse(bot.lastReply.at);
+  if (!Number.isFinite(replyAt)) return false;
+  const visitedAt = shell?.lastVisitedAt ? Date.parse(shell.lastVisitedAt) : NaN;
+  return !Number.isFinite(visitedAt) || replyAt > visitedAt;
+}
+
 export function botThreadShellStatus(
   shell: EnvironmentThreadShell | null | undefined,
   bot: Pick<BotSummary, "homeThreadMissing" | "homeThreadArchived" | "homeThreadQueueHeld"> = {},

@@ -47,6 +47,7 @@ import {
   resolveBotListOrder,
   botThreadShellStatus,
   botThreadShellStatusLabel,
+  botNeedsYou,
   type PendingBotOrder,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import { BotChat } from "./BotChat";
@@ -302,6 +303,7 @@ function BotListItem(props: {
     isDragging,
   } = useSortable({ id: props.bot.id, disabled: props.disabled });
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
+  const needsYou = botNeedsYou(props.bot, shell);
   const status = botThreadShellStatus(shell, props.bot);
   const working = status === "working";
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
@@ -344,12 +346,32 @@ function BotListItem(props: {
       >
         <BotAvatar name={props.bot.name} />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate font-medium text-sm">{props.bot.name}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className={cn("truncate text-sm", needsYou ? "font-semibold" : "font-medium")}>
+              {props.bot.name}
+            </span>
+            {needsYou ? (
+              <span
+                className="size-2 shrink-0 rounded-full bg-primary"
+                role="img"
+                aria-label="Needs you"
+              />
+            ) : null}
+          </span>
           {props.environmentLabel ? (
             <span className="truncate text-muted-foreground text-xs">{props.environmentLabel}</span>
           ) : null}
-          <span className="truncate text-muted-foreground text-xs">
-            {attentionLabel ??
+          <span
+            className={cn(
+              "truncate text-xs",
+              needsYou ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {(shell?.hasPendingApprovals
+              ? "Needs approval"
+              : shell?.hasPendingUserInput
+                ? "Needs input"
+                : attentionLabel) ??
               (props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel))}
           </span>
         </span>

@@ -1,4 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
+import { botNeedsYou } from "@t3tools/client-runtime/state/bot-conversation";
+import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -6,6 +8,7 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentSummaries } from "../../state/presentation";
 import { formatEnvironmentQueryError } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { environmentThreadShells } from "../../state/threads";
 import { retainEnvironmentBotQueries } from "./environmentBots.logic";
 
 const environmentBotsAtom = Atom.make((get) => {
@@ -35,6 +38,23 @@ const environmentBotsAtom = Atom.make((get) => {
     ),
   };
 }).pipe(Atom.keepAlive);
+
+const botsNeedsYouCountAtom = Atom.make((get) => {
+  let count = 0;
+  for (const { environmentId, data } of get(environmentBotsAtom).queries) {
+    if (!data?.bots.length) continue;
+    const shells = get(environmentThreadShells.environmentThreadIndexAtom(environmentId));
+    for (const bot of data.bots) {
+      const source = shells.get(bot.homeThreadId);
+      if (botNeedsYou(bot, source ? presentThreadShell(environmentId, source) : null)) count += 1;
+    }
+  }
+  return count;
+});
+
+export function useBotsNeedsYouCount() {
+  return useAtomValue(botsNeedsYouCountAtom);
+}
 
 export function useEnvironmentBots() {
   return useAtomValue(environmentBotsAtom);

@@ -1,7 +1,7 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { KeyboardAwareLegendList, useKeyboardChatComposerInset } from "@legendapp/list/keyboard";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
@@ -19,9 +19,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, View, type ViewInstance } from "react-native";
+import { AppState, Platform, Pressable, View, type ViewInstance } from "react-native";
 import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -141,6 +142,57 @@ function BotConversation(props: {
   const detail = useBotDetail(environmentId, bot.id);
   const thread = useEnvironmentThread(environmentId, bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
+  const focused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) =>
+      setAppActive(state === "active"),
+    );
+    return () => subscription.remove();
+  }, []);
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const lastVisit = useRef({ watermark: "", at: 0 });
+  const updatedAt = projection ? DateTime.formatIso(projection.thread.updatedAt) : null;
+  const visitedAt = projection?.thread.lastVisitedAt;
+  const lastVisitedAt = visitedAt ? DateTime.formatIso(visitedAt) : visitedAt;
+  const lastReplyAt = bot.lastReply?.at;
+  useEffect(() => {
+    if (!focused || !appActive) {
+      lastVisit.current = { watermark: "", at: 0 };
+      return;
+    }
+    if (!connected || thread.status !== "live" || updatedAt === null || lastVisitedAt === undefined)
+      return;
+    const visitedMs = lastVisitedAt ? Date.parse(lastVisitedAt) : NaN;
+    if (visitedMs >= Date.parse(updatedAt)) return;
+    if (lastVisit.current.watermark === updatedAt) return;
+    const dispatch = () => {
+      lastVisit.current = { watermark: updatedAt, at: Date.now() };
+      void visitThread({
+        environmentId,
+        input: { threadId: bot.homeThreadId, visitedAt: updatedAt },
+      });
+    };
+    const unreadReply = lastReplyAt !== undefined && !(visitedMs >= Date.parse(lastReplyAt));
+    const elapsed = Date.now() - lastVisit.current.at;
+    if (unreadReply || elapsed >= 10_000) {
+      dispatch();
+      return;
+    }
+    const timer = setTimeout(dispatch, 10_000 - elapsed);
+    return () => clearTimeout(timer);
+  }, [
+    appActive,
+    focused,
+    connected,
+    thread.status,
+    updatedAt,
+    lastVisitedAt,
+    lastReplyAt,
+    environmentId,
+    bot.homeThreadId,
+    visitThread,
+  ]);
   const retryThread = useAtomRefresh(environmentThreads.stateAtom(environmentId, bot.homeThreadId));
   const threadError = Option.getOrNull(thread.error);
   const homeThreadArchived =

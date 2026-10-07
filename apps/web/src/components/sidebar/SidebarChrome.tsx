@@ -197,14 +197,16 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 export function SidebarUtilityItem({
   icon,
   label,
+  count = 0,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  count?: number;
   onClick: () => void;
 }) {
   return (
-    <SidebarMenuItem className="shrink-0">
+    <SidebarMenuItem className="relative shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -215,6 +217,13 @@ export function SidebarUtilityItem({
         />
         <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
+      {count > 0 ? (
+        <span className="pointer-events-none absolute -top-1 -right-1" aria-hidden="true">
+          <Badge size="sm" variant="default">
+            {count}
+          </Badge>
+        </span>
+      ) : null}
     </SidebarMenuItem>
   );
 }

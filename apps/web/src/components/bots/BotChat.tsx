@@ -19,6 +19,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { ArrowUpIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
@@ -92,6 +93,41 @@ export function BotChat(props: {
   );
   const thread = useEnvironmentThread(props.environmentId, props.bot.homeThreadId);
   const projection = Option.getOrNull(thread.data);
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const lastVisit = useRef({ watermark: "", at: 0 });
+  const updatedAt = projection ? DateTime.formatIso(projection.thread.updatedAt) : null;
+  const visitedAt = projection?.thread.lastVisitedAt;
+  const lastVisitedAt = visitedAt ? DateTime.formatIso(visitedAt) : visitedAt;
+  const lastReplyAt = props.bot.lastReply?.at;
+  useEffect(() => {
+    if (thread.status !== "live" || updatedAt === null || lastVisitedAt === undefined) return;
+    const visitedMs = lastVisitedAt ? Date.parse(lastVisitedAt) : NaN;
+    if (visitedMs >= Date.parse(updatedAt)) return;
+    if (lastVisit.current.watermark === updatedAt) return;
+    const dispatch = () => {
+      lastVisit.current = { watermark: updatedAt, at: Date.now() };
+      void visitThread({
+        environmentId: props.environmentId,
+        input: { threadId: props.bot.homeThreadId, visitedAt: updatedAt },
+      });
+    };
+    const unreadReply = lastReplyAt !== undefined && !(visitedMs >= Date.parse(lastReplyAt));
+    const elapsed = Date.now() - lastVisit.current.at;
+    if (unreadReply || elapsed >= 10_000) {
+      dispatch();
+      return;
+    }
+    const timer = setTimeout(dispatch, 10_000 - elapsed);
+    return () => clearTimeout(timer);
+  }, [
+    lastReplyAt,
+    lastVisitedAt,
+    props.bot.homeThreadId,
+    props.environmentId,
+    thread.status,
+    updatedAt,
+    visitThread,
+  ]);
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });

@@ -1,6 +1,7 @@
 import {
   botThreadShellStatus,
   botThreadShellStatusLabel,
+  botNeedsYou,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -99,16 +100,21 @@ function HomeBotRow(props: {
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
   const { bot, environmentId, refresh } = props.entry;
+  const needsYou = botNeedsYou(bot, props.shell);
   const status = botThreadShellStatus(props.shell, bot);
   const working = status === "working";
-  const statusText = botThreadShellStatusLabel(status);
+  const statusText = props.shell?.hasPendingApprovals
+    ? "Needs approval"
+    : props.shell?.hasPendingUserInput
+      ? "Needs input"
+      : botThreadShellStatusLabel(status);
   useBotRunSettlement(working, refresh);
   const lastActivity = props.shell?.latestRun?.completedAt ?? props.shell?.updatedAt ?? null;
   const time = botStatusLabel({ working: false, paused: false, lastActivity }, props.now);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${bot.name}${props.environmentLabel ? `, ${props.environmentLabel}` : ""}${bot.paused ? ", paused" : ""}, ${statusText ?? time}`}
+      accessibilityLabel={`${bot.name}${props.environmentLabel ? `, ${props.environmentLabel}` : ""}${bot.paused ? ", paused" : ""}${needsYou ? ", needs you" : ""}, ${statusText ?? time}`}
       className="flex-row items-center gap-3 border-b border-border-subtle px-1 py-3 active:opacity-70"
       onPress={() => props.onSelectBot(environmentId, bot.id)}
     >
@@ -121,14 +127,22 @@ function HomeBotRow(props: {
         <View className="flex-row items-center gap-2">
           <Text
             numberOfLines={1}
-            className="min-w-0 flex-1 text-base font-t3-medium text-foreground"
+            className={
+              needsYou
+                ? "min-w-0 flex-1 text-base font-t3-bold text-foreground"
+                : "min-w-0 flex-1 text-base font-t3-medium text-foreground"
+            }
           >
             {bot.name}
           </Text>
+          {needsYou ? <View className="size-2 rounded-full bg-primary" /> : null}
           {bot.paused ? <Text className="text-xs text-foreground-muted">Paused</Text> : null}
           {lastActivity ? <Text className="text-xs text-foreground-muted">{time}</Text> : null}
         </View>
-        <Text numberOfLines={1} className="text-sm text-foreground-muted">
+        <Text
+          numberOfLines={1}
+          className={needsYou ? "text-sm text-foreground" : "text-sm text-foreground-muted"}
+        >
           {props.environmentLabel ? `${props.environmentLabel} · ` : ""}
           {statusText ?? bot.lastReply?.text ?? "Open conversation"}
         </Text>
