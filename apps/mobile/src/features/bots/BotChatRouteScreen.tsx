@@ -24,7 +24,7 @@ import { EnvironmentId, MessageId, type BotSummary, type ThreadId } from "@t3too
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AppState, Platform, Pressable, View, type ViewInstance } from "react-native";
+import { AppState, Keyboard, Platform, Pressable, View, type ViewInstance } from "react-native";
 import { KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -35,8 +35,10 @@ import { ComposerEditor } from "../../components/ComposerEditor";
 import { ComposerActionButton } from "../../components/ComposerToolbar";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { ScreenHeader } from "../../components/ScreenHeader";
+import { ScreenHeaderButton } from "../../components/ScreenHeaderButton";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentServerConfig } from "../../state/entities";
+import { useThreadServerBrowserTabs } from "../../state/preview";
 import { useComposerMediaAttachments } from "../../state/use-composer-media-attachments";
 import {
   clearComposerDraftContent,
@@ -58,6 +60,7 @@ import { BotChatRow } from "./BotChatRow";
 import { botComposerAtom, botComposerReducer, isBotSendDraftUnchanged } from "./botChat.logic";
 import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
 import { resolveComposerSendPresentation } from "../threads/composerSendPresentation";
+import { latestBrowserTab } from "../browser/browserTabs";
 
 type BotChatRouteProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -294,6 +297,12 @@ function BotConversation(props: {
     );
   const draft = useComposerDraft(draftKey);
   const serverConfig = useEnvironmentServerConfig(environmentId);
+  const browserTabs = useThreadServerBrowserTabs({
+    environmentId,
+    threadId: bot.homeThreadId,
+    enabled: serverConfig?.environment.capabilities.serverBrowser === true,
+  });
+  const browserTab = latestBrowserTab(browserTabs.tabs);
   const getDraftKey = useCallback(() => draftKey, [draftKey]);
   const { onPickDraftMedia, onRemoveDraftImage } = useComposerMediaAttachments({
     getDraftKey,
@@ -450,6 +459,23 @@ function BotConversation(props: {
         subtitle={bot.paused ? "Paused" : undefined}
         sidebar={false}
         onBack={() => navigation.goBack()}
+        trailing={
+          browserTab ? (
+            <ScreenHeaderButton
+              accessibilityLabel="Open browser"
+              icon="globe"
+              label="Open browser"
+              onPress={() => {
+                Keyboard.dismiss();
+                navigation.navigate("ThreadBrowserPreview", {
+                  environmentId,
+                  threadId: bot.homeThreadId,
+                  tabId: browserTab.tabId,
+                });
+              }}
+            />
+          ) : null
+        }
         actions={[
           {
             accessibilityLabel: `About ${bot.name}`,

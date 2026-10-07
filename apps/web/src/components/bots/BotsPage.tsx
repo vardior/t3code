@@ -20,6 +20,7 @@ import { useBotsData } from "./BotsDataProvider";
 import { BotsState } from "./BotsState";
 import { BotChat } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
+import { BotBrowserButton } from "./BotBrowserButton";
 
 export function BotsPage({
   botId,
@@ -113,6 +114,9 @@ export function BotsPage({
                 </>
               ) : null}
             </WorkspaceBreadcrumb>
+            {selected && environmentId ? (
+              <BotBrowserButton environmentId={environmentId} threadId={selected.homeThreadId} />
+            ) : null}
             {selected ? (
               <Button
                 aria-label={`About ${selected.name}`}
