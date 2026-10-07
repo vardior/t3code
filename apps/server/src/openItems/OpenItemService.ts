@@ -117,6 +117,10 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     content: OpenItemContent,
   ) {
+    const alreadyOpen = ((yield* readThread(threadId)).openItems ?? []).find(
+      (item) => item.status === "open" && item.title === content.title,
+    );
+    if (alreadyOpen !== undefined) return alreadyOpen;
     const itemId = OpenItemId.make(`item-${yield* randomUuidV4}`);
     const item = yield* apply(threadId, { type: "add", itemId, content }, (commandId) => ({
       type: "thread.open-item.add",

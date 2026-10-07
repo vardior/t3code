@@ -215,6 +215,29 @@ it.layer(layerTest)("OpenItemService", (it) => {
     }),
   );
 
+  it.effect("returns the open item with the same title instead of adding a duplicate", () =>
+    Effect.gen(function* () {
+      const openItems = yield* OpenItemService.OpenItemService;
+      yield* createThread(homeThreadId);
+      const notified = notifications.length;
+
+      const first = yield* openItems.add(homeThreadId, { title: "Rotate the deploy key?" });
+      const retried = yield* openItems.add(homeThreadId, { title: "Rotate the deploy key?" });
+      assert.equal(retried.id, first.id);
+      assert.equal(notifications.length, notified + 1);
+      assert.lengthOf(
+        (yield* openItems.list(homeThreadId, { includeResolved: false })).filter(
+          (item) => item.title === "Rotate the deploy key?",
+        ),
+        1,
+      );
+
+      yield* openItems.resolve(homeThreadId, first.id, { status: "dropped" });
+      const askedAgain = yield* openItems.add(homeThreadId, { title: "Rotate the deploy key?" });
+      assert.notEqual(askedAgain.id, first.id);
+    }),
+  );
+
   it.effect("reports why the orchestrator rejected a change that lost a race", () =>
     Effect.gen(function* () {
       const openItems = yield* OpenItemService.OpenItemService;
