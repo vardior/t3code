@@ -67,7 +67,6 @@ export interface ComposerEditorProps {
    * (send, discard). Native edits the editor made before applying that reset are dropped.
    */
   readonly readResetGeneration?: () => number;
-  readonly onContentHeightChange?: (height: number) => void;
   readonly onSelectionChange?: (selection: ComposerEditorSelection) => void;
   readonly onPasteImages?: (uris: ReadonlyArray<string>) => void;
   readonly onContextPress?: (reference: {

@@ -124,6 +124,7 @@ import {
 import { useStartSideChat } from "./useStartSideChat";
 import type { ThreadInspectorMode, ThreadInspectorTarget } from "./thread-inspector-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
+import type { ThreadRoutePresentation } from "./threadRoutePresentation";
 
 function firstRouteParam(value: string | string[] | undefined): string | null {
   const first = Array.isArray(value) ? value[0] : value;
@@ -169,6 +170,7 @@ interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
   readonly inspectorPresentation?: ThreadInspectorPresentation;
   readonly onReturnToThread?: () => void;
   readonly renderInspector?: () => ReactNode;
+  readonly presentation?: ThreadRoutePresentation;
 }
 
 function ThreadUnavailableScreen(props: {
@@ -954,7 +956,9 @@ function ThreadRouteContent(
       <>
         <ThreadScreenBinding
           header={
-            props.inspectorPresentation ? null : (
+            props.inspectorPresentation
+              ? null
+              : (props.presentation?.header ?? (
               <ThreadHeader
                 title={selectedThread.title}
                 subtitle={headerSubtitle}
@@ -964,7 +968,7 @@ function ThreadRouteContent(
                 onOpenFilesInspector={handleOpenFilesInspector}
                 onReturnToThread={props.onReturnToThread}
               />
-            )
+            ))
           }
           canOperateThread={canOperateThread}
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
@@ -975,8 +979,11 @@ function ThreadRouteContent(
           environmentLabel={selectedEnvironmentConnection?.environmentLabel ?? null}
           feedbackSubmissions={composer.feedbackSubmissions}
           onDismissFeedback={composer.dismissFeedback}
-          selectedThreadFeed={composer.selectedThreadFeed}
+          selectedThreadFeed={
+            props.presentation?.feed(composer.selectedThreadFeed) ?? composer.selectedThreadFeed
+          }
           pendingHandoff={composer.pendingHandoff}
+          workingLabel={props.presentation?.workingLabel ?? null}
           activityRun={composer.selectedThreadActivityRun}
           activeWorkStartedAt={
             creationState?.kind === "preparing" ||

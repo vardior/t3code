@@ -16,7 +16,7 @@ import {
   type Ref,
 } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
-import { Platform, StyleSheet } from "react-native";
+import { Image, Platform, StyleSheet } from "react-native";
 
 import {
   composerChipSizeSuffix,
@@ -106,7 +106,6 @@ interface NativeComposerEditorProps extends ViewProps {
   readonly textPasteThresholdBytes: number;
   readonly maxInputChars: number;
   readonly onComposerPasteText?: (event: NativePasteTextEvent) => void;
-  readonly onComposerContentSizeChange?: (event: NativeSyntheticEvent<{ height: number }>) => void;
   readonly onComposerFocus?: () => void;
   readonly onComposerBlur?: () => void;
   readonly onComposerContentSizeChange?: (
@@ -411,12 +410,9 @@ export function ComposerEditor({
         onComposerFocus={onFocus}
         onComposerBlur={onBlur}
         onComposerContentSizeChange={
-          onContentSizeChange === undefined && props.onContentHeightChange === undefined
+          onContentSizeChange === undefined
             ? undefined
-            : (event) => {
-                onContentSizeChange?.(event.nativeEvent);
-                props.onContentHeightChange?.(event.nativeEvent.height);
-              }
+            : (event) => onContentSizeChange(event.nativeEvent)
         }
         onComposerSubmit={
           onSubmit === undefined

@@ -56,7 +56,7 @@ import { startScheduledTaskEditor } from "../settings/scheduled-task-editor-stat
 import { editDraft } from "../settings/scheduledTaskDraft";
 import { formatNextScheduledTaskRun } from "../settings/scheduledTaskPresentation";
 import { describeSchedule } from "../settings/SettingsScheduledTasksRouteScreen";
-import { BotMarkdown } from "./BotChatRow";
+import { BotMarkdown } from "./BotMarkdown";
 import { useBots, useBotDetail } from "./useBots";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);

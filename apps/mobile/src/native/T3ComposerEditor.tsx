@@ -21,7 +21,6 @@ export function ComposerEditor({
   readResetGeneration: _readResetGeneration,
   readOnly = false,
   onContentSizeChange,
-  onContentHeightChange,
   ...props
 }: ComposerEditorProps) {
   const inputRef = useRef<TextInputInstance>(null);
@@ -49,10 +48,7 @@ export function ComposerEditor({
         editable={(props.editable ?? true) && !readOnly}
         selection={selection}
         onSelectionChange={(event) => props.onSelectionChange?.(event.nativeEvent.selection)}
-        onContentSizeChange={(event) => {
-          onContentSizeChange?.(event.nativeEvent.contentSize);
-          onContentHeightChange?.(event.nativeEvent.contentSize.height);
-        }}
+        onContentSizeChange={(event) => onContentSizeChange?.(event.nativeEvent.contentSize)}
         multiline={props.multiline ?? true}
         placeholderTextColorClassName={"accent-placeholder"}
         className="text-foreground"

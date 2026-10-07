@@ -148,6 +148,9 @@ import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { FONT_FAMILIES } from "../../lib/fontFamilies";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { parseThreadLink } from "@t3tools/client-runtime/state/bot-conversation";
+import { BOT_THREAD_LINK_ORIGIN } from "../bots/botChat.logic";
 import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
 import { splitMarkdownDetails } from "../../lib/markdownDetails";
 import { hasWideMarkdownBlock } from "../../lib/wideMarkdownBlocks";
@@ -2812,6 +2815,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     return scopeThreadRef(props.environmentId, link.threadId);
   };
   const onMarkdownLinkPress = (href: string, imageEmbed = false) => {
+    const botThreadLink = parseThreadLink(href, BOT_THREAD_LINK_ORIGIN);
+    if (botThreadLink) {
+      navigation.navigate("Thread", {
+        environmentId: String(botThreadLink.environmentId),
+        threadId: String(botThreadLink.threadId),
+      });
+      return;
+    }
     markdownLinkRequest.current?.abort();
     const request = new AbortController();
     markdownLinkRequest.current = request;

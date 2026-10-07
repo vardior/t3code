@@ -1,5 +1,7 @@
-import { parseThreadLink } from "@t3tools/client-runtime/state/bot-conversation";
-import { Atom } from "effect/reactivity";
+import {
+  parseThreadLink,
+  rewriteThreadLinks,
+} from "@t3tools/client-runtime/state/bot-conversation";
 
 export function botStatusLabel(
   status: {
@@ -21,65 +23,10 @@ export function botStatusLabel(
   return `${Math.floor(minutes / 1_440)}d ago`;
 }
 
-type BotComposerState = {
-  readonly scope: string;
-  readonly pendingRequestId: string | null;
-  readonly error: string | null;
-};
-
-export function initialBotComposer(scope: string): BotComposerState {
-  return { scope, pendingRequestId: null, error: null };
-}
-
-export const botComposerAtom = Atom.family((scope: string) =>
-  Atom.make(initialBotComposer(scope)).pipe(Atom.keepAlive),
-);
-
-type BotSendDraft = {
-  readonly text: string;
-  readonly attachments: ReadonlyArray<{ readonly id: string }>;
-};
-
-export function isBotSendDraftUnchanged(sent: BotSendDraft, current: BotSendDraft) {
-  return (
-    current.text === sent.text &&
-    current.attachments.length === sent.attachments.length &&
-    current.attachments.every((attachment, index) => attachment.id === sent.attachments[index]?.id)
-  );
-}
-
-type BotComposerAction =
-  | { readonly type: "edit" }
-  | { readonly type: "send"; readonly requestId: string; readonly hasContent: boolean }
-  | {
-      readonly type: "settled";
-      readonly scope: string;
-      readonly requestId: string;
-      readonly success: boolean;
-      readonly error: string | null;
-    };
-
-export function botComposerReducer(
-  state: ReturnType<typeof initialBotComposer>,
-  action: BotComposerAction,
-) {
-  if (action.type === "edit") {
-    return { ...state, error: null };
-  }
-  if (action.type === "send") {
-    if (state.pendingRequestId !== null || !action.hasContent) return state;
-    return { ...state, pendingRequestId: action.requestId, error: null };
-  }
-  if (action.scope !== state.scope || action.requestId !== state.pendingRequestId) return state;
-  return {
-    ...state,
-    pendingRequestId: null,
-    error: action.error,
-  };
-}
+export const BOT_THREAD_LINK_ORIGIN = "https://t3.invalid";
 
 export function botThreadLinkTarget(href: string, knownEnvironmentIds: ReadonlyArray<string>) {
-  const target = parseThreadLink(href, "https://t3.invalid");
+  const target = parseThreadLink(href, BOT_THREAD_LINK_ORIGIN);
   return target && knownEnvironmentIds.includes(target.environmentId) ? target : null;
 }
 
@@ -87,7 +34,7 @@ export function botMarkdownThreadLinks(
   markdown: string,
   knownEnvironmentIds: ReadonlyArray<string>,
 ) {
-  return markdown.replace(
+  return rewriteThreadLinks(markdown, BOT_THREAD_LINK_ORIGIN).replace(
     /\[([^\]]+)\]\(((?:t3-thread:\/\/|https:\/\/t3\.invalid\/)[^\s)]+)\)/g,
     (link, label: string, href: string) =>
       botThreadLinkTarget(href, knownEnvironmentIds) ? link : label,
