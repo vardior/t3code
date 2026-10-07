@@ -123,18 +123,39 @@ const layerOrchestration = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layer
   Layer.provide(layerPlatformTest),
 );
 
+const layerBots = Layer.mock(BotService.BotService)({
+  isHomeThread: (threadId) => Effect.succeed(threadId === homeThreadId),
+  notifyOwner: (threadId, input) =>
+    Effect.sync(() => {
+      notifications.push({ threadId, input });
+      return { runId: "run" as never };
+    }),
+});
+
 const layerTest = OpenItemService.layer.pipe(
-  Layer.provide(
-    Layer.mock(BotService.BotService)({
-      isHomeThread: (threadId) => Effect.succeed(threadId === homeThreadId),
-      notifyOwner: (threadId, input) =>
-        Effect.sync(() => {
-          notifications.push({ threadId, input });
-          return { runId: "run" as never };
-        }),
+  Layer.provide(layerBots),
+  Layer.provideMerge(layerOrchestration),
+);
+
+const layerOwnerDropsFirst = Layer.effect(
+  Orchestrator.OrchestratorV2,
+  Effect.map(Orchestrator.OrchestratorV2, (orchestrator) =>
+    Orchestrator.OrchestratorV2.of({
+      ...orchestrator,
+      dispatch: (command) =>
+        command.type === "thread.open-item.resolve"
+          ? orchestrator
+              .dispatch({
+                type: "thread.open-item.resolve",
+                commandId: CommandId.make(`${command.commandId}:owner`),
+                threadId: command.threadId,
+                itemId: command.itemId,
+                status: "dropped",
+              })
+              .pipe(Effect.andThen(orchestrator.dispatch(command)))
+          : orchestrator.dispatch(command),
     }),
   ),
-  Layer.provideMerge(layerOrchestration),
 );
 
 const createThread = (threadId: ThreadId) =>
@@ -191,6 +212,29 @@ it.layer(layerTest)("OpenItemService", (it) => {
         .pipe(Effect.flip);
       assert.instanceOf(rejected, OpenItemError);
       assert.equal(rejected.reason, "invalid_recommended");
+    }),
+  );
+
+  it.effect("reports why the orchestrator rejected a change that lost a race", () =>
+    Effect.gen(function* () {
+      const openItems = yield* OpenItemService.OpenItemService;
+      const threadId = ThreadId.make("open-items-race-thread");
+      yield* createThread(threadId);
+      const item = yield* openItems.add(threadId, { title: "Ship it?" });
+
+      const racing = yield* OpenItemService.OpenItemService.pipe(
+        Effect.provide(
+          Layer.fresh(OpenItemService.layer).pipe(
+            Layer.provide(layerOwnerDropsFirst),
+            Layer.provide(layerBots),
+          ),
+        ),
+      );
+      const rejected = yield* racing
+        .resolve(threadId, item.id, { status: "answered", answer: "Yes" })
+        .pipe(Effect.flip);
+      assert.equal(rejected.reason, "not_open");
+      assert.equal(rejected.message, "That open item is already resolved.");
     }),
   );
 

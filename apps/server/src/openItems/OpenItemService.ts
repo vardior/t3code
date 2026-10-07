@@ -17,11 +17,14 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import * as BotService from "../bots/BotService.ts";
 import { planOpenItemChange, type OpenItemChange } from "../orchestration-v2/OpenItems.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
+
+const isOpenItemError = Schema.is(OpenItemError);
 
 const clip = (text: string, length: number) =>
   text.length > length ? `${text.slice(0, length - 1).trimEnd()}…` : text;
@@ -81,7 +84,13 @@ const make = Effect.gen(function* () {
       if (!plan.ok) return yield* new OpenItemError({ reason: plan.reason });
       yield* orchestrator
         .dispatch(command(CommandId.make(`open-item:${yield* randomUuidV4}`)))
-        .pipe(Effect.mapError((cause) => new OpenItemError({ reason: "rejected", cause })));
+        .pipe(
+          Effect.mapError((cause) =>
+            cause._tag === "OrchestratorDispatchError" && isOpenItemError(cause.cause)
+              ? cause.cause
+              : new OpenItemError({ reason: "rejected", cause }),
+          ),
+        );
       const items = (yield* readThread(threadId)).openItems ?? [];
       const item = items.find((candidate) => candidate.id === change.itemId);
       return item ?? (yield* new OpenItemError({ reason: "not_found" }));
