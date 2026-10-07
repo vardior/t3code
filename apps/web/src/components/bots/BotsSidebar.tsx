@@ -1,7 +1,8 @@
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -19,7 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon, GripVerticalIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import { useMemo, useRef, useState, useEffect } from "react";
 import {
   resolveBotListOrder,
@@ -235,17 +236,10 @@ function BotListItem(props: {
         ref={setActivatorNodeRef}
         {...attributes}
         {...listeners}
-        disabled={props.disabled}
-        aria-label={`Reorder ${props.bot.name}`}
-        className="ml-2 flex size-6 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
-      >
-        <GripVerticalIcon className="size-4" />
-      </button>
-      <button
-        type="button"
+        aria-disabled={undefined}
         aria-current={props.selected ? "page" : undefined}
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left hover:bg-accent/60",
+          "flex min-w-0 flex-1 select-none items-center gap-3 px-3 py-3 text-left hover:bg-accent/60",
           props.selected && "bg-accent",
         )}
         onClick={props.onSelect}
@@ -310,8 +304,12 @@ function SortableBotList(props: {
   const busy = useRef(false);
   const reorder = useAtomCommand(serverEnvironment.bots.reorder, "Reorder bots");
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: { start: ["Space"], cancel: ["Escape"], end: ["Space", "Enter", "Tab"] },
+    }),
   );
   const order = resolveBotListOrder(props.bots, pendingOrder, saving);
   const byId = new Map(props.bots.map((bot) => [bot.id, bot]));
