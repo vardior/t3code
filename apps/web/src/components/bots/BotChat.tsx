@@ -2,6 +2,10 @@ import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
+  deriveThreadRuntime,
+  threadRuntimeHasInterruptibleRun,
+} from "@t3tools/client-runtime/state/thread-execution";
+import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
@@ -55,6 +59,7 @@ import {
 } from "../../lib/attachmentUploadQueue";
 import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
 import ChatMarkdown from "../ChatMarkdown";
+import { ComposerStopButton } from "../chat/ComposerPrimaryActions";
 import { readFileAsDataUrl } from "../ChatView.logic";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
@@ -188,6 +193,10 @@ export function BotChat(props: {
     [projection],
   );
   const working = status.kind === "working";
+  const canInterrupt = useMemo(
+    () => projection !== null && threadRuntimeHasInterruptibleRun(deriveThreadRuntime(projection)),
+    [projection],
+  );
   const queueHeld = isBotQueueHeld(projection?.runs ?? []);
   const resumeQueue = useAtomCommand(threadEnvironment.resumeThreadQueue);
   const [resuming, setResuming] = useState(false);
@@ -207,6 +216,7 @@ export function BotChat(props: {
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
   const [stopping, setStopping] = useState(false);
   const stop = async () => {
+    if (stopping) return;
     setStopping(true);
     try {
       await interruptTurn({
@@ -377,14 +387,6 @@ export function BotChat(props: {
               botName={props.bot.name}
             />
           ))}
-          {working && !homeThreadArchived ? (
-            <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-muted-foreground text-sm">
-              <span>Working…</span>
-              <Button size="sm" variant="ghost" disabled={stopping} onClick={() => void stop()}>
-                {stopping ? "Stopping…" : "Stop"}
-              </Button>
-            </div>
-          ) : null}
           {status.kind === "needs-attention" ? (
             <div className="self-start rounded-2xl bg-muted px-3.5 py-2 text-sm">
               <p>{status.request === "approval" ? "Needs your approval" : "Needs your input"}</p>
@@ -439,6 +441,9 @@ export function BotChat(props: {
         runtimeMode={projection?.thread.runtimeMode ?? null}
         interactionMode={projection?.thread.interactionMode ?? null}
         isRunning={working}
+        canInterrupt={canInterrupt}
+        stopping={stopping}
+        onInterrupt={() => void stop()}
       />
     </section>
   );
@@ -653,6 +658,9 @@ function BotComposer(props: {
   readonly runtimeMode: RuntimeMode | null;
   readonly interactionMode: ProviderInteractionMode | null;
   readonly isRunning: boolean;
+  readonly canInterrupt: boolean;
+  readonly stopping: boolean;
+  readonly onInterrupt: () => void;
 }) {
   const settings = useClientSettings();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -957,9 +965,18 @@ function BotComposer(props: {
           }}
         />
       </div>
-      <Button aria-label="Send" disabled={!canSend} size="icon" type="submit">
-        <ArrowUpIcon />
-      </Button>
+      {props.canInterrupt && text.trim() === "" && images.length === 0 ? (
+        <ComposerStopButton
+          disabled={!ready}
+          stopping={props.stopping}
+          preserveComposerFocusOnPointerDown={isMobileViewport}
+          onInterrupt={props.onInterrupt}
+        />
+      ) : (
+        <Button aria-label="Send" disabled={!canSend} size="icon" type="submit">
+          <ArrowUpIcon />
+        </Button>
+      )}
     </form>
   );
 }

@@ -5,6 +5,10 @@ import { useNavigation, type StaticScreenProps } from "@react-navigation/native"
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
+  deriveThreadRuntime,
+  threadRuntimeHasInterruptibleRun,
+} from "@t3tools/client-runtime/state/thread-execution";
+import {
   botChatHistoryStart,
   botConversationStatus,
   isBotQueueHeld,
@@ -25,6 +29,7 @@ import { AppText as Text } from "../../components/AppText";
 import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import { ComposerEditor } from "../../components/ComposerEditor";
+import { ComposerActionButton } from "../../components/ComposerToolbar";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { useEnvironmentPresentation } from "../../state/presentation";
@@ -56,6 +61,7 @@ import {
   isBotSendDraftUnchanged,
 } from "./botChat.logic";
 import { useBots, useBotDetail, useBotRunSettlement } from "./useBots";
+import { resolveComposerSendPresentation } from "../threads/composerSendPresentation";
 
 type BotChatRouteProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -183,6 +189,10 @@ function BotConversation(props: {
     [projection],
   );
   const working = status.kind === "working";
+  const canInterrupt = useMemo(
+    () => projection !== null && threadRuntimeHasInterruptibleRun(deriveThreadRuntime(projection)),
+    [projection],
+  );
   const queueHeld = isBotQueueHeld(projection?.runs ?? []);
   const scheduleTitles = useMemo(
     () => new Map(schedules.data?.tasks.map((task) => [task.id, task.title]) ?? []),
@@ -330,6 +340,13 @@ function BotConversation(props: {
     !attachmentsUploading &&
     uploadError === null &&
     (draft.text.trim().length > 0 || draft.attachments.length > 0);
+  const sendPresentation = resolveComposerSendPresentation({
+    editingQueuedMessage: false,
+    running: working,
+    canSteer: false,
+    followUpBehavior: "queue",
+    deliveryDeferred: queueHeld,
+  });
   const openThread = useCallback(
     (threadId: ThreadId, targetEnvironmentId = environmentId) => {
       navigation.navigate("Thread", { environmentId: targetEnvironmentId, threadId });
@@ -525,23 +542,8 @@ function BotConversation(props: {
               {unavailableReason}
             </Text>
           ) : null}
-          {unavailableReason !== null ? undefined : status.kind === "working" ? (
-            <View className="self-start flex-row items-center gap-2 rounded-2xl bg-card px-3.5 py-2">
-              <Text className="text-sm text-foreground-muted">Working…</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Stop agent"
-                accessibilityState={{ disabled: stopping || !ready }}
-                disabled={stopping || !ready}
-                onPress={() => void stop()}
-                className="rounded-full border border-border-subtle px-3 py-2 active:opacity-70 disabled:opacity-50"
-              >
-                <Text className="text-sm text-foreground-muted">
-                  {stopping ? "Stopping…" : "Stop"}
-                </Text>
-              </Pressable>
-            </View>
-          ) : status.kind === "needs-attention" || status.kind === "failed" ? (
+          {unavailableReason !== null ? undefined : status.kind === "needs-attention" ||
+            status.kind === "failed" ? (
             <View className="self-start gap-2 rounded-2xl bg-card px-3.5 py-2">
               <Text
                 accessibilityRole={status.kind === "failed" ? "alert" : undefined}
@@ -647,18 +649,23 @@ function BotConversation(props: {
                 submitTitle={`Send to ${bot.name}`}
               />
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send"
-              accessibilityState={{ disabled: !canSend }}
-              disabled={!canSend}
-              onPress={() => void send()}
-              className="h-11 justify-center rounded-full bg-primary px-4 disabled:opacity-50"
-            >
-              <Text className="font-t3-medium text-primary-foreground">
-                {sending ? "Sending…" : "Send"}
-              </Text>
-            </Pressable>
+            {canInterrupt && draft.text.trim() === "" && draft.attachments.length === 0 ? (
+              <ComposerActionButton
+                accessibilityLabel={stopping ? "Stopping…" : "Stop agent"}
+                icon="stop.fill"
+                variant="danger"
+                disabled={stopping || !ready}
+                onPress={() => void stop()}
+              />
+            ) : (
+              <ComposerActionButton
+                accessibilityLabel={sending ? "Sending…" : sendPresentation.label}
+                icon={sendPresentation.icon}
+                variant="primary"
+                disabled={!canSend}
+                onPress={() => void send()}
+              />
+            )}
           </View>
         </View>
       </KeyboardStickyView>
