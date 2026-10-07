@@ -1471,6 +1471,20 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (activeThread !== null) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:open-thread-open-items",
+      searchTerms: ["open items", "questions", "waiting", "decisions", "todo"],
+      title: "Show open items",
+      icon: <ListTodoIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore.getState().open(threadRef, "open-items");
+      },
+    });
+  }
+
+  if (activeThread !== null) {
     const thread = activeThread;
     actionItems.push({
       kind: "action",

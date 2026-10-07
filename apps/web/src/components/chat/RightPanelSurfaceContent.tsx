@@ -1,3 +1,4 @@
+import { OpenItemsPanel } from "./OpenItemsPanel";
 import type {
   EditorId,
   EnvironmentId,
@@ -167,6 +168,8 @@ export function RightPanelSurfaceContent(props: {
         />
       );
     }
+    case "open-items":
+      return <OpenItemsPanel threadRef={threadRef} />;
     case "pull-requests":
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
     case "side-chat":

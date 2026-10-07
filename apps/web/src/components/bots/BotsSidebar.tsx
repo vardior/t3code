@@ -17,6 +17,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { countOpenItems } from "@t3tools/client-runtime/state/open-items";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -211,6 +212,7 @@ function BotListItem(props: {
   } = useSortable({ id: props.bot.id, disabled: props.disabled });
   const shell = props.shell;
   const needsYou = botNeedsYou(props.bot, shell);
+  const openItemCount = countOpenItems(shell?.openItems);
   const status = botThreadShellStatus(shell, props.bot);
   const working = status === "working";
   const lastActivity = shell?.latestRun?.completedAt ?? shell?.updatedAt ?? null;
@@ -257,6 +259,14 @@ function BotListItem(props: {
                 aria-label="Needs you"
               />
             ) : null}
+            {openItemCount > 0 ? (
+              <span
+                className="ml-auto shrink-0 rounded-full bg-primary/15 px-1.5 text-primary text-xs tabular-nums"
+                aria-label={openItemsLabel(openItemCount)}
+              >
+                {openItemCount}
+              </span>
+            ) : null}
           </span>
           {props.environmentLabel ? (
             <span className="truncate text-muted-foreground text-xs">{props.environmentLabel}</span>
@@ -271,13 +281,19 @@ function BotListItem(props: {
               ? "Needs approval"
               : shell?.hasPendingUserInput
                 ? "Needs input"
-                : attentionLabel) ??
+                : openItemCount > 0
+                  ? openItemsLabel(openItemCount)
+                  : attentionLabel) ??
               (props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel))}
           </span>
         </span>
       </button>
     </div>
   );
+}
+
+function openItemsLabel(count: number) {
+  return count === 1 ? "1 open item" : `${count} open items`;
 }
 
 function botStatusLabel(status: {
