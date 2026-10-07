@@ -16,7 +16,6 @@ import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3too
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
-import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { serverEnvironment } from "./server";
@@ -63,10 +62,6 @@ export function useEnvironmentThread(
   );
   const state = AsyncResult.getOrElse(result, () => EMPTY_ENVIRONMENT_THREAD_STATE);
   return state;
-}
-
-export function refreshEnvironmentThread(environmentId: EnvironmentId, threadId: ThreadId): void {
-  appAtomRegistry.refresh(environmentThreads.stateAtom(environmentId, threadId));
 }
 
 const isRunning = (status: string) =>

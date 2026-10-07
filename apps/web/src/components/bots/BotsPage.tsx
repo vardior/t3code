@@ -1,27 +1,17 @@
 import { useNavigate } from "@tanstack/react-router";
-import { InfoIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { isElectron } from "../../env";
-import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
 import { useEnvironments } from "../../state/environments";
 import { Button } from "../ui/button";
 import { SidebarInset, useSidebar } from "../ui/sidebar";
-import {
-  WorkspaceBreadcrumb,
-  WorkspaceBreadcrumbItem,
-  WorkspaceBreadcrumbSeparator,
-  WorkspaceBreadcrumbText,
-} from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { resolveBotSelection } from "./botNavigation";
 import { refreshEnvironmentBots } from "./useEnvironmentBots";
 import { useBotsData } from "./BotsDataProvider";
 import { BotsState } from "./BotsState";
-import { BotChat } from "./BotChat";
-import { BotThreadTools } from "./BotThreadTools";
+import { BotChat, BotsBreadcrumb } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
-import { BotBrowserButton } from "./BotBrowserButton";
 
 export function BotsPage({
   botId,
@@ -30,7 +20,6 @@ export function BotsPage({
   readonly botId: string | undefined;
   readonly environmentId: string | undefined;
 }) {
-  useEscapeToGoBack();
   const { isMobile, open, setOpen, setOpenMobile } = useSidebar();
   const { environments, isReady } = useEnvironments();
   const { bots, queries } = useBotsData();
@@ -41,6 +30,7 @@ export function BotsPage({
   }, []);
   const navigate = useNavigate();
   const [infoOpen, setInfoOpen] = useState(false);
+  const openInfo = useCallback(() => setInfoOpen(true), []);
   const selection = resolveBotSelection(bots, { bot: botId, env: requestedEnvironmentId });
   const selected = selection?.bot ?? null;
   const environmentId = selection?.environmentId;
@@ -97,80 +87,44 @@ export function BotsPage({
 
   return (
     <SidebarInset className="isolate h-dvh min-h-0 overflow-hidden overscroll-y-none">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron}>
-          <div className="flex w-full min-w-0 items-center gap-2">
-            <WorkspaceBreadcrumb ariaLabel="Bots breadcrumb" className="min-w-0 flex-1">
-              <WorkspaceBreadcrumbItem current={selected === null}>
-                <h1>Bots</h1>
-              </WorkspaceBreadcrumbItem>
-              {selected ? (
-                <>
-                  <WorkspaceBreadcrumbSeparator />
-                  <WorkspaceBreadcrumbItem current>
-                    <WorkspaceBreadcrumbText title={selected.name}>
-                      {selected.name}
-                    </WorkspaceBreadcrumbText>
-                  </WorkspaceBreadcrumbItem>
-                </>
-              ) : null}
-            </WorkspaceBreadcrumb>
-            {selected && environmentId ? (
-              <BotBrowserButton environmentId={environmentId} threadId={selected.homeThreadId} />
-            ) : null}
-            {selected ? (
-              <Button
-                aria-label={`About ${selected.name}`}
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => setInfoOpen(true)}
-              >
-                <InfoIcon />
-              </Button>
-            ) : null}
+      {selected && environmentId ? (
+        <BotChat
+          key={`${environmentId}:${selected.id}`}
+          bot={selected}
+          environmentId={environmentId}
+          onOpenInfo={openInfo}
+          onRunSettled={selection!.refresh}
+        />
+      ) : (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+          <WorkspacePageHeader electron={isElectron}>
+            <BotsBreadcrumb botName={null} />
+          </WorkspacePageHeader>
+          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+            {bots.length > 0 && !botId ? (
+              <div className="flex flex-col items-center gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Pick a bot to see your conversation.
+                </p>
+                {isMobile || !open ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(true);
+                      else setOpen(true);
+                    }}
+                  >
+                    Choose a bot
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              pageState
+            )}
           </div>
-        </WorkspacePageHeader>
-
-        <div className="flex min-h-0 flex-1">
-          {selected && environmentId ? (
-            <BotThreadTools
-              key={`${environmentId}:${selected.id}`}
-              environmentId={environmentId}
-              threadId={selected.homeThreadId}
-            >
-              <BotChat
-                bot={selected}
-                environmentId={environmentId}
-                onRunSettled={selection!.refresh}
-              />
-            </BotThreadTools>
-          ) : (
-            <div className="flex min-w-0 flex-1 items-center justify-center">
-              {bots.length > 0 && !botId ? (
-                <div className="flex flex-col items-center gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    Pick a bot to see your conversation.
-                  </p>
-                  {isMobile || !open ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (isMobile) setOpenMobile(true);
-                        else setOpen(true);
-                      }}
-                    >
-                      Choose a bot
-                    </Button>
-                  ) : null}
-                </div>
-              ) : (
-                pageState
-              )}
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       {selected && environmentId ? (
         <BotInfoSheet

@@ -1,6 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AuthPreviewOperateScope, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import { GlobeIcon } from "lucide-react";
 
 import { usePreviewAvailable } from "../../browser/previewRuntime";
@@ -30,7 +29,6 @@ function OpenBotBrowserButton(props: {
   const threadRef = scopeThreadRef(props.environmentId, props.threadId);
   usePreviewSession(threadRef);
   const preview = useThreadPreviewState(threadRef);
-  const navigate = useNavigate();
   if (preview.activeTabId === null) return null;
 
   const openBrowser = () => {
@@ -38,10 +36,6 @@ function OpenBotBrowserButton(props: {
     if (tabId === null) return;
     setActivePreviewTab(threadRef, tabId);
     useRightPanelStore.getState().openBrowser(threadRef, tabId);
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: props.environmentId, threadId: props.threadId },
-    });
   };
 
   return (
