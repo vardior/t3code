@@ -25,6 +25,12 @@ When a bot is waiting on an approval or an answer, its chat says so and links to
 
 **About** shows the bot's model, schedules, charter and workers, and opens the full home thread when you need every tool call.
 
+## Open items
+
+When an agent needs a decision from you, it can add an open item to its thread instead of burying the question in a reply. Open items appear in a panel beside the thread (open it from the panel launcher or **Show open items** in the command palette) and, on mobile, from the **open** count above the composer. Each item can offer suggested answers, mark a recommended one, and say what the agent will do if you stay silent. Bots notify you when they add one, and the Bots list shows each bot's count.
+
+Tap an option or type a reply to answer. Your answer is sent to the agent as a message, so it picks the work back up. **Drop** closes an item without a message, and **Reopen** brings a resolved item back.
+
 ## Pause a bot
 
 **Pause bot** in About turns off every schedule the bot owns. **Resume bot** turns back on the ones that were on when you paused. You can still message a paused bot.
