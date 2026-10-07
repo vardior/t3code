@@ -10,6 +10,7 @@ import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { botStatusLabel } from "../bots/botChat.logic";
+import { SortableBotList } from "../bots/SortableBotList";
 import { useBotRunSettlement } from "../bots/useBots";
 import type { useHomeBots } from "./useHomeBots";
 
@@ -32,6 +33,18 @@ export function HomeBotsSection(props: {
       ),
     [props.bots.bots.length, props.threads],
   );
+  const groups = useMemo(() => {
+    const byEnvironment = new Map<EnvironmentId, ReturnType<typeof useHomeBots>["bots"]>();
+    for (const entry of props.bots.bots) {
+      const group = byEnvironment.get(entry.environmentId) ?? [];
+      byEnvironment.set(entry.environmentId, [...group, entry]);
+    }
+    return [...byEnvironment].map(([environmentId, entries]) => ({
+      environmentId,
+      entries,
+      bots: entries.map((entry) => entry.bot),
+    }));
+  }, [props.bots.bots]);
   if (props.bots.bots.length === 0 && props.bots.errors.length === 0) return null;
   return (
     <View className="mb-4 px-4">
@@ -54,18 +67,24 @@ export function HomeBotsSection(props: {
           </Pressable>
         </View>
       ))}
-      {props.bots.bots.map((entry) => (
-        <HomeBotRow
-          key={scopedThreadKey(entry.environmentId, entry.bot.homeThreadId)}
-          entry={entry}
-          shell={shells.get(scopedThreadKey(entry.environmentId, entry.bot.homeThreadId))}
-          environmentLabel={
-            props.environmentLabels.size > 1
-              ? props.environmentLabels.get(entry.environmentId)
-              : undefined
-          }
-          now={props.now}
-          onSelectBot={props.onSelectBot}
+      {groups.map(({ environmentId, entries, bots }) => (
+        <SortableBotList
+          key={environmentId}
+          environmentId={environmentId}
+          bots={bots}
+          renderBot={(bot) => (
+            <HomeBotRow
+              entry={entries.find((entry) => entry.bot.id === bot.id)!}
+              shell={shells.get(scopedThreadKey(environmentId, bot.homeThreadId))}
+              environmentLabel={
+                props.environmentLabels.size > 1
+                  ? props.environmentLabels.get(environmentId)
+                  : undefined
+              }
+              now={props.now}
+              onSelectBot={props.onSelectBot}
+            />
+          )}
         />
       ))}
     </View>

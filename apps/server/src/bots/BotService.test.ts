@@ -342,7 +342,9 @@ it.effect("lists only summaries and gets charter, Slack DMs and spawned workers"
       }),
     );
     expect(listReads).toContain(path.join(root, "helper", "bot.json"));
-    expect(listReads.every((filePath) => path.basename(filePath) === "bot.json")).toBe(true);
+    expect(
+      listReads.every((filePath) => ["bot.json", "order.json"].includes(path.basename(filePath))),
+    ).toBe(true);
     const dms = Array.from({ length: 450 }, (_, index) => ({
       text: `${index}: ${"שלום 🌍 ".repeat(100)}`,
       at: "2026-10-01T00:08:00Z",
@@ -2145,5 +2147,94 @@ it.effect("notify_owner validates its caller and marks only the current bot run"
         ),
       ),
     );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("persists bot order across service restarts and appends new bots alphabetically", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-order-" });
+    const root = path.join(baseDir, "bots");
+    const addBot = (id: string) =>
+      Effect.gen(function* () {
+        yield* fs.makeDirectory(path.join(root, id), { recursive: true });
+        yield* fs.writeFileString(
+          path.join(root, id, "bot.json"),
+          toJson({ name: id, homeThreadId: id }),
+        );
+      });
+    yield* addBot("alpha");
+    yield* addBot("beta");
+    yield* addBot("gamma");
+    expect((yield* listBots({ baseDir })).bots.map((bot) => bot.id)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
+    const config = yield* fs.readFileString(path.join(root, "beta", "bot.json"));
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        yield* bots.reorderBots(["gamma", "missing", "beta", "gamma"]);
+        expect((yield* bots.list()).bots.map((bot) => bot.id)).toEqual(["gamma", "beta", "alpha"]);
+      }),
+    );
+    expect(JSON.parse(yield* fs.readFileString(path.join(root, "order.json")))).toEqual([
+      "gamma",
+      "missing",
+      "beta",
+    ]);
+    expect(yield* fs.readFileString(path.join(root, "beta", "bot.json"))).toBe(config);
+    yield* addBot("delta");
+    yield* fs.remove(path.join(root, "gamma"), { recursive: true });
+    expect((yield* listBots({ baseDir })).bots.map((bot) => bot.id)).toEqual([
+      "beta",
+      "alpha",
+      "delta",
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("publishes reorder changes and rejects invalid names without replacing the order", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-order-" });
+    yield* fs.makeDirectory(path.join(baseDir, "bots"));
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const subscribed = yield* Deferred.make<void>();
+        const changed = yield* bots.streamChanges.pipe(
+          Stream.tap(() => Deferred.succeed(subscribed, undefined)),
+          Stream.drop(1),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(subscribed);
+        yield* bots.reorderBots(["beta", "alpha"]);
+        expect((yield* Fiber.join(changed)).length).toBe(1);
+        const rejected = yield* bots.reorderBots(["../alpha"]).pipe(Effect.exit);
+        expect(Exit.isFailure(rejected)).toBe(true);
+        expect(
+          JSON.parse(yield* fs.readFileString(path.join(baseDir, "bots", "order.json"))),
+        ).toEqual(["beta", "alpha"]);
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("reports unreadable bot order instead of silently discarding a saved order", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-order-" });
+    yield* fs.makeDirectory(path.join(baseDir, "bots"));
+    yield* fs.writeFileString(path.join(baseDir, "bots", "order.json"), "{}");
+    expect(Exit.isFailure(yield* listBots({ baseDir }).pipe(Effect.exit))).toBe(true);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

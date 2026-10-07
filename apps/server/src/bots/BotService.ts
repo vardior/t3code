@@ -29,6 +29,8 @@ import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { writeFileStringAtomically } from "../atomicWrite.ts";
+
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { ServerConfig } from "../config.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
@@ -69,6 +71,9 @@ const replyPreview = (text: string) => {
 const decodeOwnerNotification = Schema.decodeEffect(RelayOwnerNotification);
 const decodeSlackDmLine = Schema.decodeUnknownOption(Schema.fromJsonString(BotSlackDm));
 const isBotError = Schema.is(BotError);
+const BotOrder = Schema.fromJsonString(Schema.Array(Schema.String));
+const decodeBotOrder = Schema.decodeEffect(BotOrder);
+const encodeBotOrder = Schema.encodeEffect(BotOrder);
 
 const isPauseExpired = (config: BotConfigFile, nowMs: number) =>
   config.paused !== true &&
@@ -88,6 +93,7 @@ export class BotService extends Context.Service<
     readonly streamChanges: Stream.Stream<{}>;
     readonly get: (input: BotGetInput) => Effect.Effect<BotDetail, BotError>;
     readonly list: () => Effect.Effect<BotListResult, BotError>;
+    readonly reorderBots: (names: ReadonlyArray<string>) => Effect.Effect<{}, BotError>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly notifyOwner: (
       threadId: ThreadId | undefined,
@@ -123,6 +129,33 @@ export const layer = Layer.effect(
     const scheduledTasks = yield* ScheduledTaskService;
     const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim() || null;
     const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
+
+    const orderPath = path.join(botsDir, "order.json");
+    const orderLock = yield* Semaphore.make(1);
+    const readOrder = () =>
+      fileSystem.readFileString(orderPath).pipe(
+        Effect.flatMap(decodeBotOrder),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])),
+        Effect.mapError((cause) => new BotError({ message: "Cannot read bot order", cause })),
+      );
+    const reorderBots = (names: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        if (names.some((name) => !BOT_ID.test(name))) {
+          return yield* new BotError({ message: "Invalid bot name in order" });
+        }
+        yield* writeFileStringAtomically({
+          filePath: orderPath,
+          contents: `${yield* encodeBotOrder([...new Set(names)]).pipe(
+            Effect.mapError((cause) => new BotError({ message: "Cannot encode bot order", cause })),
+          )}\n`,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError((cause) => new BotError({ message: "Cannot save bot order", cause })),
+        );
+        yield* PubSub.publish(changes, {});
+        return {};
+      }).pipe(Effect.uninterruptible, orderLock.withPermit);
 
     const homeThreadLookupLock = yield* Semaphore.make(1);
     let homeThreadIds = new Set<ThreadId>();
@@ -418,7 +451,11 @@ export const layer = Layer.effect(
         );
         const summaries = bots.flatMap((bot) => Option.toArray(bot));
         yield* cacheHomeThreadIds(summaries.map((bot) => bot.homeThreadId));
-        return { bots: summaries };
+        const order = [...new Set(yield* readOrder())];
+        const byId = new Map(summaries.map((bot) => [bot.id, bot]));
+        const ordered = order.flatMap((id) => byId.get(id) ?? []);
+        const orderedIds = new Set(order);
+        return { bots: [...ordered, ...summaries.filter((bot) => !orderedIds.has(bot.id))] };
       });
 
     const isHomeThread = (threadId: ThreadId) =>
@@ -657,7 +694,7 @@ export const layer = Layer.effect(
     yield* fileSystem.watch(watchDir, { recursive: true }).pipe(
       Stream.filter((event) => {
         const relative = path.relative(botsDir, path.resolve(watchDir, event.path));
-        if (relative === "") return true;
+        if (relative === "" || relative === "order.json") return true;
         const parts = relative.split(path.sep);
         return (
           BOT_ID.test(parts[0] ?? "") &&
@@ -688,6 +725,7 @@ export const layer = Layer.effect(
     return BotService.of({
       get,
       list,
+      reorderBots,
       isHomeThread,
       notifyOwner,
       getOwnerNotification,

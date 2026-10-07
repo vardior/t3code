@@ -68,6 +68,9 @@ export type BotSetPausedInput = typeof BotSetPausedInput.Type;
 export const BotSetPausedResult = Schema.Struct({});
 export type BotSetPausedResult = typeof BotSetPausedResult.Type;
 
+export const BotReorderInput = Schema.Struct({ names: Schema.Array(Schema.String) });
+export type BotReorderInput = typeof BotReorderInput.Type;
+
 export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
@@ -77,6 +80,7 @@ export const BOT_WS_METHODS = {
   botsList: "bots.list",
   botsGet: "bots.get",
   botsSetPaused: "bots.setPaused",
+  botsReorder: "bots.reorder",
   botsSubscribeChanges: "bots.subscribeChanges",
 } as const;
 
@@ -97,6 +101,11 @@ export const BotsRpcGroup = RpcGroup.make(
     success: BotListResult,
     error: Schema.Union([BotError, EnvironmentAuthorizationError]),
   }),
+  Rpc.make(BOT_WS_METHODS.botsReorder, {
+    payload: BotReorderInput,
+    success: Schema.Struct({}),
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+  }),
   Rpc.make(BOT_WS_METHODS.botsSetPaused, {
     payload: BotSetPausedInput,
     success: BotSetPausedResult,
@@ -109,4 +118,5 @@ export const BOT_RPC_REQUIRED_SCOPES = {
   [BOT_WS_METHODS.botsSubscribeChanges]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsGet]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
+  [BOT_WS_METHODS.botsReorder]: AuthOrchestrationOperateScope,
 } satisfies Record<RpcGroup.Rpcs<typeof BotsRpcGroup>["_tag"], AuthEnvironmentScope>;

@@ -4,6 +4,7 @@ import {
   type ServerConfig,
   WS_METHODS,
 } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import type * as EnvironmentRegistry from "../connection/registry.ts";
@@ -50,6 +51,14 @@ export function createBotsEnvironmentAtoms<R, E>(
     }),
     list: (target: { readonly environmentId: EnvironmentId; readonly input: {} }) =>
       listAtom(target.environmentId),
+    reorder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:reorder",
+      tag: WS_METHODS.botsReorder,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+      onSettled: ({ environmentId }, registry) =>
+        Effect.sync(() => registry.refresh(rpcList({ environmentId, input: {} }))),
+    }),
     setPaused: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:bot:set-paused",
       tag: WS_METHODS.botsSetPaused,

@@ -1,8 +1,29 @@
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon, InfoIcon } from "lucide-react";
+import { ArrowLeftIcon, GripVerticalIcon, InfoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
@@ -177,21 +198,21 @@ export function BotsPage({
                 description="Reconnect to message these bots."
               />
             ))}
-            {bots.map((entry) => (
-              <BotListItem
-                key={`${entry.environmentId}:${entry.bot.id}`}
-                bot={entry.bot}
-                environmentId={entry.environmentId}
+            {queries.map((query) => (
+              <SortableBotList
+                key={query.environmentId}
+                environmentId={query.environmentId}
+                bots={query.data?.bots ?? []}
+                refresh={query.refresh}
                 environmentLabel={
                   showEnvironmentLabels
                     ? environments.find(
-                        (environment) => environment.environmentId === entry.environmentId,
+                        (environment) => environment.environmentId === query.environmentId,
                       )?.label
                     : undefined
                 }
-                selected={entry === selection}
-                refresh={entry.refresh}
-                onSelect={() => selectBot(entry)}
+                selectedId={environmentId === query.environmentId ? selected?.id : undefined}
+                onSelect={selectBot}
               />
             ))}
           </nav>
@@ -267,7 +288,17 @@ function BotListItem(props: {
   readonly environmentLabel: string | undefined;
   readonly onSelect: () => void;
   readonly refresh: () => void;
+  readonly disabled: boolean;
 }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.bot.id, disabled: props.disabled });
   const shell = useThreadShell(scopeThreadRef(props.environmentId, props.bot.homeThreadId));
   const status = botThreadShellStatus(shell, props.bot);
   const working = status === "working";
@@ -281,27 +312,47 @@ function BotListItem(props: {
     wasWorking.current = working;
   }, [working, refresh]);
   return (
-    <button
-      type="button"
-      aria-current={props.selected ? "page" : undefined}
-      className={cn(
-        "flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-accent/60",
-        props.selected && "bg-accent",
-      )}
-      onClick={props.onSelect}
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        transition: transition,
+      }}
+      className={cn("flex items-center", isDragging && "relative z-10 bg-background shadow-md")}
     >
-      <BotAvatar name={props.bot.name} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium text-sm">{props.bot.name}</span>
-        {props.environmentLabel ? (
-          <span className="truncate text-muted-foreground text-xs">{props.environmentLabel}</span>
-        ) : null}
-        <span className="truncate text-muted-foreground text-xs">
-          {attentionLabel ??
-            (props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel))}
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        disabled={props.disabled}
+        aria-label={`Reorder ${props.bot.name}`}
+        className="ml-2 flex size-6 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+      >
+        <GripVerticalIcon className="size-4" />
+      </button>
+      <button
+        type="button"
+        aria-current={props.selected ? "page" : undefined}
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left hover:bg-accent/60",
+          props.selected && "bg-accent",
+        )}
+        onClick={props.onSelect}
+      >
+        <BotAvatar name={props.bot.name} />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-medium text-sm">{props.bot.name}</span>
+          {props.environmentLabel ? (
+            <span className="truncate text-muted-foreground text-xs">{props.environmentLabel}</span>
+          ) : null}
+          <span className="truncate text-muted-foreground text-xs">
+            {attentionLabel ??
+              (props.bot.paused ? statusLabel : (props.bot.lastReply?.text ?? statusLabel))}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
 
@@ -312,4 +363,86 @@ function botStatusLabel(status: {
   if (status.paused) return "Paused";
   if (status.lastActivity) return formatRelativeTimeLabel(status.lastActivity);
   return "Idle";
+}
+
+function SortableBotList(props: {
+  readonly environmentId: EnvironmentId;
+  readonly bots: ReadonlyArray<BotSummary>;
+  readonly refresh: () => void;
+  readonly environmentLabel: string | undefined;
+  readonly selectedId: string | undefined;
+  readonly onSelect: (entry: ReturnType<typeof useEnvironmentBots>["bots"][number]) => void;
+}) {
+  const [pending, setPending] = useState<{
+    names: ReadonlyArray<string>;
+    source: ReadonlyArray<BotSummary>;
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const busy = useRef(false);
+  const reorder = useAtomCommand(serverEnvironment.bots.reorder, "Reorder bots");
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const order =
+    pending && (saving || pending.source === props.bots)
+      ? [
+          ...pending.names.filter((id) => props.bots.some((bot) => bot.id === id)),
+          ...props.bots.filter((bot) => !pending.names.includes(bot.id)).map((bot) => bot.id),
+        ]
+      : props.bots.map((bot) => bot.id);
+  const byId = new Map(props.bots.map((bot) => [bot.id, bot]));
+  const handleDragEnd = async (event: DragEndEvent) => {
+    if (busy.current || event.over === null || event.active.id === event.over.id) return;
+    const from = order.indexOf(String(event.active.id));
+    const to = order.indexOf(String(event.over.id));
+    if (from < 0 || to < 0) return;
+    const names = arrayMove([...order], from, to);
+    busy.current = true;
+    setSaving(true);
+    setPending({ names, source: props.bots });
+    try {
+      const result = await reorder({ environmentId: props.environmentId, input: { names } });
+      if (result._tag === "Failure") setPending(null);
+    } catch {
+      setPending(null);
+    } finally {
+      setSaving(false);
+      busy.current = false;
+    }
+  };
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      onDragEnd={(event) => void handleDragEnd(event)}
+    >
+      <SortableContext items={[...order]} strategy={verticalListSortingStrategy}>
+        <div>
+          {order.map((id) => {
+            const bot = byId.get(id);
+            return bot ? (
+              <BotListItem
+                key={id}
+                bot={bot}
+                environmentId={props.environmentId}
+                environmentLabel={props.environmentLabel}
+                selected={id === props.selectedId}
+                refresh={props.refresh}
+                disabled={saving}
+                onSelect={() =>
+                  props.onSelect({
+                    bot,
+                    environmentId: props.environmentId,
+                    refresh: props.refresh,
+                  })
+                }
+              />
+            ) : null;
+          })}
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
 }

@@ -1,5 +1,6 @@
 import {
   type BotGetInput,
+  type BotReorderInput,
   type BotListInput,
   type BotSetPausedInput,
   WS_METHODS,
@@ -12,5 +13,6 @@ export const makeHandlers = (bots: Context.Service.Shape<typeof BotService.BotSe
   [WS_METHODS.botsSubscribeChanges]: (_input: BotListInput) => bots.streamChanges,
   [WS_METHODS.botsGet]: (input: BotGetInput) => bots.get(input),
   [WS_METHODS.botsList]: (_input: BotListInput) => bots.list(),
+  [WS_METHODS.botsReorder]: (input: BotReorderInput) => bots.reorderBots(input.names),
   [WS_METHODS.botsSetPaused]: (input: BotSetPausedInput) => bots.setPaused(input),
 });
