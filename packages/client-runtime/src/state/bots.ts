@@ -64,6 +64,11 @@ export function createBotsEnvironmentAtoms<R, E>(
     list: (target: { readonly environmentId: EnvironmentId; readonly input: {} }) =>
       listAtom(target.environmentId),
     morning: morningAtom,
+    route: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:bot:route",
+      tag: WS_METHODS.botsRoute,
+      idleTtlMs: 0,
+    }),
     reorder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:bot:reorder",
       tag: WS_METHODS.botsReorder,

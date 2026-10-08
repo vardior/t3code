@@ -14,6 +14,7 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import { botStatusLabel } from "../bots/botChat.logic";
 import { SortableBotList } from "../bots/SortableBotList";
 import { useBotRunSettlement } from "../bots/useBots";
+import { HomeBotComposer } from "./HomeBotComposer";
 import type { useHomeBots } from "./useHomeBots";
 
 export function HomeBotsSection(props: {
@@ -56,6 +57,13 @@ export function HomeBotsSection(props: {
       >
         Bots
       </Text>
+      {props.bots.bots.length > 0 ? (
+        <HomeBotComposer
+          bots={props.bots.bots}
+          environmentLabels={props.environmentLabels}
+          onSent={props.onSelectBot}
+        />
+      ) : null}
       {props.bots.errors.map((entry) => (
         <View key={entry.environmentId} className="flex-row items-center gap-3 py-3">
           <Text accessibilityRole="alert" className="min-w-0 flex-1 text-sm text-danger-foreground">

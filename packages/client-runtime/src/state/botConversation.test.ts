@@ -37,7 +37,26 @@ import {
   buildBotChat,
   slackMarkupToMarkdown,
   shouldLoadEarlierBotChatHistory,
+  botRouteEnvironment,
+  botRouteText,
 } from "./botConversation.ts";
+
+describe("bot routing input", () => {
+  it("routes only text of at least two words and eight characters", () => {
+    expect(botRouteText("  omni pods crash  ")).toBe("omni pods crash");
+    expect(botRouteText("deployment")).toBeNull();
+    expect(botRouteText("fix it")).toBeNull();
+    expect(botRouteText("   ")).toBeNull();
+  });
+
+  it("routes only when every bot lives in one environment", () => {
+    const local = EnvironmentId.make("local");
+    const remote = EnvironmentId.make("remote");
+    expect(botRouteEnvironment([{ environmentId: local }, { environmentId: local }])).toBe(local);
+    expect(botRouteEnvironment([{ environmentId: local }, { environmentId: remote }])).toBeNull();
+    expect(botRouteEnvironment([])).toBeNull();
+  });
+});
 
 describe("slackMarkupToMarkdown", () => {
   it("turns Slack links into Markdown links", () => {

@@ -496,3 +496,53 @@ export function botMorningLine(
 ) {
   return bot.replyCount > 1 ? `${bot.replyCount} replies · ${bot.latestReply}` : bot.latestReply;
 }
+
+export const BOT_ROUTE_DEBOUNCE_MS = 600;
+
+export function botRouteText(text: string): string | null {
+  const trimmed = text.trim();
+  return trimmed.length >= 8 && trimmed.split(/\s+/).length >= 2 ? trimmed : null;
+}
+
+export function botRouteEnvironment(
+  bots: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
+): EnvironmentId | null {
+  const environmentIds = new Set(bots.map((entry) => entry.environmentId));
+  return environmentIds.size === 1 ? bots[0]!.environmentId : null;
+}
+
+type BotRouteEntry = {
+  readonly environmentId: EnvironmentId;
+  readonly bot: { readonly id: string };
+};
+
+export function botRouteKey(entry: BotRouteEntry): string {
+  return JSON.stringify([entry.environmentId, entry.bot.id]);
+}
+
+export function heldBotRouteSuggestion(input: {
+  readonly routeText: string | null;
+  readonly routed: { readonly botId: string | null } | null;
+  readonly heldBotId: string | null;
+}): string | null {
+  if (input.routeText === null) return null;
+  if (input.routed === null) return input.heldBotId;
+  return input.routed.botId;
+}
+
+export function botRoutePickerLabel(botName: string | null, isRouting: boolean): string {
+  if (botName !== null) return `→ ${botName}`;
+  return isRouting ? "Finding a bot…" : "Pick a bot";
+}
+
+export function findRoutedBot<T extends BotRouteEntry>(
+  bots: ReadonlyArray<T>,
+  choice: { readonly environmentId: EnvironmentId; readonly botId: string } | null,
+): T | null {
+  if (choice === null) return null;
+  return (
+    bots.find(
+      (entry) => entry.environmentId === choice.environmentId && entry.bot.id === choice.botId,
+    ) ?? null
+  );
+}
