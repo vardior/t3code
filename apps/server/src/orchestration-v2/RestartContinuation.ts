@@ -200,18 +200,18 @@ const deliverRestartContinuation = Effect.fn("RestartContinuation.deliverRestart
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const messageId = restartContinuationMessageId(input.sourceRunId);
     const resendMessageId = restartResendMessageId(input.sourceRunId);
+    const restartMessageIds = [messageId, resendMessageId];
     const projection = yield* threads.getThreadRecords(
       input.threadId,
       ["messages", "runs", "providerTurns", "attempts", "runtimeRequests", "turnItems"],
-      { messageIds: [messageId, resendMessageId], turnItemTypes: ["secret_request"] },
+      { messageIds: restartMessageIds, turnItemTypes: ["secret_request"] },
     );
     if (
       !resolveProjectSettings(enabled, projection.thread.projectId).settings
         .continueThreadsAfterServerUpdate
     )
       return false;
-    if (projection.messages.some((message) => [messageId, resendMessageId].includes(message.id)))
-      return false;
+    if (projection.messages.some((message) => restartMessageIds.includes(message.id))) return false;
     const source = projection.runs.find((run) => run.id === input.sourceRunId);
     if (
       !source ||
