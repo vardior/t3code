@@ -12,6 +12,7 @@ import { useBotsData } from "./BotsDataProvider";
 import { BotsState } from "./BotsState";
 import { BotChat, BotsBreadcrumb } from "./BotChat";
 import { BotInfoSheet } from "./BotInfoSheet";
+import { BotsMorningCards } from "./BotsMorningCard";
 
 export function BotsPage({
   botId,
@@ -102,7 +103,8 @@ export function BotsPage({
           </WorkspacePageHeader>
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
             {bots.length > 0 && !botId ? (
-              <div className="flex flex-col items-center gap-3">
+              <div className="flex max-h-full w-full flex-col items-center gap-3 overflow-y-auto p-4">
+                <BotsMorningCards />
                 <p className="text-sm text-muted-foreground">
                   Pick a bot to see your conversation.
                 </p>

@@ -1,5 +1,6 @@
 import {
   type BotListResult,
+  type BotMorning,
   type EnvironmentId,
   type ServerConfig,
   WS_METHODS,
@@ -35,6 +36,17 @@ export function createBotsEnvironmentAtoms<R, E>(
     refreshTrigger,
   });
   const noBots = AsyncResult.success<BotListResult>({ bots: [] });
+  const rpcMorning = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:server:bots:morning",
+    tag: WS_METHODS.botsMorning,
+  });
+  const morningAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.transform(rpcMorning({ environmentId, input: {} }), (get, source) =>
+      get(configValueAtom(environmentId))?.environment.capabilities.bots === true
+        ? get(source)
+        : AsyncResult.success<BotMorning | null>(null),
+    ),
+  );
   const listAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.transform(rpcList({ environmentId, input: {} }), (get, source) => {
       const config = get(configValueAtom(environmentId));
@@ -51,6 +63,7 @@ export function createBotsEnvironmentAtoms<R, E>(
     }),
     list: (target: { readonly environmentId: EnvironmentId; readonly input: {} }) =>
       listAtom(target.environmentId),
+    morning: morningAtom,
     reorder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:bot:reorder",
       tag: WS_METHODS.botsReorder,

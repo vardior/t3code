@@ -20,6 +20,9 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  answerBotMorningFinding,
+  dismissBotMorning,
+  EMPTY_BOT_MORNING_MEMORY,
   threadsWithoutBotHomes,
   parseThreadLink,
   rewriteThreadLinks,
@@ -1207,5 +1210,23 @@ describe("home bot threads", () => {
   it("keeps the ordinary list when no bot summaries are available", () => {
     const threads = [home];
     expect(threadsWithoutBotHomes(threads, [])).toBe(threads);
+  });
+});
+
+describe("bot morning memory", () => {
+  it("remembers recent dismissals once each and forgets the oldest", () => {
+    let memory = EMPTY_BOT_MORNING_MEMORY;
+    for (let index = 0; index < 14; index++) memory = dismissBotMorning(memory, `env:${index}`);
+    memory = dismissBotMorning(memory, "env:5");
+    expect(memory.dismissed).toHaveLength(12);
+    expect(memory.dismissed[0]).toBe("env:2");
+    expect(memory.dismissed.at(-1)).toBe("env:5");
+    expect(memory.dismissed.filter((entry) => entry === "env:5")).toHaveLength(1);
+  });
+
+  it("records a finding decision and rolls it back when the send fails", () => {
+    const answered = answerBotMorningFinding(EMPTY_BOT_MORNING_MEMORY, "env:finding", "accept");
+    expect(answered.answered).toEqual({ "env:finding": "accept" });
+    expect(answerBotMorningFinding(answered, "env:finding", null).answered).toEqual({});
   });
 });

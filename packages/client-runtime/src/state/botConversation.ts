@@ -3,6 +3,7 @@ import {
   ThreadId,
   type RunId,
   type BotDetail,
+  type BotMorning,
   type BotSummary,
   type ChatAttachmentId,
   type OrchestrationV2ConversationMessage,
@@ -20,6 +21,7 @@ import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 import * as Hash from "effect/Hash";
+import * as Schema from "effect/Schema";
 
 import type { EnvironmentThreadShell } from "./models.ts";
 
@@ -452,4 +454,45 @@ export function botVisitWatermark(
 ): string | null {
   if (threadUpdatedAt === null || lastReplyAt === undefined) return threadUpdatedAt;
   return Date.parse(lastReplyAt) > Date.parse(threadUpdatedAt) ? lastReplyAt : threadUpdatedAt;
+}
+
+const BOT_MORNING_MEMORY_LIMIT = 12;
+const BotMorningDecision = Schema.Literals(["accept", "skip"]);
+export type BotMorningDecision = typeof BotMorningDecision.Type;
+export const BotMorningMemory = Schema.Struct({
+  dismissed: Schema.Array(Schema.String),
+  answered: Schema.Record(Schema.String, BotMorningDecision),
+});
+export type BotMorningMemory = typeof BotMorningMemory.Type;
+export const EMPTY_BOT_MORNING_MEMORY: BotMorningMemory = { dismissed: [], answered: {} };
+
+export function dismissBotMorning(memory: BotMorningMemory, key: string): BotMorningMemory {
+  return {
+    ...memory,
+    dismissed: [...memory.dismissed.filter((entry) => entry !== key), key].slice(
+      -BOT_MORNING_MEMORY_LIMIT,
+    ),
+  };
+}
+
+export function answerBotMorningFinding(
+  memory: BotMorningMemory,
+  key: string,
+  decision: BotMorningDecision | null,
+): BotMorningMemory {
+  const { [key]: _, ...rest } = memory.answered;
+  return {
+    ...memory,
+    answered: Object.fromEntries(
+      Object.entries(decision === null ? rest : { ...rest, [key]: decision }).slice(
+        -BOT_MORNING_MEMORY_LIMIT,
+      ),
+    ),
+  };
+}
+
+export function botMorningLine(
+  bot: Pick<BotMorning["bots"][number], "replyCount" | "latestReply">,
+) {
+  return bot.replyCount > 1 ? `${bot.replyCount} replies · ${bot.latestReply}` : bot.latestReply;
 }
