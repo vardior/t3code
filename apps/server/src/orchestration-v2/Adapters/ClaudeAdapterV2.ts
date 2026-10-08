@@ -1740,6 +1740,7 @@ const CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS = `
 
 To wait for a background command or Monitor you started (tests, a build), call \`t3_background_wait\` with its task ID before you end your turn. Do not mark work you leave running, or PRs. T3 MCP tools are deferred: load one with ToolSearch before you call it.
 `;
+const CLAUDE_SDK_ARTIFACT_OPT_IN = { CLAUDE_CODE_ARTIFACT: "1" };
 
 // Native subagents start from their task, not this session's system prompt.
 const subagentDeviceInstructions: HookCallback = () =>
@@ -1881,7 +1882,9 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: input.environment }),
+    ...(input.environment === undefined
+      ? {}
+      : { env: { ...CLAUDE_SDK_ARTIFACT_OPT_IN, ...input.environment } }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
     systemPrompt: {
       type: "preset" as const,
@@ -2004,6 +2007,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__t3_environment_links",
   "mcp__t3-code__html_preview",
   "mcp__t3-code__html_render",
+  "mcp__t3-code__open_item_list",
 ];
 
 // T3 waits can block for an hour; exceed Claude's default 60 s timeout.

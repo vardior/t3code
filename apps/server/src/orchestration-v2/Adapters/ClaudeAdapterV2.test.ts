@@ -374,6 +374,39 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     });
   });
 
+  it("turns on the Artifact tool unless the instance environment sets it", () => {
+    const artifactFlagFor = (environment: NodeJS.ProcessEnv) =>
+      ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "native-thread-artifact",
+        resume: false,
+        cwd: "/workspace",
+        environment,
+      }).env?.CLAUDE_CODE_ARTIFACT;
+    assert.equal(artifactFlagFor({ PATH: "/usr/bin" }), "1");
+    assert.equal(artifactFlagFor({ CLAUDE_CODE_ARTIFACT: "0" }), "0");
+  });
+
+  it("passes automatic compaction and resume-dialog controls to the SDK", () => {
+    const onUserDialog = async () => ({
+      behavior: "completed" as const,
+      result: "continue" as const,
+    });
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-thread-auto-compact",
+      resume: true,
+      cwd: "/workspace",
+      settings: AUTO_COMPACT_CLAUDE_SETTINGS,
+      onUserDialog,
+      supportedDialogKinds: ["resume_return"],
+    });
+
+    assert.equal((options.settings as { autoCompactWindow?: number }).autoCompactWindow, 300_000);
+    assert.equal(options.onUserDialog, onUserDialog);
+    assert.deepEqual(options.supportedDialogKinds, ["resume_return"]);
+  });
+
   it("projects AskUserQuestion input with question text as the answer key", () => {
     const preview = "\n  **Proposed change**\n\n```ts\n\tconst enabled = true;\n```\n  ";
     assert.deepEqual(
