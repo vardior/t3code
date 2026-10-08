@@ -15,4 +15,5 @@ export const makeHandlers = (bots: Context.Service.Shape<typeof BotService.BotSe
   [WS_METHODS.botsList]: (_input: BotListInput) => bots.list(),
   [WS_METHODS.botsReorder]: (input: BotReorderInput) => bots.reorderBots(input.names),
   [WS_METHODS.botsSetPaused]: (input: BotSetPausedInput) => bots.setPaused(input),
+  [WS_METHODS.botsMorning]: (_input: BotListInput) => bots.morning(),
 });

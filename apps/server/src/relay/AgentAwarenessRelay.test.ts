@@ -370,6 +370,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       list: unused,
       get: unused,
       setPaused: unused,
+      morning: unused,
       reorderBots: unused,
       streamChanges: Stream.empty,
       isHomeThread: () => Effect.succeed(options.homeThread ?? false),

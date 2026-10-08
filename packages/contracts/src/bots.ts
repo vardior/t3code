@@ -71,6 +71,38 @@ export type BotSetPausedResult = typeof BotSetPausedResult.Type;
 export const BotReorderInput = Schema.Struct({ names: Schema.Array(Schema.String) });
 export type BotReorderInput = typeof BotReorderInput.Type;
 
+export const BotMorningFinding = Schema.Struct({
+  id: Schema.String,
+  botId: Schema.String,
+  kind: Schema.Literals(["pattern", "proposal"]),
+  what: Schema.String,
+  fix: Schema.String,
+});
+export type BotMorningFinding = typeof BotMorningFinding.Type;
+
+export const BotMorning = Schema.Struct({
+  awaySince: IsoDateTime,
+  bots: Schema.Array(
+    Schema.Struct({
+      botId: Schema.String,
+      name: Schema.String,
+      replyCount: Schema.Number,
+      latestReply: Schema.String,
+      latestAt: IsoDateTime,
+    }),
+  ),
+  findings: Schema.Array(BotMorningFinding),
+});
+export type BotMorning = typeof BotMorning.Type;
+
+export const botFindingDecisionMessage = (
+  finding: Pick<BotMorningFinding, "what" | "fix">,
+  decision: "accept" | "skip",
+) =>
+  decision === "skip"
+    ? `Skip your finding: ${finding.what}`
+    : `Go ahead with your finding: ${finding.what}${finding.fix ? ` (${finding.fix})` : ""}`;
+
 export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
@@ -82,6 +114,7 @@ export const BOT_WS_METHODS = {
   botsSetPaused: "bots.setPaused",
   botsReorder: "bots.reorder",
   botsSubscribeChanges: "bots.subscribeChanges",
+  botsMorning: "bots.morning",
 } as const;
 
 export const BotsRpcGroup = RpcGroup.make(
@@ -111,12 +144,18 @@ export const BotsRpcGroup = RpcGroup.make(
     success: BotSetPausedResult,
     error: Schema.Union([BotError, EnvironmentAuthorizationError]),
   }),
+  Rpc.make(BOT_WS_METHODS.botsMorning, {
+    payload: BotListInput,
+    success: Schema.NullOr(BotMorning),
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+  }),
 );
 
 export const BOT_RPC_REQUIRED_SCOPES = {
   [BOT_WS_METHODS.botsList]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsSubscribeChanges]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsGet]: AuthOrchestrationReadScope,
+  [BOT_WS_METHODS.botsMorning]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
   [BOT_WS_METHODS.botsReorder]: AuthOrchestrationOperateScope,
 } satisfies Record<RpcGroup.Rpcs<typeof BotsRpcGroup>["_tag"], AuthEnvironmentScope>;

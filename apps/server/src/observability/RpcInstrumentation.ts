@@ -106,6 +106,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.guestShareCreate]: "guest-share",
   [WS_METHODS.botsGet]: "bots",
   [WS_METHODS.botsList]: "bots",
+  [WS_METHODS.botsMorning]: "bots",
   [WS_METHODS.botsReorder]: "bots",
   [WS_METHODS.botsSetPaused]: "bots",
   [WS_METHODS.botsSubscribeChanges]: "bots",

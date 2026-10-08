@@ -2488,3 +2488,164 @@ it.effect("reports unreadable bot order instead of silently discarding a saved o
     expect(Exit.isFailure(yield* listBots({ baseDir }).pipe(Effect.exit))).toBe(true);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
+
+it.effect("summarizes what the bots did since the owner last spoke and offers open findings", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-morning-" });
+    const root = path.join(baseDir, "bots");
+    for (const [id, homeThreadId] of [
+      ["helper", "home"],
+      ["quiet", "quiet-home"],
+    ] as const) {
+      yield* fs.makeDirectory(path.join(root, id), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, id, "bot.json"),
+        toJson({ name: id === "helper" ? "Helper" : "Quiet", homeThreadId }),
+      );
+    }
+    yield* fs.makeDirectory(path.join(root, "memory"));
+    const findingsPath = path.join(root, "memory", "findings.md");
+    yield* fs.writeFileString(
+      findingsPath,
+      [
+        "# Findings",
+        "Format: `<date> | <bot> | pattern|proposal|none | <what, evidence> | <fix or stream, cost>`",
+        "2026-10-05 | helper | pattern | stale finding | old fix",
+        "2026-10-08 | helper | pattern | re-asked twice | dedupe asks, 1h",
+        "2026-10-08 | quiet | proposal | nightly digest | stream digest, small",
+        "2026-10-08 | quiet | none | nothing new | -",
+        "2026-10-08 | agent | pattern | not a bot | -",
+      ].join("\n"),
+    );
+    const before = yield* fs.readFileString(findingsPath);
+
+    yield* insertRun(sql, { id: "evening", threadId: "home", ordinal: 1, status: "completed" });
+    yield* insertMessage(sql, {
+      id: "goodnight",
+      threadId: "home",
+      runId: "evening",
+      text: "Goodnight",
+      createdAt: "2026-10-07T20:00:00.000Z",
+    });
+    yield* insertMessage(sql, {
+      id: "evening-reply",
+      threadId: "home",
+      runId: "evening",
+      role: "assistant",
+      text: "Night.",
+      createdAt: "2026-10-07T20:01:00.000Z",
+    });
+    for (const [ordinal, wake] of [
+      { id: "wake-1", notify: true, reply: "Merged the fix.", at: "2026-10-08T02:00" },
+      { id: "wake-2", notify: true, reply: "**Two** PRs need review.", at: "2026-10-08T04:00" },
+      { id: "wake-3", notify: false, reply: "Nothing to report.", at: "2026-10-08T05:00" },
+    ].entries()) {
+      yield* insertRun(sql, {
+        id: wake.id,
+        threadId: "home",
+        ordinal: ordinal + 2,
+        status: "completed",
+      });
+      yield* insertMessage(sql, {
+        id: `${wake.id}-prompt`,
+        threadId: "home",
+        runId: wake.id,
+        createdBy: "agent",
+        scheduledTaskId: "wake",
+        text: "Wake up.",
+        createdAt: `${wake.at}:00.000Z`,
+      });
+      yield* insertMessage(sql, {
+        id: `${wake.id}-progress`,
+        threadId: "home",
+        runId: wake.id,
+        role: "assistant",
+        text: "Looking.",
+        createdAt: `${wake.at}:01.000Z`,
+      });
+      yield* insertMessage(sql, {
+        id: `${wake.id}-reply`,
+        threadId: "home",
+        runId: wake.id,
+        role: "assistant",
+        text: wake.reply,
+        createdAt: `${wake.at}:02.000Z`,
+      });
+      if (wake.notify) {
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_turn_items (
+            turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json
+          ) VALUES (
+            ${`${wake.id}-notify`}, 'home', ${wake.id}, 1, 'dynamic_tool', 'completed',
+            ${`${wake.at}:01.500Z`}, ${toJson({ toolName: "t3-code.notify_owner" })}
+          )
+        `;
+      }
+    }
+
+    const readMorning = withBots(
+      { baseDir },
+      Effect.flatMap(BotService.BotService, (bots) => bots.morning()),
+    );
+    yield* TestClock.setTime(Date.parse("2026-10-08T01:59:00.000Z"));
+    expect(yield* readMorning).toBeNull();
+    yield* TestClock.setTime(Date.parse("2026-10-08T07:00:00.000Z"));
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const morning = yield* bots.morning();
+        expect(morning).toMatchObject({
+          awaySince: "2026-10-07T20:00:00.000Z",
+          bots: [
+            {
+              botId: "helper",
+              name: "Helper",
+              replyCount: 3,
+              latestReply: "Two PRs need review.",
+              latestAt: "2026-10-08T04:00:02.000Z",
+            },
+          ],
+          findings: [
+            { botId: "helper", kind: "pattern", what: "re-asked twice", fix: "dedupe asks, 1h" },
+            {
+              botId: "quiet",
+              kind: "proposal",
+              what: "nightly digest",
+              fix: "stream digest, small",
+            },
+          ],
+        });
+
+        yield* insertMessage(sql, {
+          id: "skip",
+          threadId: "home",
+          text: "Skip your finding: re-asked twice",
+          createdAt: "2026-10-08T07:01:00.000Z",
+        });
+        yield* insertMessage(sql, {
+          id: "accept",
+          threadId: "quiet-home",
+          text: "Go ahead with your finding: nightly digest (stream digest, small)",
+          createdAt: "2026-10-08T07:02:00.000Z",
+        });
+        expect(yield* bots.morning()).toMatchObject({
+          awaySince: "2026-10-07T20:00:00.000Z",
+          findings: [],
+        });
+
+        yield* insertMessage(sql, {
+          id: "morning",
+          threadId: "quiet-home",
+          text: "Morning",
+          createdAt: "2026-10-08T07:03:00.000Z",
+        });
+        expect(yield* bots.morning()).toBeNull();
+      }),
+    );
+    expect(yield* fs.readFileString(findingsPath)).toBe(before);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);

@@ -1,12 +1,14 @@
 import {
   BotError,
   BotSlackDm,
+  botFindingDecisionMessage,
   ScheduledTaskId,
   ThreadId,
   type RunId,
   type BotDetail,
   type BotGetInput,
   type BotListResult,
+  type BotMorning,
   type BotSetPausedInput,
   type BotSetPausedResult,
   type BotSummary,
@@ -37,6 +39,12 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { ServerConfig } from "../config.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 
+import {
+  AWAY_THRESHOLD_MS,
+  FINDING_DECISION_PREFIXES,
+  findingsWindowStart,
+  parseBotFindings,
+} from "./BotMorning.ts";
 import {
   BOT_ID,
   BotSchedulePauseTransition,
@@ -122,6 +130,7 @@ export class BotService extends Context.Service<
       runId: RunId,
     ) => Effect.Effect<RelayOwnerNotification | undefined>;
     readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
+    readonly morning: () => Effect.Effect<BotMorning | null, BotError>;
   }
 >()("t3/bots/BotService") {}
 
@@ -285,38 +294,57 @@ export const layer = Layer.effect(
         }));
       });
 
+    const isOwnerMessage = sql`
+      m.role = 'user'
+      AND json_extract(m.payload_json, '$.createdBy') IS 'user'
+      AND json_extract(m.payload_json, '$.senderThreadId') IS NULL
+      AND json_extract(m.payload_json, '$.scheduledTaskId') IS NULL
+    `;
+
+    const isVisibleReply = (homeThreadId: ThreadId) => sql`
+      m.thread_id = ${homeThreadId}
+      AND m.role = 'assistant' AND m.streaming = 0 AND m.run_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_runs r
+        WHERE r.run_id = m.run_id
+          AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_messages incoming
+        WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
+          AND incoming.role = 'user'
+          AND json_extract(incoming.payload_json, '$.text') = '/compact'
+      )
+      AND (EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_messages incoming
+        WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
+          AND incoming.role = 'user'
+          AND json_extract(incoming.payload_json, '$.createdBy') IS 'user'
+          AND json_extract(incoming.payload_json, '$.senderThreadId') IS NULL
+          AND json_extract(incoming.payload_json, '$.scheduledTaskId') IS NULL
+      ) OR EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_turn_items notification
+        WHERE notification.thread_id = m.thread_id AND notification.run_id = m.run_id
+          AND notification.type = 'dynamic_tool' AND notification.status = 'completed'
+          AND json_extract(notification.payload_json, '$.toolName') IN ${sql.in(NOTIFY_OWNER_TOOL_NAMES)}
+      ))
+    `;
+
+    const isSlackSend = (homeThreadId: ThreadId) => sql`
+      i.thread_id = ${homeThreadId} AND i.type = 'command_execution'
+      AND i.status = 'completed'
+      AND (json_extract(i.payload_json, '$.exitCode') IS NULL
+        OR json_extract(i.payload_json, '$.exitCode') = 0)
+      AND json_extract(i.payload_json, '$.input') LIKE '%dm-send%'
+    `;
+
     const readLastReply = (homeThreadId: ThreadId) =>
       sql<{ readonly kind: "assistant" | "command"; readonly text: string; readonly at: string }>`
         WITH visible_reply AS (
           SELECT json_extract(m.payload_json, '$.text') AS text, m.created_at AS at,
             m.message_id AS id
           FROM orchestration_v2_projection_messages m
-          WHERE m.thread_id = ${homeThreadId}
-            AND m.role = 'assistant' AND m.streaming = 0 AND m.run_id IS NOT NULL
-            AND NOT EXISTS (
-              SELECT 1 FROM orchestration_v2_projection_runs r
-              WHERE r.run_id = m.run_id
-                AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting')
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM orchestration_v2_projection_messages incoming
-              WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
-                AND incoming.role = 'user'
-                AND json_extract(incoming.payload_json, '$.text') = '/compact'
-            )
-            AND (EXISTS (
-              SELECT 1 FROM orchestration_v2_projection_messages incoming
-              WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
-                AND incoming.role = 'user'
-                AND json_extract(incoming.payload_json, '$.createdBy') IS 'user'
-                AND json_extract(incoming.payload_json, '$.senderThreadId') IS NULL
-                AND json_extract(incoming.payload_json, '$.scheduledTaskId') IS NULL
-            ) OR EXISTS (
-              SELECT 1 FROM orchestration_v2_projection_turn_items notification
-              WHERE notification.thread_id = m.thread_id AND notification.run_id = m.run_id
-                AND notification.type = 'dynamic_tool' AND notification.status = 'completed'
-                AND json_extract(notification.payload_json, '$.toolName') IN ${sql.in(NOTIFY_OWNER_TOOL_NAMES)}
-            ))
+          WHERE ${isVisibleReply(homeThreadId)}
           ORDER BY m.created_at DESC, m.message_id DESC
           LIMIT 1
         )
@@ -326,11 +354,7 @@ export const layer = Layer.effect(
           COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at) AS at,
           i.turn_item_id AS id, i.ordinal
         FROM orchestration_v2_projection_turn_items i
-        WHERE i.thread_id = ${homeThreadId} AND i.type = 'command_execution'
-          AND i.status = 'completed'
-          AND (json_extract(i.payload_json, '$.exitCode') IS NULL
-            OR json_extract(i.payload_json, '$.exitCode') = 0)
-          AND json_extract(i.payload_json, '$.input') LIKE '%dm-send%'
+        WHERE ${isSlackSend(homeThreadId)}
           AND COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at)
             >= COALESCE((SELECT at FROM visible_reply), '')
         ORDER BY at DESC, kind DESC, ordinal DESC, id DESC
@@ -343,6 +367,39 @@ export const layer = Layer.effect(
           return null;
         }),
       );
+
+    const readRepliesSince = (homeThreadId: ThreadId, since: string) =>
+      sql<{ readonly kind: "assistant" | "command"; readonly text: string; readonly at: string }>`
+        SELECT kind, text, at FROM (
+          SELECT 'assistant' AS kind, json_extract(m.payload_json, '$.text') AS text,
+            m.created_at AS at,
+            ROW_NUMBER() OVER (
+              PARTITION BY m.run_id ORDER BY m.created_at DESC, m.message_id DESC
+            ) AS position
+          FROM orchestration_v2_projection_messages m
+          WHERE ${isVisibleReply(homeThreadId)} AND m.created_at > ${since}
+        ) WHERE position = 1
+        UNION ALL
+        SELECT 'command' AS kind, json_extract(i.payload_json, '$.input') AS text,
+          COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at) AS at
+        FROM orchestration_v2_projection_turn_items i
+        WHERE ${isSlackSend(homeThreadId)}
+          AND COALESCE(json_extract(i.payload_json, '$.completedAt'), i.updated_at) > ${since}
+        ORDER BY at DESC
+      `.pipe(
+        Effect.map((rows) =>
+          rows.flatMap((row) => {
+            const text = row.kind === "command" ? slackTextFromCommand(row.text) : row.text;
+            return text === null ? [] : [{ text, at: row.at }];
+          }),
+        ),
+      );
+
+    const isFindingDecision = sql.or(
+      FINDING_DECISION_PREFIXES.map(
+        (prefix) => sql`COALESCE(json_extract(m.payload_json, '$.text'), '') LIKE ${`${prefix}%`}`,
+      ),
+    );
 
     const readHomeThreadState = (threadId: ThreadId) =>
       sql<{ readonly archived_at: string | null }>`
@@ -502,6 +559,88 @@ export const layer = Layer.effect(
         const orderedIds = new Set(order);
         return { bots: [...ordered, ...summaries.filter((bot) => !orderedIds.has(bot.id))] };
       });
+
+    const morning = () =>
+      Effect.gen(function* () {
+        const order = [...new Set(yield* readOrder())];
+        const bots = (yield* Effect.forEach(
+          yield* readBotIds(),
+          (id) =>
+            fileSystem.readFileString(path.join(botsDir, id, "bot.json")).pipe(
+              Effect.flatMap(decodeBotConfig),
+              Effect.map((config) => Option.some({ id, config })),
+              Effect.catchCause(() => Effect.succeed(Option.none())),
+            ),
+          { concurrency: 4 },
+        ))
+          .flatMap(Option.toArray)
+          .toSorted(
+            (left, right) =>
+              (order.indexOf(left.id) + 1 || Infinity) - (order.indexOf(right.id) + 1 || Infinity),
+          );
+        if (bots.length === 0) return null;
+        const homeThreadIds = bots.map(({ config }) => config.homeThreadId);
+        const [latestOwnerMessage] = yield* sql<{ readonly at: string | null }>`
+          SELECT MAX(m.created_at) AS at FROM orchestration_v2_projection_messages m
+          WHERE m.thread_id IN ${sql.in(homeThreadIds)} AND ${isOwnerMessage}
+            AND NOT ${isFindingDecision}
+        `;
+        const awaySince = latestOwnerMessage?.at ?? null;
+        const now = yield* Clock.currentTimeMillis;
+        if (awaySince === null || now - Date.parse(awaySince) <= AWAY_THRESHOLD_MS) return null;
+        const active = (yield* Effect.forEach(bots, ({ id, config }) =>
+          readRepliesSince(config.homeThreadId, awaySince).pipe(
+            Effect.map(([latest, ...rest]) =>
+              latest === undefined
+                ? []
+                : [
+                    {
+                      botId: id,
+                      name: config.name,
+                      replyCount: rest.length + 1,
+                      latestReply: replyPreview(latest.text),
+                      latestAt: latest.at,
+                    },
+                  ],
+            ),
+          ),
+        )).flat();
+        if (active.length === 0) return null;
+        const windowStart = findingsWindowStart(Date.parse(awaySince), now);
+        const homeThreadByBot = new Map(bots.map(({ id, config }) => [id, config.homeThreadId]));
+        const findings = parseBotFindings(
+          yield* fileSystem
+            .readFileString(path.join(botsDir, "memory", "findings.md"))
+            .pipe(Effect.catchCause(() => Effect.succeed(""))),
+          windowStart,
+        ).filter((finding) => homeThreadByBot.has(finding.botId));
+        if (findings.length === 0) return { awaySince, bots: active, findings };
+        const decisions = new Set(
+          (yield* sql<{ readonly thread_id: string; readonly text: string }>`
+            SELECT m.thread_id, json_extract(m.payload_json, '$.text') AS text
+            FROM orchestration_v2_projection_messages m
+            WHERE m.thread_id IN ${sql.in(homeThreadIds)} AND ${isOwnerMessage}
+              AND ${isFindingDecision}
+              AND m.created_at >= ${DateTime.formatIso(DateTime.makeUnsafe(windowStart))}
+          `).map((row) => `${row.thread_id}\n${row.text}`),
+        );
+        return {
+          awaySince,
+          bots: active,
+          findings: findings.filter((finding) => {
+            const homeThreadId = homeThreadByBot.get(finding.botId);
+            return !(["accept", "skip"] as const).some((decision) =>
+              decisions.has(`${homeThreadId}\n${botFindingDecisionMessage(finding, decision)}`),
+            );
+          }),
+        };
+      }).pipe(
+        Effect.mapError((cause) =>
+          isBotError(cause)
+            ? cause
+            : new BotError({ message: "Cannot read what the bots did while you were away", cause }),
+        ),
+      );
 
     const isHomeThread = (threadId: ThreadId) =>
       Effect.gen(function* () {
@@ -779,6 +918,7 @@ export const layer = Layer.effect(
       notifyOwner,
       getOwnerNotification,
       setPaused,
+      morning,
       streamChanges: Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* PubSub.subscribe(changes);
