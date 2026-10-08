@@ -108,6 +108,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.botsList]: "bots",
   [WS_METHODS.botsMorning]: "bots",
   [WS_METHODS.botsReorder]: "bots",
+  [WS_METHODS.botsRoute]: "bots",
   [WS_METHODS.botsSetPaused]: "bots",
   [WS_METHODS.botsSubscribeChanges]: "bots",
   [WS_METHODS.openItemsAnswer]: "openItems",

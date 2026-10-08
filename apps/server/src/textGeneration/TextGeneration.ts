@@ -25,6 +25,8 @@ import * as TextGenerators from "./TextGenerators.ts";
 import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
 
 export type {
+  BotRouteGenerationInput,
+  BotRouteGenerationResult,
   BranchNameGenerationInput,
   BranchNameGenerationResult,
   CommitMessageGenerationInput,
@@ -49,7 +51,8 @@ type TextGenerationOp =
   | "generateBranchName"
   | "generateThreadTitle"
   | "generateReviewGuide"
-  | "generateTranscriptionPostProcessing";
+  | "generateTranscriptionPostProcessing"
+  | "generateBotRoute";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -182,6 +185,11 @@ export const make = Effect.gen(function* () {
         input.modelSelection,
         (service, modelSelection) =>
           service.generateTranscriptionPostProcessing({ ...input, modelSelection }),
+      );
+    }),
+    generateBotRoute: Effect.fn("TextGeneration.generateBotRoute")(function (input) {
+      return resolveInstance(registry, "generateBotRoute", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateBotRoute(input)),
       );
     }),
     generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {

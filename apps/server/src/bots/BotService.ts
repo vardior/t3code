@@ -48,6 +48,7 @@ import {
 import {
   BOT_ID,
   BotSchedulePauseTransition,
+  charterJob,
   decodeBotConfig,
   isPaused,
   listedScheduleIds,
@@ -119,6 +120,10 @@ export class BotService extends Context.Service<
     readonly streamChanges: Stream.Stream<{}>;
     readonly get: (input: BotGetInput) => Effect.Effect<BotDetail, BotError>;
     readonly list: () => Effect.Effect<BotListResult, BotError>;
+    readonly listJobs: () => Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly job: string }>,
+      BotError
+    >;
     readonly reorderBots: (names: ReadonlyArray<string>) => Effect.Effect<{}, BotError>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly notifyOwner: (
@@ -642,6 +647,27 @@ export const layer = Layer.effect(
         ),
       );
 
+    const readBotJob = (id: string) =>
+      Effect.gen(function* () {
+        const botDir = path.join(botsDir, id);
+        const config = yield* fileSystem
+          .readFileString(path.join(botDir, "bot.json"))
+          .pipe(Effect.flatMap(decodeBotConfig));
+        const charter = yield* readCharter(botDir);
+        return [{ id, job: (charter === null ? null : charterJob(charter)) ?? config.name }];
+      }).pipe(Effect.catchCause(() => Effect.succeed([])));
+
+    const listJobs = () =>
+      Effect.gen(function* () {
+        const ids = yield* readBotIds().pipe(
+          Effect.mapError(
+            (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
+          ),
+        );
+        const jobs = yield* Effect.forEach(ids, (id) => readBotJob(id), { concurrency: 4 });
+        return jobs.flat();
+      });
+
     const isHomeThread = (threadId: ThreadId) =>
       Effect.gen(function* () {
         if ((yield* Clock.currentTimeMillis) >= homeThreadIdsExpireAt) {
@@ -913,6 +939,7 @@ export const layer = Layer.effect(
     return BotService.of({
       get,
       list,
+      listJobs,
       reorderBots,
       isHomeThread,
       notifyOwner,

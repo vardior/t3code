@@ -215,6 +215,51 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
+it.effect("lists each bot's job line, joining a wrapped job and falling back to the name", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-jobs-" });
+    const root = path.join(baseDir, "bots");
+    const writeBot = (id: string, charter?: string) =>
+      Effect.gen(function* () {
+        yield* fs.makeDirectory(path.join(root, id), { recursive: true });
+        yield* fs.writeFileString(
+          path.join(root, id, "bot.json"),
+          toJson({ name: `${id} name`, homeThreadId: `${id}-home` }),
+        );
+        if (charter !== undefined) {
+          yield* fs.writeFileString(path.join(root, id, "charter.md"), charter);
+        }
+      });
+    yield* writeBot(
+      "omni",
+      "# omni\n\n## Identity\njob: Keep omni healthy on GKE.\ngood looks like: quiet.\n",
+    );
+    yield* writeBot(
+      "chief",
+      "## Identity\njob: Or's front door. Turn what he sends into streams, and keep him to\n     the decisions that are truly his.\ntemperament: brief.\n",
+    );
+    yield* writeBot("plain");
+    yield* fs.makeDirectory(path.join(root, "broken"));
+    yield* fs.writeFileString(path.join(root, "broken", "bot.json"), "{");
+    yield* fs.makeDirectory(path.join(root, "notes"));
+
+    const jobs = yield* withBots(
+      { baseDir },
+      Effect.flatMap(BotService.BotService, (bots) => bots.listJobs()),
+    );
+    expect(jobs).toEqual([
+      {
+        id: "chief",
+        job: "Or's front door. Turn what he sends into streams, and keep him to the decisions that are truly his.",
+      },
+      { id: "omni", job: "Keep omni healthy on GKE." },
+      { id: "plain", job: "plain name" },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
 it.effect("lists only summaries and gets charter, Slack DMs and spawned workers", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

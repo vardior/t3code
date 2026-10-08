@@ -162,6 +162,11 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateTranscriptionPostProcessing(input),
         v2: v2.generateTranscriptionPostProcessing(input),
       }),
+    generateBotRoute: (input) =>
+      byOpenCodeRuntime(probe.get, {
+        v1: v1.generateBotRoute(input),
+        v2: v2.generateBotRoute(input),
+      }),
   };
 }
 

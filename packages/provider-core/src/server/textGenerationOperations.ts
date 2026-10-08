@@ -7,6 +7,7 @@ import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
 import type { ProviderTextGeneration } from "./textGeneration.ts";
 import {
+  buildBotRoutePrompt,
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
@@ -180,6 +181,18 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     });
   });
 
+  const generateBotRoute: ProviderTextGeneration["generateBotRoute"] = Effect.fn(
+    `${name}.generateBotRoute`,
+  )(function* (input) {
+    const generated = yield* run({
+      operation: "generateBotRoute",
+      cwd: input.cwd,
+      modelSelection: input.modelSelection,
+      ...buildBotRoutePrompt({ message: input.message, bots: input.bots }),
+    });
+    return { botId: generated.botId };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
@@ -187,5 +200,6 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     generateThreadTitle,
     generateReviewGuide,
     generateTranscriptionPostProcessing,
+    generateBotRoute,
   } satisfies ProviderTextGeneration;
 }

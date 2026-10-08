@@ -129,6 +129,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
+import * as BotRouter from "./bots/BotRouter.ts";
 import * as Bots from "./bots/BotService.ts";
 import * as BotsRpc from "./bots/rpc.ts";
 import * as OpenItemService from "./openItems/OpenItemService.ts";
@@ -1454,6 +1455,7 @@ export const layerWsRpc = (
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
       const bots = yield* Bots.BotService;
+      const botRouter = yield* BotRouter.BotRouter;
       const openItems = yield* OpenItemService.OpenItemService;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
@@ -2397,7 +2399,7 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
-        ...BotsRpc.makeHandlers(bots),
+        ...BotsRpc.makeHandlers(bots, botRouter),
         [WS_METHODS.openItemsAnswer]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(openItems.answer(input)),
@@ -3561,6 +3563,7 @@ export const layer = Layer.unwrap(
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
     const bots = yield* Bots.BotService;
+    const botRouter = yield* BotRouter.BotRouter;
     const openItems = yield* OpenItemService.OpenItemService;
     return HttpRouter.add(
       "GET",
@@ -3651,6 +3654,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(Layer.succeed(Bots.BotService, bots)),
+              Layer.provide(Layer.succeed(BotRouter.BotRouter, botRouter)),
               Layer.provide(Layer.succeed(OpenItemService.OpenItemService, openItems)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(

@@ -23,6 +23,22 @@ export type BotConfigFile = typeof BotConfigFile.Type;
 export const decodeBotConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(BotConfigFile));
 export const BOT_ID = /^[\w-][\w.-]*$/;
 
+export const charterJob = (charter: string) => {
+  const lines = charter.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trimStart().startsWith("job:"));
+  if (start < 0) return null;
+  const wrapped = lines.slice(start + 1);
+  const end = wrapped.findIndex((line) => !/^\s+\S/.test(line));
+  const job = [
+    lines[start]!.trimStart().slice("job:".length),
+    ...wrapped.slice(0, end < 0 ? undefined : end),
+  ]
+    .map((part) => part.trim())
+    .join(" ")
+    .trim();
+  return job || null;
+};
+
 export const listedScheduleIds = (config: BotConfigFile) =>
   [config.scheduledTaskId, config.dmRelayScheduledTaskId].filter((value) => value !== undefined);
 

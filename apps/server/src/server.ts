@@ -855,6 +855,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
   Layer.provide(OpenItemService.layer),
+  Layer.provide(BotsRuntime.routerLayer),
   Layer.provide(BotsRuntime.layer),
 );
 

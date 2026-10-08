@@ -486,3 +486,27 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+export interface BotRoutePromptInput {
+  message: string;
+  bots: ReadonlyArray<{ readonly id: string; readonly job: string }>;
+}
+
+export function buildBotRoutePrompt(input: BotRoutePromptInput) {
+  const prompt = [
+    "You route a message to the bot whose job owns its topic.",
+    "Return a JSON object with key: botId.",
+    "Rules:",
+    "- botId must be exactly one of the bot ids listed below",
+    "- botId is null when no bot's job clearly owns the topic",
+    "- answer from the message and the jobs alone, without tools",
+    "",
+    "Bots (id: job):",
+    limitSection(input.bots.map((bot) => `- ${bot.id}: ${bot.job}`).join("\n"), 8_000),
+    "",
+    "Message:",
+    limitSection(input.message, 4_000),
+  ].join("\n");
+  const outputSchema = Schema.Struct({ botId: Schema.NullOr(Schema.String) });
+  return { prompt, outputSchema };
+}

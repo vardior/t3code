@@ -368,6 +368,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     Effect.provideService(ServerSettingsService.ServerSettingsService, settings),
     Effect.provideService(BotService.BotService, {
       list: unused,
+      listJobs: unused,
       get: unused,
       setPaused: unused,
       morning: unused,

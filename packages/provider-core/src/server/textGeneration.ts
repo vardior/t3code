@@ -107,6 +107,17 @@ export interface TranscriptionPostProcessingResult {
   transcription: string;
 }
 
+export interface BotRouteGenerationInput {
+  cwd: string;
+  message: string;
+  bots: ReadonlyArray<{ readonly id: string; readonly job: string }>;
+  modelSelection: ModelSelection;
+}
+
+export interface BotRouteGenerationResult {
+  botId: string | null;
+}
+
 export interface ProviderTextGeneration {
   readonly generateTranscriptionPostProcessing: (
     input: TranscriptionPostProcessingInput,
@@ -131,4 +142,8 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateBotRoute: (
+    input: BotRouteGenerationInput,
+  ) => Effect.Effect<BotRouteGenerationResult, TextGenerationError>;
 }

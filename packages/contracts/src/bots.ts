@@ -103,6 +103,14 @@ export const botFindingDecisionMessage = (
     ? `Skip your finding: ${finding.what}`
     : `Go ahead with your finding: ${finding.what}${finding.fix ? ` (${finding.fix})` : ""}`;
 
+export const BotRouteInput = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(8_000)),
+});
+export type BotRouteInput = typeof BotRouteInput.Type;
+
+export const BotRouteResult = Schema.Struct({ botId: Schema.NullOr(Schema.String) });
+export type BotRouteResult = typeof BotRouteResult.Type;
+
 export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
@@ -113,6 +121,7 @@ export const BOT_WS_METHODS = {
   botsGet: "bots.get",
   botsSetPaused: "bots.setPaused",
   botsReorder: "bots.reorder",
+  botsRoute: "bots.route",
   botsSubscribeChanges: "bots.subscribeChanges",
   botsMorning: "bots.morning",
 } as const;
@@ -139,6 +148,11 @@ export const BotsRpcGroup = RpcGroup.make(
     success: Schema.Struct({}),
     error: Schema.Union([BotError, EnvironmentAuthorizationError]),
   }),
+  Rpc.make(BOT_WS_METHODS.botsRoute, {
+    payload: BotRouteInput,
+    success: BotRouteResult,
+    error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+  }),
   Rpc.make(BOT_WS_METHODS.botsSetPaused, {
     payload: BotSetPausedInput,
     success: BotSetPausedResult,
@@ -158,4 +172,5 @@ export const BOT_RPC_REQUIRED_SCOPES = {
   [BOT_WS_METHODS.botsMorning]: AuthOrchestrationReadScope,
   [BOT_WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
   [BOT_WS_METHODS.botsReorder]: AuthOrchestrationOperateScope,
+  [BOT_WS_METHODS.botsRoute]: AuthOrchestrationOperateScope,
 } satisfies Record<RpcGroup.Rpcs<typeof BotsRpcGroup>["_tag"], AuthEnvironmentScope>;
