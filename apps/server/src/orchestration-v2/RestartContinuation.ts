@@ -182,24 +182,36 @@ export function restartContinuationRun(
   return run;
 }
 
-export const continueRestartedRun = Effect.fn("RestartContinuation.continueRestartedRun")(
-  function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
+const restartContinuationMessageId = (sourceRunId: RunId) =>
+  MessageId.make(`message:restart-continuation:${sourceRunId}`);
+
+const restartResendMessageId = (sourceRunId: RunId) =>
+  MessageId.make(`message:restart-resend:${sourceRunId}`);
+
+const deliverRestartContinuation = Effect.fn("RestartContinuation.deliverRestartContinuation")(
+  function* (input: {
+    readonly threadId: ThreadId;
+    readonly sourceRunId: RunId;
+    readonly resendOnly: boolean;
+  }) {
     const settings = yield* ServerSettings.ServerSettingsService;
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    if (!enabled) return;
+    if (!enabled) return false;
     const threads = yield* ThreadManagementService.ThreadManagementService;
-    const messageId = MessageId.make(`message:restart-continuation:${input.sourceRunId}`);
+    const messageId = restartContinuationMessageId(input.sourceRunId);
+    const resendMessageId = restartResendMessageId(input.sourceRunId);
     const projection = yield* threads.getThreadRecords(
       input.threadId,
       ["messages", "runs", "providerTurns", "attempts", "runtimeRequests", "turnItems"],
-      { messageIds: [messageId], turnItemTypes: ["secret_request"] },
+      { messageIds: [messageId, resendMessageId], turnItemTypes: ["secret_request"] },
     );
     if (
       !resolveProjectSettings(enabled, projection.thread.projectId).settings
         .continueThreadsAfterServerUpdate
     )
-      return;
-    if (projection.messages.some((message) => message.id === messageId)) return;
+      return false;
+    if (projection.messages.some((message) => [messageId, resendMessageId].includes(message.id)))
+      return false;
     const source = projection.runs.find((run) => run.id === input.sourceRunId);
     if (
       !source ||
@@ -214,18 +226,12 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
         isRestartNoteSource(source, projection.providerTurns),
       )
     )
-      return;
-    if (
-      projection.runs.some(
-        (run) =>
-          run.id !== source.id &&
-          run.status !== "queued" &&
-          !cancelledBeforeStart(run) &&
-          runRanAfter(run, source),
-      )
-    )
-      return;
-    if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
+      return false;
+    const laterRuns = projection.runs.filter(
+      (run) => run.id !== source.id && run.status !== "queued" && !cancelledBeforeStart(run) && runRanAfter(run, source),
+    );
+    if (input.resendOnly && laterRuns.length === 0) return false;
+    if (projection.thread.providerInstanceId !== source.providerInstanceId) return false;
     // A turn that keeps crashing the server would otherwise restart it forever.
     let chainLength = 0;
     const loopWindowStart =
@@ -244,13 +250,13 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
         threadId: input.threadId,
         sourceRunId: input.sourceRunId,
       });
-      return;
+      return false;
     }
     const sourceRecords = yield* threads.getThreadRecords(
       input.threadId,
       ["messages", "turnItems"],
       {
-        messageIds: [source.userMessageId],
+        messageIds: [source.userMessageId, ...laterRuns.map((run) => run.userMessageId)],
         turnItemRunIds: [source.id],
         turnItemTypes: ["run_interrupt_request"],
       },
@@ -260,7 +266,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
         (item) => item.runId === source.id && item.type === "run_interrupt_request",
       )
     )
-      return;
+      return false;
     // A parent's Stop reaches its open delegated tasks through an effect a restart can cut short.
     const { lineage, forkedFrom } = projection.thread;
     const taskId =
@@ -285,12 +291,32 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
           turnItemRunIds: [parentRunId],
         })).turnItems.length > 0
       )
-        return;
+        return false;
     }
     const sourceMessage = sourceRecords.messages.find(
       (message) => message.id === source.userMessageId,
     );
-    if (sourceMessage !== undefined && isNativeMaintenanceCommand(sourceMessage)) return;
+    if (sourceMessage !== undefined && isNativeMaintenanceCommand(sourceMessage)) return false;
+    if (laterRuns.length > 0) {
+      const sentByUser = (run: OrchestrationV2Run) =>
+        (sourceRecords.messages.find((message) => message.id === run.userMessageId)?.createdBy ??
+          "user") === "user";
+      if (sourceMessage?.createdBy !== "user" || laterRuns.some(sentByUser)) return false;
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`command:restart-resend:${input.sourceRunId}`),
+        threadId: input.threadId,
+        messageId: resendMessageId,
+        text: sourceMessage.text,
+        ...(sourceMessage.context === undefined ? {} : { context: sourceMessage.context }),
+        attachments: sourceMessage.attachments,
+        modelSelection: source.modelSelection,
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "agent",
+        creationSource: "server",
+      });
+      return false;
+    }
     const note = restartContinuationNote(
       source,
       projection.runs,
@@ -345,6 +371,21 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
             }),
         }),
       );
+    return true;
+  },
+);
+
+export const continueRestartedRun = Effect.fn("RestartContinuation.continueRestartedRun")(
+  function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
+    const continued = yield* deliverRestartContinuation({ ...input, resendOnly: false });
+    if (!continued) return;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const messageId = restartContinuationMessageId(input.sourceRunId);
+    const resumed = yield* threads.getThreadRecords(input.threadId, ["messages"], {
+      messageIds: [messageId],
+    });
+    if (!resumed.messages.some((message) => message.id === messageId))
+      yield* deliverRestartContinuation({ ...input, resendOnly: true });
   },
   // Declined child continuations still owe parent results; existing continuation runs settle them instead.
   (effect, input) =>

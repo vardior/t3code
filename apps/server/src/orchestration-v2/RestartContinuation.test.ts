@@ -1326,3 +1326,124 @@ it.effect("skips restart discovery when no project enables continuation", () =>
     yield* recovery.prepareForShutdown;
   }),
 );
+
+const userQuestion = {
+  id: MessageId.make("message:user"),
+  text: "Why did the deploy fail?",
+  attachments: [],
+  createdBy: "user",
+  creationSource: "web",
+};
+
+const automaticRunAfterRestart = (createdBy: "agent" | "user") => ({
+  run: {
+    id: RunId.make("run:automatic"),
+    ordinal: 2,
+    providerInstanceId: instanceId,
+    providerThreadId,
+    userMessageId: MessageId.make("message:automatic"),
+    status: "running",
+  },
+  message: {
+    id: MessageId.make("message:automatic"),
+    text: "Delegated task finished.",
+    attachments: [],
+    createdBy,
+    creationSource: "server",
+  },
+});
+
+type DispatchCommand = Parameters<
+  ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
+>[0];
+
+const recordingThreads = (
+  read: () => OrchestrationV2ThreadProjection,
+  onDispatch: (command: DispatchCommand, dispatchCount: number) => void,
+) => {
+  const commands: Array<DispatchCommand> = [];
+  const layer = Layer.merge(
+    Layer.mock(ThreadManagementService.ThreadManagementService)({
+      getThreadRecords: () => Effect.sync(read),
+      recoverDelegatedTask: () => Effect.void,
+      dispatch: (command) => {
+        commands.push(command);
+        onDispatch(command, commands.length);
+        return Effect.succeed({} as never);
+      },
+    }),
+    ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
+  );
+  return { commands, layer };
+};
+
+const sentMessages = (commands: ReadonlyArray<DispatchCommand>) =>
+  commands.map((command) =>
+    command.type === "message.dispatch"
+      ? [command.messageId, command.text, command.restartContinuationOfRunId]
+      : [command.type],
+  );
+
+it.effect("re-sends the user's cut message when an automatic run took the thread first", () =>
+  Effect.gen(function* () {
+    const cut = cutMidTurn();
+    for (const createdBy of ["agent", "user"] as const) {
+      const later = automaticRunAfterRestart(createdBy);
+      let projection = {
+        ...cut,
+        runs: [...cut.runs, later.run],
+        messages: [userQuestion, later.message],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const { commands, layer } = recordingThreads(
+        () => projection,
+        (command) => {
+          if (command.type === "message.dispatch")
+            projection = {
+              ...projection,
+              messages: [...projection.messages, { id: command.messageId } as never],
+            };
+        },
+      );
+      yield* continueRestartedRun({ threadId, sourceRunId: runId }).pipe(Effect.provide(layer));
+      yield* continueRestartedRun({ threadId, sourceRunId: runId }).pipe(Effect.provide(layer));
+      assert.deepEqual(
+        sentMessages(commands),
+        createdBy === "agent"
+          ? [[MessageId.make(`message:restart-resend:${runId}`), userQuestion.text, undefined]]
+          : [],
+        createdBy,
+      );
+    }
+  }),
+);
+
+it.effect("re-sends the user's message when an automatic run wins the race to resume", () =>
+  Effect.gen(function* () {
+    const cut = cutMidTurn();
+    const later = automaticRunAfterRestart("agent");
+    let projection = {
+      ...cut,
+      messages: [userQuestion],
+    } as unknown as OrchestrationV2ThreadProjection;
+    const { commands, layer } = recordingThreads(
+      () => projection,
+      (_command, dispatchCount) => {
+        if (dispatchCount === 1)
+          projection = {
+            ...projection,
+            runs: [...projection.runs, later.run],
+            messages: [...projection.messages, later.message],
+          } as unknown as OrchestrationV2ThreadProjection;
+      },
+    );
+    yield* continueRestartedRun({ threadId, sourceRunId: runId }).pipe(Effect.provide(layer));
+    assert.deepEqual(sentMessages(commands), [
+      [
+        MessageId.make(`message:restart-continuation:${runId}`),
+        "Continue where you left off.",
+        runId,
+      ],
+      [MessageId.make(`message:restart-resend:${runId}`), userQuestion.text, undefined],
+    ]);
+  }),
+);
