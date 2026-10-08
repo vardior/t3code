@@ -1,8 +1,16 @@
-import { OpenItemError, OpenItemId, ThreadId, type OpenItem } from "@t3tools/contracts";
+import {
+  EnvironmentAuthorizationError,
+  OpenItemError,
+  OpenItemId,
+  ThreadId,
+  type OpenItem,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   type NotifiedShell,
+  type OpenItemAnswerResult,
+  answerOnceConnected,
   openItemAnswerActionId,
   openItemAnswerChoices,
   openItemAnswerForAction,
@@ -199,5 +207,90 @@ describe("open item answer outcomes", () => {
     expect(content.title).toBe("Couldn't answer: Ship it");
     expect(content.body).toContain("Environment env-1 is offline.");
     expect(content.data).toMatchObject({ kind: "open-item-retry", answer: "Ship it" });
+  });
+});
+
+describe("answerOnceConnected", () => {
+  const unavailable: OpenItemAnswerResult = {
+    _tag: "Failure",
+    error: new Error("MacBook Pro is not connected."),
+  };
+  const answered: OpenItemAnswerResult = {
+    _tag: "Success",
+    value: item({ status: "answered", answer: "Ship it" }),
+  };
+
+  function harness(input: {
+    readonly results: ReadonlyArray<OpenItemAnswerResult | "hang">;
+    readonly connectsAfter?: number;
+  }) {
+    const calls = { answer: 0, reconnect: 0 };
+    let connections = 0;
+    const run = answerOnceConnected({
+      answer: () => {
+        const next = input.results[calls.answer] ?? unavailable;
+        calls.answer += 1;
+        return next === "hang"
+          ? new Promise<OpenItemAnswerResult>(() => {})
+          : Promise.resolve(next);
+      },
+      reconnect: () => {
+        calls.reconnect += 1;
+      },
+      waitForConnection: async () => {
+        connections += 1;
+        return connections > (input.connectsAfter ?? 0);
+      },
+      timeoutMs: 200,
+      attemptTimeoutMs: 20,
+    });
+    return { run, calls };
+  }
+
+  it("wakes the connection before answering", async () => {
+    const { run, calls } = harness({ results: [answered] });
+    expect(await run).toBe(answered);
+    expect(calls).toEqual({ answer: 1, reconnect: 1 });
+  });
+
+  it("reconnects and retries after the socket turns out to be down", async () => {
+    const { run, calls } = harness({ results: [unavailable, answered] });
+    expect(await run).toBe(answered);
+    expect(calls).toEqual({ answer: 2, reconnect: 2 });
+  });
+
+  it("retries an attempt that never hears back from a dead socket", async () => {
+    const { run, calls } = harness({ results: ["hang", answered] });
+    expect(await run).toBe(answered);
+    expect(calls.answer).toBe(2);
+  });
+
+  it("does not retry answers the server rejected", async () => {
+    const rejected: OpenItemAnswerResult = {
+      _tag: "Failure",
+      error: new OpenItemError({ reason: "not_open" }),
+    };
+    const denied: OpenItemAnswerResult = {
+      _tag: "Failure",
+      error: new EnvironmentAuthorizationError({
+        message: "denied",
+        requiredScope: "orchestration:operate",
+      }),
+    };
+    expect(await harness({ results: [rejected, answered] }).run).toBe(rejected);
+    expect(await harness({ results: [denied, answered] }).run).toBe(denied);
+  });
+
+  it("gives up without answering when the environment never connects", async () => {
+    const { run, calls } = harness({ results: [answered], connectsAfter: 99 });
+    const result = await run;
+    expect(result._tag).toBe("Failure");
+    expect(calls.answer).toBe(0);
+  });
+
+  it("reports the last failure once attempts run out", async () => {
+    const { run, calls } = harness({ results: [unavailable, unavailable, unavailable, answered] });
+    expect(await run).toBe(unavailable);
+    expect(calls.answer).toBe(3);
   });
 });

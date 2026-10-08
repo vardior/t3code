@@ -1,8 +1,11 @@
 import { squashAtomCommandFailure, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, type OpenItem, OpenItemId, ThreadId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
+import { environmentCatalog } from "../../connection/catalog";
 import {
   loadOpenItemNotificationMarks,
   saveOpenItemNotificationMarks,
@@ -13,8 +16,10 @@ import { environmentThreadShells } from "../../state/threads";
 import {
   type NotifiedShell,
   type OpenItemAnswerOutcome,
+  type OpenItemAnswerResult,
   type OpenItemNotificationData,
   type OpenItemNotificationTarget,
+  answerOnceConnected,
   openItemAnswerActionId,
   openItemAnswerChoices,
   openItemAnswerForAction,
@@ -32,6 +37,7 @@ const ALERT_CHANNEL = "agent-alerts";
 const RESULT_CHANNEL = "open-item-results";
 const RESULT_VISIBLE_MS = 5_000;
 const ANSWER_TIMEOUT_MS = 20_000;
+const ANSWER_ATTEMPT_TIMEOUT_MS = 8_000;
 
 const shown = new Map<string, OpenItemNotificationTarget>();
 const handledResponses = new Set<string>();
@@ -192,24 +198,34 @@ export function startOpenItemNotifications(
   };
 }
 
-async function answerItem(
+function waitForConnection(environmentId: EnvironmentId, timeoutMs: number): Promise<boolean> {
+  const atom = environmentCatalog.stateAtom(environmentId);
+  const connected = () =>
+    Option.getOrNull(AsyncResult.value(appAtomRegistry.get(atom)))?.phase === "connected";
+  if (connected()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (value: boolean) => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(false), Math.max(timeoutMs, 0));
+    const unsubscribe = appAtomRegistry.subscribe(atom, () => {
+      if (connected()) finish(true);
+    });
+  });
+}
+
+function sendAnswer(
+  environmentId: EnvironmentId,
   data: OpenItemNotificationData,
   answer: string,
-): Promise<OpenItemAnswerOutcome> {
-  const precheck = openItemAnswerPrecheck(findItem(data));
-  if (precheck !== null) return precheck;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<{ readonly _tag: "Failure"; readonly error: Error }>((resolve) => {
-    timeout = setTimeout(
-      () => resolve({ _tag: "Failure", error: new Error("The server did not respond.") }),
-      ANSWER_TIMEOUT_MS,
-    );
-  });
-  const answered = runAtomCommand(
+): Promise<OpenItemAnswerResult> {
+  return runAtomCommand(
     appAtomRegistry,
     serverEnvironment.answerOpenItem,
     {
-      environmentId: EnvironmentId.make(data.environmentId),
+      environmentId,
       input: {
         threadId: ThreadId.make(data.threadId),
         itemId: OpenItemId.make(data.itemId),
@@ -218,12 +234,33 @@ async function answerItem(
       },
     },
     { reportFailure: false },
-  ).then((result) =>
+  ).then((result): OpenItemAnswerResult =>
     result._tag === "Success"
-      ? { _tag: "Success" as const, value: result.value }
-      : { _tag: "Failure" as const, error: squashAtomCommandFailure(result) },
+      ? { _tag: "Success", value: result.value }
+      : { _tag: "Failure", error: squashAtomCommandFailure(result) },
   );
-  const result = await Promise.race([answered, timedOut]).finally(() => clearTimeout(timeout));
+}
+
+function reconnect(environmentId: EnvironmentId): void {
+  void runAtomCommand(appAtomRegistry, environmentCatalog.retryNow, environmentId, {
+    reportFailure: false,
+  });
+}
+
+async function answerItem(
+  data: OpenItemNotificationData,
+  answer: string,
+): Promise<OpenItemAnswerOutcome> {
+  const precheck = openItemAnswerPrecheck(findItem(data));
+  if (precheck !== null) return precheck;
+  const environmentId = EnvironmentId.make(data.environmentId);
+  const result = await answerOnceConnected({
+    answer: () => sendAnswer(environmentId, data, answer),
+    reconnect: () => reconnect(environmentId),
+    waitForConnection: (timeoutMs) => waitForConnection(environmentId, timeoutMs),
+    timeoutMs: ANSWER_TIMEOUT_MS,
+    attemptTimeoutMs: ANSWER_ATTEMPT_TIMEOUT_MS,
+  });
   return openItemAnswerOutcome({ answer, result, current: findItem(data) });
 }
 

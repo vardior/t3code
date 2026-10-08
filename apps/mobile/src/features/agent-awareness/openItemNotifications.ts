@@ -1,5 +1,5 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { OpenItemError, type OpenItem } from "@t3tools/contracts";
+import { EnvironmentAuthorizationError, OpenItemError, type OpenItem } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -33,6 +33,8 @@ export type OpenItemNotificationData = typeof OpenItemNotificationData.Type;
 
 const decodeNotificationData = Schema.decodeUnknownOption(OpenItemNotificationData);
 const isOpenItemError = Schema.is(OpenItemError);
+const isEnvironmentAuthorizationError = Schema.is(EnvironmentAuthorizationError);
+const MAX_ANSWER_ATTEMPTS = 3;
 
 export function openItemNotificationId(target: OpenItemNotificationTarget): string {
   return `open-item:${target.environmentId}:${target.itemId}`;
@@ -168,11 +170,56 @@ export function openItemAnswerPrecheck(
   return current !== undefined && current.status !== "open" ? alreadyResolved(current) : null;
 }
 
+export type OpenItemAnswerResult =
+  | { readonly _tag: "Success"; readonly value: OpenItem }
+  | { readonly _tag: "Failure"; readonly error: unknown };
+
+function isFinalAnswerResult(result: OpenItemAnswerResult): boolean {
+  return (
+    result._tag === "Success" ||
+    isOpenItemError(result.error) ||
+    isEnvironmentAuthorizationError(result.error)
+  );
+}
+
+function withinTime<A>(promise: Promise<A>, timeoutMs: number, fallback: A): Promise<A> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<A>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), Math.max(timeoutMs, 0));
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+export async function answerOnceConnected(input: {
+  readonly answer: () => Promise<OpenItemAnswerResult>;
+  readonly reconnect: () => void;
+  readonly waitForConnection: (timeoutMs: number) => Promise<boolean>;
+  readonly timeoutMs: number;
+  readonly attemptTimeoutMs: number;
+}): Promise<OpenItemAnswerResult> {
+  const deadline = Date.now() + input.timeoutMs;
+  let result: OpenItemAnswerResult = {
+    _tag: "Failure",
+    error: new Error("The server could not be reached."),
+  };
+  for (let attempt = 0; attempt < MAX_ANSWER_ATTEMPTS && Date.now() < deadline; attempt += 1) {
+    input.reconnect();
+    if (!(await input.waitForConnection(deadline - Date.now()))) return result;
+    result = await withinTime(
+      input.answer(),
+      Math.min(input.attemptTimeoutMs, deadline - Date.now()),
+      { _tag: "Failure", error: new Error("The server did not respond.") },
+    );
+    if (isFinalAnswerResult(result)) return result;
+  }
+  return result;
+}
+
 export function openItemAnswerOutcome(input: {
   readonly answer: string;
-  readonly result:
-    | { readonly _tag: "Success"; readonly value: OpenItem }
-    | { readonly _tag: "Failure"; readonly error: unknown };
+  readonly result: OpenItemAnswerResult;
   readonly current: OpenItem | undefined;
 }): OpenItemAnswerOutcome {
   if (input.result._tag === "Success") {
