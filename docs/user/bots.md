@@ -29,7 +29,7 @@ When a bot is waiting on an approval or an answer, its chat says so and links to
 
 When an agent needs a decision from you, it can add an open item to its thread instead of burying the question in a reply. Open items appear in a panel beside the thread (open it from the panel launcher or **Show open items** in the command palette) and, on mobile, from the **open** count above the composer. Each item can offer suggested answers, mark a recommended one, and say what the agent will do if you stay silent. Bots notify you when they add one, and the Bots list shows each bot's count.
 
-Tap an option or type a reply to answer. Your answer is sent to the agent as a message, so it picks the work back up. **Drop** closes an item and **Reopen** brings a resolved item back; the agent is told either way. A thread with an open item is never auto-settled.
+Tap an option or type a reply to answer. Your answer is sent to the agent as a message, so it picks the work back up. While the mobile app is running, including in the background, a new open item also shows a phone notification with up to three of its options as buttons; tapping one answers without opening the app. Items that arrive while the app is closed are notified the next time you open it. **Drop** closes an item and **Reopen** brings a resolved item back; the agent is told either way. A thread with an open item is never auto-settled.
 
 ## Pause a bot
 
