@@ -6,11 +6,11 @@ import {
   botMorningLine,
   dismissBotMorning,
   EMPTY_BOT_MORNING_MEMORY,
-  type BotMorningDecision,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   AuthOrchestrationOperateScope,
   botFindingDecisionMessage,
+  type BotFindingDecision,
   CommandId,
   MessageId,
   type BotMorningFinding,
@@ -65,7 +65,7 @@ function useMorningMemory() {
     () => ({
       memory,
       dismiss: (key: string) => save(dismissBotMorning(latest.current, key)),
-      answer: (key: string, decision: BotMorningDecision | null) =>
+      answer: (key: string, decision: BotFindingDecision | null) =>
         save(answerBotMorningFinding(latest.current, key, decision)),
     }),
     [memory, save],
@@ -99,7 +99,7 @@ function HomeMorningCard(props: {
   readonly environmentLabel: string | undefined;
   readonly memory: BotMorningMemory;
   readonly onDismiss: (key: string) => void;
-  readonly onAnswer: (key: string, decision: BotMorningDecision | null) => void;
+  readonly onAnswer: (key: string, decision: BotFindingDecision | null) => void;
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
   const { environmentId, onAnswer } = props;
@@ -124,7 +124,7 @@ function HomeMorningCard(props: {
     [list],
   );
   const decide = useCallback(
-    (finding: BotMorningFinding, decision: BotMorningDecision) => {
+    (finding: BotMorningFinding, decision: BotFindingDecision) => {
       const homeThreadId = bots.get(finding.botId)?.homeThreadId;
       if (homeThreadId === undefined) return;
       const key = `${environmentId}:${finding.id}`;
@@ -182,6 +182,7 @@ function HomeMorningCard(props: {
       ))}
       {morning.findings.map((finding) => {
         const answer = props.memory.answered[`${environmentId}:${finding.id}`];
+        const canDecide = canOperate && bots.has(finding.botId);
         return (
           <View key={finding.id} className="mt-2 border-t border-border-subtle pt-3">
             <Text className="text-xs text-foreground-muted">
@@ -200,12 +201,12 @@ function HomeMorningCard(props: {
                 <MaterialButton
                   label="Do it"
                   tone="primary"
-                  disabled={!canOperate || !bots.has(finding.botId)}
+                  disabled={!canDecide}
                   onPress={() => decide(finding, "accept")}
                 />
                 <MaterialButton
                   label="Skip"
-                  disabled={!canOperate || !bots.has(finding.botId)}
+                  disabled={!canDecide}
                   onPress={() => decide(finding, "skip")}
                 />
               </View>

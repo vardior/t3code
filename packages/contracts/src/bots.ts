@@ -95,9 +95,12 @@ export const BotMorning = Schema.Struct({
 });
 export type BotMorning = typeof BotMorning.Type;
 
+export const BotFindingDecision = Schema.Literals(["accept", "skip"]);
+export type BotFindingDecision = typeof BotFindingDecision.Type;
+
 export const botFindingDecisionMessage = (
   finding: Pick<BotMorningFinding, "what" | "fix">,
-  decision: "accept" | "skip",
+  decision: BotFindingDecision,
 ) =>
   decision === "skip"
     ? `Skip your finding: ${finding.what}`

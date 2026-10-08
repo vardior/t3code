@@ -6,11 +6,11 @@ import {
   botMorningLine,
   dismissBotMorning,
   EMPTY_BOT_MORNING_MEMORY,
-  type BotMorningDecision,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   AuthOrchestrationOperateScope,
   botFindingDecisionMessage,
+  type BotFindingDecision,
   type BotMorningFinding,
   type BotSummary,
   type EnvironmentId,
@@ -67,7 +67,7 @@ function BotsMorningCard(props: {
   readonly bots: ReadonlyArray<BotSummary>;
   readonly memory: BotMorningMemory;
   readonly onDismiss: (key: string) => void;
-  readonly onAnswer: (key: string, decision: BotMorningDecision | null) => void;
+  readonly onAnswer: (key: string, decision: BotFindingDecision | null) => void;
 }) {
   const { environmentId } = props;
   const morningAtom = serverEnvironment.bots.morning(environmentId);
@@ -130,8 +130,8 @@ function BotsMorningFinding(props: {
   readonly environmentId: EnvironmentId;
   readonly finding: BotMorningFinding;
   readonly bot: BotSummary | undefined;
-  readonly answer: BotMorningDecision | undefined;
-  readonly onAnswer: (decision: BotMorningDecision | null) => void;
+  readonly answer: BotFindingDecision | undefined;
+  readonly onAnswer: (decision: BotFindingDecision | null) => void;
 }) {
   const { environmentId, finding, bot, onAnswer } = props;
   const shell = useThreadShell(
@@ -140,7 +140,7 @@ function BotsMorningFinding(props: {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn);
   const canDecide =
     useEnvironmentScope(environmentId, AuthOrchestrationOperateScope) && shell !== null;
-  const decide = async (decision: BotMorningDecision) => {
+  const decide = async (decision: BotFindingDecision) => {
     if (!canDecide) return;
     onAnswer(decision);
     const sent = await startThreadTurn({

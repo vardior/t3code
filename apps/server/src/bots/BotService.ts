@@ -1,5 +1,6 @@
 import {
   BotError,
+  BotFindingDecision,
   BotSlackDm,
   botFindingDecisionMessage,
   ScheduledTaskId,
@@ -170,6 +171,17 @@ export const layer = Layer.effect(
         Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])),
         Effect.mapError((cause) => new BotError({ message: "Cannot read bot order", cause })),
       );
+    const inBotOrder = <T extends { readonly id: string }>(
+      order: ReadonlyArray<string>,
+      bots: ReadonlyArray<T>,
+    ) => {
+      const byId = new Map(bots.map((bot) => [bot.id, bot]));
+      const orderedIds = new Set(order);
+      return [
+        ...[...orderedIds].flatMap((id) => byId.get(id) ?? []),
+        ...bots.filter((bot) => !orderedIds.has(bot.id)),
+      ];
+    };
     const reorderBots = (names: ReadonlyArray<string>) =>
       Effect.gen(function* () {
         if (names.some((name) => !BOT_ID.test(name))) {
@@ -199,6 +211,11 @@ export const layer = Layer.effect(
         Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])),
         Effect.map((entries) => entries.filter((id) => BOT_ID.test(id)).toSorted()),
       );
+
+    const readBotConfig = (id: string) =>
+      fileSystem
+        .readFileString(path.join(botsDir, id, "bot.json"))
+        .pipe(Effect.flatMap(decodeBotConfig));
 
     const cacheHomeThreadIds = (ids: Iterable<ThreadId>) =>
       Effect.gen(function* () {
@@ -558,31 +575,21 @@ export const layer = Layer.effect(
         );
         const summaries = bots.flatMap((bot) => Option.toArray(bot));
         yield* cacheHomeThreadIds(summaries.map((bot) => bot.homeThreadId));
-        const order = [...new Set(yield* readOrder())];
-        const byId = new Map(summaries.map((bot) => [bot.id, bot]));
-        const ordered = order.flatMap((id) => byId.get(id) ?? []);
-        const orderedIds = new Set(order);
-        return { bots: [...ordered, ...summaries.filter((bot) => !orderedIds.has(bot.id))] };
+        return { bots: inBotOrder(yield* readOrder(), summaries) };
       });
 
     const morning = () =>
       Effect.gen(function* () {
-        const order = [...new Set(yield* readOrder())];
-        const bots = (yield* Effect.forEach(
+        const configs = yield* Effect.forEach(
           yield* readBotIds(),
           (id) =>
-            fileSystem.readFileString(path.join(botsDir, id, "bot.json")).pipe(
-              Effect.flatMap(decodeBotConfig),
-              Effect.map((config) => Option.some({ id, config })),
-              Effect.catchCause(() => Effect.succeed(Option.none())),
+            readBotConfig(id).pipe(
+              Effect.map((config) => [{ id, config }]),
+              Effect.catchCause(() => Effect.succeed([])),
             ),
           { concurrency: 4 },
-        ))
-          .flatMap(Option.toArray)
-          .toSorted(
-            (left, right) =>
-              (order.indexOf(left.id) + 1 || Infinity) - (order.indexOf(right.id) + 1 || Infinity),
-          );
+        );
+        const bots = inBotOrder(yield* readOrder(), configs.flat());
         if (bots.length === 0) return null;
         const homeThreadIds = bots.map(({ config }) => config.homeThreadId);
         const [latestOwnerMessage] = yield* sql<{ readonly at: string | null }>`
@@ -595,19 +602,19 @@ export const layer = Layer.effect(
         if (awaySince === null || now - Date.parse(awaySince) <= AWAY_THRESHOLD_MS) return null;
         const active = (yield* Effect.forEach(bots, ({ id, config }) =>
           readRepliesSince(config.homeThreadId, awaySince).pipe(
-            Effect.map(([latest, ...rest]) =>
-              latest === undefined
-                ? []
-                : [
-                    {
-                      botId: id,
-                      name: config.name,
-                      replyCount: rest.length + 1,
-                      latestReply: replyPreview(latest.text),
-                      latestAt: latest.at,
-                    },
-                  ],
-            ),
+            Effect.map((replies) => {
+              const [latest] = replies;
+              if (latest === undefined) return [];
+              return [
+                {
+                  botId: id,
+                  name: config.name,
+                  replyCount: replies.length,
+                  latestReply: replyPreview(latest.text),
+                  latestAt: latest.at,
+                },
+              ];
+            }),
           ),
         )).flat();
         if (active.length === 0) return null;
@@ -634,7 +641,7 @@ export const layer = Layer.effect(
           bots: active,
           findings: findings.filter((finding) => {
             const homeThreadId = homeThreadByBot.get(finding.botId);
-            return !(["accept", "skip"] as const).some((decision) =>
+            return !BotFindingDecision.literals.some((decision) =>
               decisions.has(`${homeThreadId}\n${botFindingDecisionMessage(finding, decision)}`),
             );
           }),
@@ -649,11 +656,8 @@ export const layer = Layer.effect(
 
     const readBotJob = (id: string) =>
       Effect.gen(function* () {
-        const botDir = path.join(botsDir, id);
-        const config = yield* fileSystem
-          .readFileString(path.join(botDir, "bot.json"))
-          .pipe(Effect.flatMap(decodeBotConfig));
-        const charter = yield* readCharter(botDir);
+        const config = yield* readBotConfig(id);
+        const charter = yield* readCharter(path.join(botsDir, id));
         return [{ id, job: (charter === null ? null : charterJob(charter)) ?? config.name }];
       }).pipe(Effect.catchCause(() => Effect.succeed([])));
 

@@ -3,6 +3,7 @@ import {
   ThreadId,
   type RunId,
   type BotDetail,
+  BotFindingDecision,
   type BotMorning,
   type BotSummary,
   type ChatAttachmentId,
@@ -457,11 +458,9 @@ export function botVisitWatermark(
 }
 
 const BOT_MORNING_MEMORY_LIMIT = 12;
-const BotMorningDecision = Schema.Literals(["accept", "skip"]);
-export type BotMorningDecision = typeof BotMorningDecision.Type;
 export const BotMorningMemory = Schema.Struct({
   dismissed: Schema.Array(Schema.String),
-  answered: Schema.Record(Schema.String, BotMorningDecision),
+  answered: Schema.Record(Schema.String, BotFindingDecision),
 });
 export type BotMorningMemory = typeof BotMorningMemory.Type;
 export const EMPTY_BOT_MORNING_MEMORY: BotMorningMemory = { dismissed: [], answered: {} };
@@ -478,7 +477,7 @@ export function dismissBotMorning(memory: BotMorningMemory, key: string): BotMor
 export function answerBotMorningFinding(
   memory: BotMorningMemory,
   key: string,
-  decision: BotMorningDecision | null,
+  decision: BotFindingDecision | null,
 ): BotMorningMemory {
   const { [key]: _, ...rest } = memory.answered;
   return {

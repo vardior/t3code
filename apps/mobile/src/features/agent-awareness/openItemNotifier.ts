@@ -63,11 +63,8 @@ async function forget(notificationId: string): Promise<void> {
 }
 
 async function present(shell: NotifiedShell, item: OpenItem): Promise<void> {
-  const notificationId = openItemNotificationId({
-    environmentId: shell.environmentId,
-    threadId: shell.id,
-    itemId: item.id,
-  });
+  const target = { environmentId: shell.environmentId, threadId: shell.id, itemId: item.id };
+  const notificationId = openItemNotificationId(target);
   const choices = canAnswer(shell.environmentId) ? openItemAnswerChoices(item) : [];
   if (choices.length > 0) {
     await Notifications.setNotificationCategoryAsync(
@@ -91,11 +88,7 @@ async function present(shell: NotifiedShell, item: OpenItem): Promise<void> {
     },
     trigger: channelTrigger(ALERT_CHANNEL),
   });
-  shown.set(notificationId, {
-    environmentId: shell.environmentId,
-    threadId: shell.id,
-    itemId: item.id,
-  });
+  shown.set(notificationId, target);
 }
 
 export function startOpenItemNotifications(

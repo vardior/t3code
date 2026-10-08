@@ -83,12 +83,8 @@ export function openItemAnswerForAction(
   return Number.isInteger(index) ? (data.choices[index] ?? null) : null;
 }
 
-function itemVersion(environmentId: string, item: OpenItem): string {
-  return `${environmentId}:${item.id}:${item.updatedAt}`;
-}
-
 export function openItemNotificationVersion(shell: NotifiedShell, item: OpenItem): string {
-  return itemVersion(shell.environmentId, item);
+  return `${shell.environmentId}:${item.id}:${item.updatedAt}`;
 }
 
 export interface OpenItemNotificationPlan {
@@ -121,7 +117,7 @@ export function planOpenItemNotifications(input: {
       if (
         item.status === "open" &&
         item.updatedAt > since &&
-        !input.posted.has(itemVersion(shell.environmentId, item))
+        !input.posted.has(openItemNotificationVersion(shell, item))
       ) {
         post.push({ shell, item });
       }
@@ -149,6 +145,14 @@ export type OpenItemAnswerOutcome =
     }
   | { readonly type: "gone" }
   | { readonly type: "failed"; readonly message: string };
+
+function alreadyResolvedTitle(
+  outcome: Extract<OpenItemAnswerOutcome, { readonly type: "already-resolved" }>,
+): string {
+  if (outcome.status === "dropped") return "Already dropped";
+  if (outcome.answer) return `Already answered: ${outcome.answer}`;
+  return "Already answered";
+}
 
 function alreadyResolved(current: OpenItem | undefined): OpenItemAnswerOutcome {
   return {
@@ -203,16 +207,7 @@ export function openItemOutcomeContent(
     case "answered":
       return { title: `Answered: ${outcome.answer}`, body: data.title, data: result };
     case "already-resolved":
-      return {
-        title:
-          outcome.status === "dropped"
-            ? "Already dropped"
-            : outcome.answer
-              ? `Already answered: ${outcome.answer}`
-              : "Already answered",
-        body: data.title,
-        data: result,
-      };
+      return { title: alreadyResolvedTitle(outcome), body: data.title, data: result };
     case "gone":
       return { title: "This open item no longer exists", body: data.title, data: result };
     case "failed":
