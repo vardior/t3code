@@ -27,6 +27,7 @@ import {
   TranscriptionPostProcessingOutput,
 } from "@t3tools/provider-core/server/textGenerationOperations";
 import {
+  buildBotRoutePrompt,
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
@@ -361,6 +362,16 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     });
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
+  const generateBotRoute: ProviderTextGeneration["generateBotRoute"] = Effect.fn(
+    "MuseTextGeneration.generateBotRoute",
+  )(function* (input) {
+    const generated = yield* runMuseJson({
+      operation: "generateBotRoute",
+      ...buildBotRoutePrompt({ message: input.message, bots: input.bots }),
+      modelSelection: input.modelSelection,
+    });
+    return { botId: generated.botId };
+  });
   return {
     generateCommitMessage,
     generatePrContent,
@@ -368,5 +379,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     generateThreadTitle,
     generateReviewGuide,
     generateTranscriptionPostProcessing,
+    generateBotRoute,
   } satisfies ProviderTextGeneration;
 });

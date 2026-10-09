@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ServerCommand,
   type ThreadId,
 } from "@t3tools/contracts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -22,7 +23,6 @@ import * as Schema from "effect/Schema";
 import * as BotService from "../bots/BotService.ts";
 import { planOpenItemChange, type OpenItemChange } from "../orchestration-v2/OpenItems.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
-import { randomUuidV4 } from "../orchestration-v2/RandomUuid.ts";
 
 const isOpenItemError = Schema.is(OpenItemError);
 
