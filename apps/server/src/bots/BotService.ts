@@ -17,7 +17,8 @@ import {
 import { RelayOwnerNotification } from "@t3tools/contracts/relay";
 import { NOTIFY_OWNER_TOOL_NAMES } from "@t3tools/shared/notifyOwnerTool";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -33,8 +34,6 @@ import * as Schema from "effect/Schema";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
-
-import { writeFileStringAtomically } from "../atomicWrite.ts";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { ServerConfig } from "../config.ts";
@@ -160,7 +159,7 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const scheduledTasks = yield* ScheduledTaskService;
-    const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim() || null;
+    const configuredBotsDir = (yield* HostProcess.Environment).T3CODE_BOTS_DIR?.trim() || null;
     const botsDir = configuredBotsDir ?? path.join((yield* ServerConfig).baseDir, "bots");
 
     const orderPath = path.join(botsDir, "order.json");

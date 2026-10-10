@@ -10,7 +10,8 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import type { RelayOwnerNotification } from "@t3tools/contracts/relay";
-import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -61,7 +62,7 @@ const providerInstance = {
     getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: () => Effect.die("sessions are not used by open item tests"),
-  } as ProviderAdapterV2Shape,
+  } as ProviderAdapter.ProviderAdapterV2["Service"],
   textGeneration: {} as ProviderInstance["textGeneration"],
 } satisfies ProviderInstance;
 
@@ -76,6 +77,7 @@ const layerOrchestration = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layer
     }),
   ),
   Layer.provide(ProviderTurnStartServiceTestkit.layer),
+  Layer.provide(McpProviderSessions.layer),
   Layer.provide(
     Layer.succeed(ProjectEnrichmentService.ProjectEnrichmentService, {
       peek: () =>

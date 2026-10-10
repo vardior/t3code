@@ -1,5 +1,6 @@
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as OpenItemService from "../openItems/OpenItemService.ts";
 import * as BotService from "../bots/BotService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
@@ -238,6 +239,7 @@ describe("orchestrator MCP toolkit", () => {
         const layerTest = layerOrchestratorToolkit.pipe(
           Layer.provide(Layer.mock(BotService.BotService)({})),
           Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+          Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
           Layer.provideMerge(layerOrchestration),
           Layer.provide(
             CodexOrchestratorReplayHarness.makeProviderAdapterRegistryLayer(transcript).pipe(

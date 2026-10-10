@@ -53,7 +53,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   BOT_ID,
   BotSchedulePauseTransition,
@@ -512,7 +512,7 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const serverConfig = yield* Effect.serviceOption(ServerConfig);
-    const configuredBotsDir = (yield* HostProcessEnvironment).T3CODE_BOTS_DIR?.trim();
+    const configuredBotsDir = (yield* HostProcess.Environment).T3CODE_BOTS_DIR?.trim();
     const botsDir =
       configuredBotsDir ||
       (Option.isSome(serverConfig) ? path.join(serverConfig.value.baseDir, "bots") : null);
@@ -857,7 +857,7 @@ export const layer = Layer.effect(
         SELECT workspace_root FROM projection_projects WHERE project_id = ${task.projectId}
       `;
       const shell =
-        (yield* HostProcessPlatform) === "win32"
+        (yield* HostProcess.Platform) === "win32"
           ? { command: "cmd.exe", args: ["/d", "/s", "/c", checkCommand] }
           : { command: "/bin/sh", args: ["-c", checkCommand] };
       const result = yield* processRunner.run({

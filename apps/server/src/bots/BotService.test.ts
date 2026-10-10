@@ -11,7 +11,7 @@ import {
   ThreadId,
   type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Queue from "effect/Queue";
@@ -28,6 +28,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ServerConfig } from "../config.ts";
+import * as OpenItemService from "../openItems/OpenItemService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -91,7 +92,7 @@ const withBots = <A, E, R>(
         ),
       ),
     ),
-    Effect.provideService(HostProcessEnvironment, input.env ?? {}),
+    Effect.provideService(HostProcess.Environment, input.env ?? {}),
   );
 
 const listBots = (input: { readonly baseDir: string; readonly env?: NodeJS.ProcessEnv }) =>
@@ -2438,6 +2439,7 @@ it.effect(
               Layer.provideMerge(McpServer.McpServer.layer),
               Layer.provide(Layer.mock(OrchestratorMcpService.OrchestratorMcpService)({})),
               Layer.provide(Layer.mock(ThreadMetadataMcpService.ThreadMetadataMcpService)({})),
+              Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
             ),
           ),
         ),

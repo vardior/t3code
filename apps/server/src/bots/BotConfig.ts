@@ -1,10 +1,9 @@
 import { ScheduledTaskId, ThreadId } from "@t3tools/contracts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
-
-import { writeFileStringAtomically } from "../atomicWrite.ts";
 
 const BotConfigFile = Schema.Struct({
   name: Schema.String,
