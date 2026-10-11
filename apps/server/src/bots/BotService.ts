@@ -322,6 +322,13 @@ export const layer = Layer.effect(
       AND json_extract(m.payload_json, '$.scheduledTaskId') IS NULL
     `;
 
+    const isOwnerRequest = sql`
+      request.role = 'user'
+      AND json_extract(request.payload_json, '$.createdBy') IS 'user'
+      AND json_extract(request.payload_json, '$.senderThreadId') IS NULL
+      AND json_extract(request.payload_json, '$.scheduledTaskId') IS NULL
+    `;
+
     const isVisibleReply = (homeThreadId: ThreadId) => sql`
       m.thread_id = ${homeThreadId}
       AND m.role = 'assistant' AND m.streaming = 0 AND m.run_id IS NOT NULL
@@ -337,12 +344,34 @@ export const layer = Layer.effect(
           AND json_extract(incoming.payload_json, '$.text') = '/compact'
       )
       AND (EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_messages request
+        WHERE request.thread_id = m.thread_id AND request.run_id = m.run_id
+          AND ${isOwnerRequest}
+      ) OR EXISTS (
         SELECT 1 FROM orchestration_v2_projection_messages incoming
         WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
           AND incoming.role = 'user'
-          AND json_extract(incoming.payload_json, '$.createdBy') IS 'user'
-          AND json_extract(incoming.payload_json, '$.senderThreadId') IS NULL
-          AND json_extract(incoming.payload_json, '$.scheduledTaskId') IS NULL
+          AND json_extract(incoming.payload_json, '$.notification') IS NOT NULL
+          AND (
+            SELECT ${isOwnerRequest}
+            FROM orchestration_v2_projection_messages request
+            WHERE request.thread_id = m.thread_id AND request.role = 'user'
+              AND request.created_at < incoming.created_at
+              AND json_extract(request.payload_json, '$.notification') IS NULL
+              AND NOT (
+                json_extract(request.payload_json, '$.createdBy') IS 'agent'
+                AND json_extract(request.payload_json, '$.text') = '/compact'
+              )
+            ORDER BY request.created_at DESC, request.message_id DESC
+            LIMIT 1
+          ) = 1
+      ) OR EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_messages incoming
+        JOIN orchestration_v2_projection_messages request
+          ON request.thread_id = incoming.thread_id
+          AND request.run_id = json_extract(incoming.payload_json, '$.delegatedCompletion.parentRunId')
+        WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
+          AND incoming.role = 'user' AND ${isOwnerRequest}
       ) OR EXISTS (
         SELECT 1 FROM orchestration_v2_projection_turn_items notification
         WHERE notification.thread_id = m.thread_id AND notification.run_id = m.run_id

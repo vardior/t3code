@@ -165,6 +165,8 @@ const insertMessage = (
     role?: string;
     streaming?: boolean;
     text?: string;
+    notification?: { source: { kind: string }; outcome: string; summary: string };
+    delegatedCompletion?: { parentRunId: string; generation: number; taskIds: string[] };
   },
 ) => sql`
   INSERT INTO orchestration_v2_projection_messages (
@@ -179,6 +181,8 @@ const insertMessage = (
       creationSource: message.creationSource,
       senderThreadId: message.senderThreadId,
       scheduledTaskId: message.scheduledTaskId,
+      notification: message.notification,
+      delegatedCompletion: message.delegatedCompletion,
     })}
   )
 `;
@@ -1109,6 +1113,72 @@ it.effect.each(["cancelled", "interrupted", "completed"] as const)(
         expect(yield* readReply).toEqual(visible);
       }
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("previews the reply of a background completion that continues an owner request", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-continued-reply-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(botDir, "bot.json"),
+      toJson({ name: "Helper", homeThreadId: "home" }),
+    );
+    yield* insertThread(sql, { id: "home", createdAt: "2026-10-01T00:00:00.000Z" });
+    const readReply = listBots({ baseDir }).pipe(Effect.map((result) => result.bots[0]!.lastReply));
+    const notification = {
+      source: { kind: "background_command" },
+      outcome: "completed",
+      summary: "Command finished",
+    };
+    const turn = (
+      ordinal: number,
+      incoming: Partial<Parameters<typeof insertMessage>[1]>,
+      reply: string,
+    ) =>
+      Effect.gen(function* () {
+        const runId = `run-${ordinal}`;
+        yield* insertRun(sql, { id: runId, threadId: "home", ordinal, status: "completed" });
+        yield* insertMessage(sql, {
+          id: `${runId}-incoming`,
+          threadId: "home",
+          runId,
+          createdAt: `2026-10-01T00:0${ordinal}:00.000Z`,
+          ...incoming,
+        });
+        yield* insertMessage(sql, {
+          id: `${runId}-reply`,
+          threadId: "home",
+          runId,
+          role: "assistant",
+          text: reply,
+          createdAt: `2026-10-01T00:0${ordinal}:30.000Z`,
+        });
+      });
+    const completion = { createdBy: "agent" as const, creationSource: "provider", notification };
+
+    yield* turn(1, {}, "Holding the draft");
+    yield* turn(2, { createdBy: "agent", creationSource: "server", text: "/compact" }, "");
+    yield* turn(3, completion, "Here is the one-pager");
+    const delivered = { text: "Here is the one-pager", at: "2026-10-01T00:03:30.000Z" };
+    expect(yield* readReply).toEqual(delivered);
+    yield* turn(4, { createdBy: "agent", scheduledTaskId: "schedule" }, "Poll reply");
+    yield* turn(5, completion, "Poll follow-up");
+    expect(yield* readReply).toEqual(delivered);
+    yield* turn(
+      6,
+      {
+        createdBy: "agent",
+        creationSource: "server",
+        delegatedCompletion: { parentRunId: "run-1", generation: 1, taskIds: [] },
+      },
+      "Meeting summary",
+    );
+    expect(yield* readReply).toEqual({ text: "Meeting summary", at: "2026-10-01T00:06:30.000Z" });
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect.each(["mcp__t3-code__notify_owner", "t3-code.notify_owner"])(

@@ -157,6 +157,8 @@ type ChatMessage = Pick<
   | "text"
   | "attachments"
   | "createdAt"
+  | "notification"
+  | "delegatedCompletion"
 >;
 
 export function isBotWorking(
@@ -284,7 +286,23 @@ export function buildBotChat(input: {
       message.senderThreadId === undefined &&
       message.scheduledTaskId === undefined,
   );
-  const ownerRunIds = new Set(ownerMessages.flatMap((message) => message.runId ?? []));
+  const ownerMessageSet = new Set(ownerMessages);
+  const ownerRequests: RunId[][] = [];
+  let request: RunId[] | null = null;
+  for (const message of incoming) {
+    if (message.runId === null) continue;
+    const parentRunId = message.delegatedCompletion?.parentRunId;
+    if (ownerMessageSet.has(message)) {
+      request = [message.runId];
+      ownerRequests.push(request);
+    } else if (parentRunId !== undefined) {
+      ownerRequests.find((runIds) => runIds.includes(parentRunId))?.push(message.runId);
+    } else if (message.notification === undefined) {
+      request = null;
+    } else if (request !== null && !request.includes(message.runId)) {
+      request.push(message.runId);
+    }
+  }
   const compactRunIds = new Set(
     input.messages.flatMap((message) =>
       message.role === "user" && message.text === "/compact" ? (message.runId ?? []) : [],
@@ -306,7 +324,11 @@ export function buildBotChat(input: {
     if (message.role !== "assistant" || message.streaming || message.runId === null) continue;
     if (!activeRunIds.has(message.runId)) finalReplyByRun.set(message.runId, message);
   }
-  const replies = [...new Set([...ownerRunIds, ...notifiedRunIds])].flatMap((runId) =>
+  const latestReplyRunIds = ownerRequests.flatMap(
+    (runIds) =>
+      runIds.findLast((runId) => !compactRunIds.has(runId) && finalReplyByRun.has(runId)) ?? [],
+  );
+  const replies = [...new Set([...latestReplyRunIds, ...notifiedRunIds])].flatMap((runId) =>
     compactRunIds.has(runId) ? [] : (finalReplyByRun.get(runId) ?? []),
   );
 

@@ -617,6 +617,115 @@ describe("buildBotChat background replies", () => {
     ).toEqual(["you", "bot"]);
   });
 
+  it("shows the latest reply of an owner request that continues on background completions", () => {
+    const completion = (id: string, runId: string, createdAt: string) => ({
+      ...message({
+        id,
+        role: "user",
+        runId,
+        createdAt,
+        text: "Background command completed",
+        createdBy: "agent",
+        creationSource: "provider",
+      }),
+      notification: {
+        source: { kind: "command" as const },
+        outcome: "completed" as const,
+        summary: "Command finished",
+      },
+    });
+    const ask = message({
+      id: "ask",
+      role: "user",
+      runId: "run-ask",
+      createdAt: "2026-10-01T00:01:00Z",
+      text: "Write the one-pager",
+    });
+    const holding = message({
+      id: "holding",
+      role: "assistant",
+      runId: "run-ask",
+      createdAt: "2026-10-01T00:02:00Z",
+      text: "Holding the draft until the check finishes",
+    });
+    const autoCompact = message({
+      id: "auto-compact",
+      role: "user",
+      runId: "run-compact",
+      createdAt: "2026-10-01T00:03:00Z",
+      text: "/compact",
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    const delivered = message({
+      id: "delivered",
+      role: "assistant",
+      runId: "run-done",
+      createdAt: "2026-10-01T00:05:00Z",
+      text: "Here is the one-pager",
+    });
+    const tick = { ...prompt, createdAt: at("2026-10-01T00:06:00Z") };
+    const tickCompletion = completion("tick-done", "run-tick-done", "2026-10-01T00:08:00Z");
+    const tickReply = message({
+      id: "tick-reply",
+      role: "assistant",
+      runId: "run-tick-done",
+      createdAt: "2026-10-01T00:09:00Z",
+      text: "Poll follow-up",
+    });
+    const chat = (runs: ReadonlyArray<{ id: RunId; status: OrchestrationV2Run["status"] }>) =>
+      buildBotChat({
+        ...input,
+        runs,
+        messages: [
+          ask,
+          holding,
+          autoCompact,
+          completion("done", "run-done", "2026-10-01T00:04:00Z"),
+          delivered,
+          tick,
+          tickCompletion,
+          tickReply,
+        ],
+      }).map((item) => [item.kind, "text" in item ? item.text : null]);
+
+    expect(chat([])).toEqual([
+      ["you", "Write the one-pager"],
+      ["bot", "Here is the one-pager"],
+    ]);
+    expect(chat([{ id: RunId.make("run-done"), status: "running" }])).toEqual([
+      ["you", "Write the one-pager"],
+      ["bot", "Holding the draft until the check finishes"],
+    ]);
+
+    const taskResult = {
+      ...message({
+        id: "task-result",
+        role: "user",
+        runId: "run-task",
+        createdAt: "2026-10-01T00:10:00Z",
+        text: "Delegated task reached a terminal state",
+        createdBy: "agent",
+        creationSource: "server",
+      }),
+      delegatedCompletion: { parentRunId: RunId.make("run-ask"), generation: 1, taskIds: [] },
+    };
+    const summary = message({
+      id: "summary",
+      role: "assistant",
+      runId: "run-task",
+      createdAt: "2026-10-01T00:11:00Z",
+      text: "Meeting summary",
+    });
+    expect(
+      buildBotChat({
+        ...input,
+        runs: [],
+        messages: [ask, holding, tick, tickReply, taskResult, summary],
+      }).map((item) => ("text" in item ? item.text : null)),
+    ).toEqual(["Write the one-pager", "Meeting summary"]);
+  });
+
   it("keeps successful DM sends visible without a notification", () => {
     expect(
       buildBotChat({
