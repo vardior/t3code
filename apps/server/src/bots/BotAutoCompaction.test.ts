@@ -95,7 +95,7 @@ function projection(
         runAttemptId: attemptId,
         ordinal: 1,
         status: input.failed ? "failed" : "completed",
-        tokenUsage: { usedTokens: input.usedTokens ?? 250_001, maxTokens: input.maxTokens },
+        tokenUsage: { usedTokens: input.usedTokens ?? 120_001, maxTokens: input.maxTokens },
       },
     ],
   } as unknown as OrchestrationV2ThreadProjection;
@@ -203,7 +203,7 @@ describe("BotAutoCompaction", () => {
   it.effect("skips a bot home below the threshold", () =>
     Effect.gen(function* () {
       const { layer, deliveries } = yield* harness({
-        projection: projection({ usedTokens: 250_000 }),
+        projection: projection({ usedTokens: 120_000 }),
       });
       const service = yield* BotAutoCompaction.BotAutoCompaction.pipe(Effect.provide(layer));
       yield* service.afterSettledRun(homeThreadId, runId);
@@ -212,10 +212,10 @@ describe("BotAutoCompaction", () => {
   );
 
   it.effect.each([
-    { usedTokens: 160_001, maxTokens: 200_000, expected: 1 },
-    { usedTokens: 160_000, maxTokens: 200_000, expected: 0 },
-    { usedTokens: 250_001, maxTokens: 1_000_000, expected: 1 },
-    { usedTokens: 250_000, maxTokens: 1_000_000, expected: 0 },
+    { usedTokens: 80_001, maxTokens: 100_000, expected: 1 },
+    { usedTokens: 80_000, maxTokens: 100_000, expected: 0 },
+    { usedTokens: 120_001, maxTokens: 1_000_000, expected: 1 },
+    { usedTokens: 120_000, maxTokens: 1_000_000, expected: 0 },
   ])("compacts at the capped window threshold: %j", ({ usedTokens, maxTokens, expected }) =>
     Effect.gen(function* () {
       const { layer, deliveries } = yield* harness({

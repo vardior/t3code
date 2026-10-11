@@ -17,7 +17,7 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as BotService from "./BotService.ts";
 
-const COMPACTION_THRESHOLD = 250_000;
+const COMPACTION_THRESHOLD = 120_000;
 const CONTEXT_OVERFLOW_CODES = new Set([
   "contextlengthexceeded",
   "contextwindowexceeded",
