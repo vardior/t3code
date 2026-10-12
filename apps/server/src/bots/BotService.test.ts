@@ -1178,6 +1178,13 @@ it.effect("previews the reply of a background completion that continues an owner
       "Meeting summary",
     );
     expect(yield* readReply).toEqual({ text: "Meeting summary", at: "2026-10-01T00:06:30.000Z" });
+    yield* turn(7, {}, "Two PRs are open");
+    yield* turn(
+      8,
+      { ...completion, notification: { ...notification, source: { kind: "monitor" } } },
+      "Nothing needs you.",
+    );
+    expect(yield* readReply).toEqual({ text: "Two PRs are open", at: "2026-10-01T00:07:30.000Z" });
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

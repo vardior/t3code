@@ -352,6 +352,7 @@ export const layer = Layer.effect(
         WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
           AND incoming.role = 'user'
           AND json_extract(incoming.payload_json, '$.notification') IS NOT NULL
+          AND json_extract(incoming.payload_json, '$.notification.source.kind') IS NOT 'monitor'
           AND (
             SELECT ${isOwnerRequest}
             FROM orchestration_v2_projection_messages request
