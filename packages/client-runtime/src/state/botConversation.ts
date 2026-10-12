@@ -290,7 +290,7 @@ export function buildBotChat(input: {
   const ownerRequests: RunId[][] = [];
   let request: RunId[] | null = null;
   for (const message of incoming) {
-    if (message.runId === null) continue;
+    if (message.runId === null || message.notification?.source.kind === "monitor") continue;
     const parentRunId = message.delegatedCompletion?.parentRunId;
     if (ownerMessageSet.has(message)) {
       request = [message.runId];

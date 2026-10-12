@@ -726,6 +726,53 @@ describe("buildBotChat background replies", () => {
     ).toEqual(["Write the one-pager", "Meeting summary"]);
   });
 
+  it("keeps the answer to an owner request when a watch update follows", () => {
+    const ask = message({
+      id: "ask",
+      role: "user",
+      runId: "run-ask",
+      createdAt: "2026-10-01T00:01:00Z",
+      text: "Where does the UX work stand?",
+    });
+    const answer = message({
+      id: "answer",
+      role: "assistant",
+      runId: "run-ask",
+      createdAt: "2026-10-01T00:02:00Z",
+      text: "Two PRs are open",
+    });
+    const watchUpdate = {
+      ...message({
+        id: "watch-update",
+        role: "user",
+        runId: "run-watch",
+        createdAt: "2026-10-01T00:03:00Z",
+        text: "Update on pull request #1",
+        createdBy: "agent",
+        creationSource: "server",
+      }),
+      notification: {
+        source: { kind: "monitor" as const },
+        outcome: "updated" as const,
+        summary: "Checks passed",
+      },
+    };
+    const quiet = message({
+      id: "quiet",
+      role: "assistant",
+      runId: "run-watch",
+      createdAt: "2026-10-01T00:04:00Z",
+      text: "Nothing needs you.",
+    });
+    expect(
+      buildBotChat({
+        ...input,
+        runs: [],
+        messages: [ask, answer, watchUpdate, quiet],
+      }).map((item) => ("text" in item ? item.text : null)),
+    ).toEqual(["Where does the UX work stand?", "Two PRs are open"]);
+  });
+
   it("keeps successful DM sends visible without a notification", () => {
     expect(
       buildBotChat({
