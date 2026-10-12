@@ -190,9 +190,13 @@ function BotModelPicker(props: {
   const instanceEntries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(providers),
+          settings,
+          shell?.projectId ?? null,
+        ),
       ),
-    [providers, settings],
+    [providers, settings, shell?.projectId],
   );
   const modelOptions = useMemo(
     () =>
@@ -249,6 +253,7 @@ function BotModelPicker(props: {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <ProviderModelPicker
+        environmentId={props.environmentId}
         activeInstanceId={selection.instanceId}
         model={selection.model}
         lockedProvider={supportsHandoff || !hasStarted ? null : (provider?.driver ?? null)}

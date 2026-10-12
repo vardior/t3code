@@ -166,8 +166,13 @@ function BotModelPicker(props: {
   });
   const models = useMemo(
     () =>
-      buildModelOptions(config, selection, canSwitchProvider ? undefined : selection?.instanceId),
-    [config, selection, canSwitchProvider],
+      buildModelOptions(
+        config,
+        selection,
+        canSwitchProvider ? undefined : selection?.instanceId,
+        shell?.projectId ?? null,
+      ),
+    [config, selection, canSwitchProvider, shell?.projectId],
   );
   const providerGroups = useMemo(() => groupByProvider(models), [models]);
   const selectedOption = models.find(
@@ -211,6 +216,7 @@ function BotModelPicker(props: {
       ? ({
           ownerId,
           environmentId,
+          projectId: shell.projectId,
           providerInstanceId: selection.instanceId,
           providerGroups,
           selectedModel: selection,

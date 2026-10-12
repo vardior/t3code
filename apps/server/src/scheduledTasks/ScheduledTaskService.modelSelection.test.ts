@@ -1,3 +1,5 @@
+import * as ServerSettings from "../serverSettings.ts";
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -63,7 +65,18 @@ it.effect(
         NodeServices.layer,
         NodeCrypto.layer,
         Scheduler.layer,
-        ThreadManagementService.layer.pipe(Layer.provide(layerOrchestrator)),
+        ThreadManagementService.layer.pipe(
+          Layer.provide(layerOrchestrator),
+          Layer.provide(
+            ServerSettings.layerTest({
+              providerInstances: {
+                [ProviderInstanceId.make("codex")]: { driver: "codex", enabled: true },
+                [ProviderInstanceId.make("codex-owner")]: { driver: "codex", enabled: true },
+              },
+            }),
+          ),
+          Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+        ),
         Layer.mock(ThreadLaunchService.ThreadLaunchService)({
           launch: (input) =>
             orchestrator.getThreadProjection(ThreadId.make("home")).pipe(
