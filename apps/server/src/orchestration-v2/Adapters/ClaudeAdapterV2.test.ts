@@ -12409,6 +12409,90 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const harness = yield* makeWakeHarness;
           const now = yield* DateTime.now;
           const resetsAt = 1790298600;
+  it.effect("settles the wake run when Claude folds a queued prompt into the wake turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        const foldedReplyText = "Handled the wake and the queued prompt together.";
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-wake-folded-1"),
+            text: "Run the build in the background.",
+            attachments: [],
+          }),
+        );
+        yield* Queue.offer(harness.sdkMessages, turnOneResult);
+        yield* awaitUntil(() => harness.terminalEvents().length === 1, "first turn terminal");
+
+        yield* harness.offerAndWait(wakeTurnInit);
+        assert.lengthOf(harness.continuationRequests, 1);
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-wake-folded-2"),
+            text: "Triage the new signals.",
+            attachments: [],
+            providerTurnOrdinal: 2,
+          }),
+        );
+        yield* awaitUntil(() => harness.offeredMessages.length === 2, "queued prompt offered");
+
+        yield* harness.offerAndWait(
+          makeAssistantTextFrame({
+            uuid: "00000000-0000-4000-8000-000000000120",
+            text: foldedReplyText,
+          }),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          claudeSdkFrame({
+            ...makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000000121",
+              result: foldedReplyText,
+            }),
+            user_message_uuids: ["00000000-0000-4000-8000-000000000122", harness.promptUuid(1)],
+          }),
+        );
+        yield* awaitUntil(() => harness.terminalEvents().length === 2, "folded turn terminal");
+        assert.equal(harness.terminalEvents()[1]?.status, "completed");
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-wake-folded-3"),
+            text: "Background task completed.",
+            attachments: [],
+            providerTurnOrdinal: 3,
+            messageCreatedBy: "agent",
+            messageCreationSource: "provider",
+          }),
+        );
+        yield* awaitUntil(() => harness.terminalEvents().length === 3, "wake run terminal");
+        assert.equal(harness.terminalEvents()[2]?.status, "completed");
+        assert.lengthOf(harness.offeredMessages, 2);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("does not offer a continuation for notification-only opaque work", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
 
           yield* harness.runtime.startTurn(
             makeClaudeTestTurnInput({
