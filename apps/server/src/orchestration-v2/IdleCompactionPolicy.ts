@@ -8,6 +8,7 @@ import {
 import { latestNativeContextUsage } from "@t3tools/provider-core/server/handoffBudget";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 
 export const IDLE_COMPACTION_DELAY_MS = 54 * 60 * 1_000;
 export const IDLE_COMPACTION_EXPIRY_MS = 60 * 60 * 1_000;
@@ -23,6 +24,12 @@ export const IdleCompactionAdmission = Context.Reference<IdleCompactionCandidate
   "t3/orchestration-v2/IdleCompactionAdmission",
   { defaultValue: () => undefined },
 );
+
+export const IdleCompactionPauseGuard = Context.Reference<
+  (threadId: ThreadId) => Effect.Effect<boolean>
+>("t3/orchestration-v2/IdleCompactionPauseGuard", {
+  defaultValue: () => () => Effect.succeed(false),
+});
 
 export const idleCompactionFields = [
   "runs",

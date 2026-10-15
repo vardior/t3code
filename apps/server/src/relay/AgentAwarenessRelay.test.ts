@@ -179,7 +179,10 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
     readonly notifyAgentThreads?: boolean;
     readonly homeThread?: boolean;
-    readonly autoCompaction?: boolean;
+    readonly autoCompaction?: "bot-auto-compact" | "idle-compact";
+    readonly sourceCreatedBy?: "agent" | "user";
+    readonly sourceCreationSource?: "server" | "user";
+    readonly sourceAttachments?: ReadonlyArray<unknown>;
     readonly sourceText?: string;
     readonly scheduledWake?: boolean;
     readonly relayedWake?: boolean;
@@ -280,20 +283,25 @@ const makeTestRelay = Effect.fnUntraced(function* (
           {
             id: "latest-run",
             userMessageId: options.autoCompaction
-              ? "bot-auto-compact:previous-run"
+              ? `${options.autoCompaction}:previous-run`
               : "ordinary-message",
           },
         ],
         messages: [
           {
-            id: options.autoCompaction ? "bot-auto-compact:previous-run" : "ordinary-message",
+            id: options.autoCompaction
+              ? `${options.autoCompaction}:previous-run`
+              : "ordinary-message",
             role: "user",
             scheduledTaskId: options.scheduledWake ? ScheduledTaskId.make("wake-task") : undefined,
             senderThreadId: options.relayedWake ? SECOND_THREAD_ID : undefined,
-            createdBy: options.autoCompaction || options.relayedWake ? "agent" : "user",
-            creationSource: options.autoCompaction ? "server" : "user",
+            createdBy:
+              options.sourceCreatedBy ??
+              (options.autoCompaction || options.relayedWake ? "agent" : "user"),
+            creationSource:
+              options.sourceCreationSource ?? (options.autoCompaction ? "server" : "user"),
             text: options.sourceText ?? "/compact",
-            attachments: [],
+            attachments: options.sourceAttachments ?? [],
           },
         ],
       } as never),
@@ -374,6 +382,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       morning: unused,
       reorderBots: unused,
       streamChanges: Stream.empty,
+      isHomeThreadPaused: unused,
       isHomeThread: () => Effect.succeed(options.homeThread ?? false),
       notifyOwner: unused,
       getOwnerNotification: () => Effect.succeed(options.ownerNotification),
@@ -457,12 +466,17 @@ describe("AgentAwarenessRelay", () => {
       }),
   );
 
-  it.effect.each([
-    { homeThread: true, autoCompaction: true, sourceText: "/compact", expected: 0 },
-    { homeThread: true, autoCompaction: false, sourceText: "/compact", expected: 1 },
-    { homeThread: true, autoCompaction: true, sourceText: "Wake up", expected: 1 },
-    { homeThread: false, autoCompaction: true, sourceText: "/compact", expected: 1 },
-  ])("suppresses only automatic bot compaction: %j", (input) =>
+  it.effect.each(
+    (["bot-auto-compact", "idle-compact"] as const).flatMap((autoCompaction) => [
+      { homeThread: true, autoCompaction, sourceText: "/compact", expected: 0 },
+      { homeThread: true, sourceText: "/compact", expected: 1 },
+      { homeThread: true, autoCompaction, sourceText: "Wake up", expected: 1 },
+      { homeThread: false, autoCompaction, sourceText: "/compact", expected: 1 },
+      { homeThread: true, autoCompaction, sourceCreatedBy: "user" as const, expected: 1 },
+      { homeThread: true, autoCompaction, sourceCreationSource: "user" as const, expected: 1 },
+      { homeThread: true, autoCompaction, sourceAttachments: [{}], expected: 1 },
+    ]),
+  )("suppresses only automatic bot compaction: %j", (input) =>
     Effect.gen(function* () {
       const { relay, currentShell, publications } = yield* makeTestRelay(input);
       yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run") }));
@@ -589,20 +603,21 @@ describe("AgentAwarenessRelay", () => {
     }),
   );
 
-  it.effect("automatic compaction overrides explicit notification and failure", () =>
-    Effect.gen(function* () {
-      const { relay, currentShell, publications } = yield* makeTestRelay({
-        homeThread: true,
-        autoCompaction: true,
-        ownerNotification: { body: "Notify" },
-      });
-      yield* Ref.set(
-        currentShell,
-        shell({ latestRunId: RunId.make("latest-run"), status: "failed" }),
-      );
-      yield* relay.publishThread(THREAD_ID);
-      assert.equal(publications.length, 0);
-    }),
+  it.effect.each(["bot-auto-compact", "idle-compact"] as const)(
+    "%s suppresses running, completion, and failure even with an explicit notification",
+    (autoCompaction) =>
+      Effect.gen(function* () {
+        const { relay, currentShell, publications } = yield* makeTestRelay({
+          homeThread: true,
+          autoCompaction,
+          ownerNotification: { body: "Notify" },
+        });
+        for (const status of ["running", "completed", "failed"] as const) {
+          yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run"), status }));
+          yield* relay.publishThread(THREAD_ID);
+        }
+        assert.equal(publications.length, 0);
+      }),
   );
 
   it.effect("publishes bot home threads while agent notifications are disabled", () =>

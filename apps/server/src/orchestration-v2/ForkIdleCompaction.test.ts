@@ -25,6 +25,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import {
   IdleCompactionAdmission,
+  IdleCompactionPauseGuard,
   idleCompactionCandidate,
   sameIdleCompactionCandidate,
 } from "./IdleCompactionPolicy.ts";
@@ -385,6 +386,37 @@ const seed = Effect.gen(function* () {
 });
 
 describe("idle compaction admission", () => {
+  it.effect(
+    "checks bot pause at admission and admits after resume without consuming the generation",
+    () =>
+      Effect.gen(function* () {
+        yield* seed;
+        yield* TestClock.adjust(54 * minute);
+        let paused = true;
+        let checks = 0;
+        const service = yield* ForkIdleCompactionService.make.pipe(
+          Effect.provideService(IdleCompactionPauseGuard, (candidateThreadId) =>
+            Effect.sync(() => {
+              assert.equal(candidateThreadId, threadId);
+              checks++;
+              return paused;
+            }),
+          ),
+        );
+        const o = yield* Orchestrator.OrchestratorV2;
+        yield* service.sweep;
+        yield* (yield* ForkIdleCompactionService.make.pipe(
+          Effect.provideService(IdleCompactionPauseGuard, () => Effect.succeed(true)),
+        )).sweep;
+        assert.lengthOf((yield* o.getThreadRecords(threadId, ["messages"])).messages, 0);
+        assert.equal(checks, 1);
+        paused = false;
+        yield* service.sweep;
+        assert.lengthOf((yield* o.getThreadRecords(threadId, ["messages"])).messages, 1);
+        assert.equal(checks, 2);
+      }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("the scoped server worker recovers due maintenance at startup", () =>
     Effect.gen(function* () {
       yield* seed;

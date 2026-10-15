@@ -125,6 +125,7 @@ export class BotService extends Context.Service<
       BotError
     >;
     readonly reorderBots: (names: ReadonlyArray<string>) => Effect.Effect<{}, BotError>;
+    readonly isHomeThreadPaused: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly notifyOwner: (
       threadId: ThreadId | undefined,
@@ -709,6 +710,24 @@ export const layer = Layer.effect(
         return homeThreadIds.has(threadId);
       }).pipe(homeThreadLookupLock.withPermit);
 
+    const isHomeThreadPaused = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        for (const id of yield* readBotIds()) {
+          const configPath = path.join(botsDir, id, "bot.json");
+          if (!(yield* fileSystem.exists(configPath))) continue;
+          const config = yield* readBotConfig(id);
+          if (config.homeThreadId === threadId && isPaused(config, now)) return true;
+        }
+        return false;
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Cannot check bot home pause", { threadId, cause }).pipe(
+            Effect.as(true),
+          ),
+        ),
+      );
+
     const notifyOwner = Effect.fn("BotService.notifyOwner")(function* (
       threadId: ThreadId | undefined,
       input: RelayOwnerNotification,
@@ -975,6 +994,7 @@ export const layer = Layer.effect(
       listJobs,
       reorderBots,
       isHomeThread,
+      isHomeThreadPaused,
       notifyOwner,
       getOwnerNotification,
       setPaused,

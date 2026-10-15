@@ -10,6 +10,7 @@ import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import {
   IdleCompactionAdmission,
+  IdleCompactionPauseGuard,
   idleCompactionCandidate,
   idleCompactionFields,
   IDLE_COMPACTION_DELAY_MS,
@@ -17,6 +18,7 @@ import {
 } from "./IdleCompactionPolicy.ts";
 
 export const make = Effect.gen(function* () {
+  const pauseGuard = yield* IdleCompactionPauseGuard;
   const sql = yield* SqlClient.SqlClient;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
@@ -69,7 +71,10 @@ export const make = Effect.gen(function* () {
               createdBy: "agent",
               creationSource: "server",
             })
-            .pipe(Effect.provideService(IdleCompactionAdmission, candidate));
+            .pipe(
+              Effect.provideService(IdleCompactionAdmission, candidate),
+              Effect.provideService(IdleCompactionPauseGuard, pauseGuard),
+            );
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Idle context compaction skipped", {

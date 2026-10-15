@@ -583,7 +583,7 @@ export const make = Effect.gen(function* () {
       const message = records.messages.find((candidate) => candidate.id === run?.userMessageId);
       autoCompaction =
         message !== undefined &&
-        message.id.startsWith("bot-auto-compact:") &&
+        (message.id.startsWith("bot-auto-compact:") || message.id.startsWith("idle-compact:")) &&
         message.createdBy === "agent" &&
         message.creationSource === "server" &&
         message.text.trim().toLowerCase() === "/compact" &&

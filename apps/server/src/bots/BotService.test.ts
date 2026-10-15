@@ -1405,6 +1405,44 @@ it.effect("distinguishes archived home threads from deleted and absent ones", ()
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
+it.effect("reads current bot home pause state without transcripts or cached pause flags", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-idle-pause-" });
+    const botDir = path.join(baseDir, "bots", "helper");
+    const configPath = path.join(botDir, "bot.json");
+    yield* fs.makeDirectory(botDir, { recursive: true });
+    const config = { name: "Helper", homeThreadId: "home", triageThreadId: "triage" };
+    yield* fs.writeFileString(configPath, toJson(config));
+    yield* withBots(
+      { baseDir },
+      Effect.gen(function* () {
+        const bots = yield* BotService.BotService;
+        const home = ThreadId.make("home");
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(false);
+        yield* fs.writeFileString(configPath, toJson({ ...config, paused: true }));
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(true);
+        expect(yield* bots.isHomeThreadPaused(ThreadId.make("ordinary"))).toBe(false);
+        expect(yield* bots.isHomeThreadPaused(ThreadId.make("triage"))).toBe(false);
+        yield* fs.writeFileString(
+          configPath,
+          toJson({ ...config, pausedUntil: "1970-01-01T00:00:01.000Z" }),
+        );
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(true);
+        yield* TestClock.adjust("1 second");
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(false);
+        yield* bots.setPaused({ botId: "helper", paused: true });
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(true);
+        yield* bots.setPaused({ botId: "helper", paused: false });
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(false);
+        yield* fs.writeFileString(configPath, "malformed");
+        expect(yield* bots.isHomeThreadPaused(home)).toBe(true);
+      }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
 it.effect("caches home thread lookups for 30 seconds and refreshes them after listing", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

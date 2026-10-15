@@ -200,6 +200,8 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as BotsRuntime from "./bots/runtime.ts";
+import { BotService } from "./bots/BotService.ts";
+import { IdleCompactionPauseGuard } from "./orchestration-v2/IdleCompactionPolicy.ts";
 import * as OpenItemService from "./openItems/OpenItemService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
@@ -655,10 +657,17 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,
   Layer.effectDiscard(
-    ForkIdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
+    Effect.gen(function* () {
+      const bots = yield* BotService;
+      yield* ForkIdleCompactionService.make.pipe(
+        Effect.flatMap((service) => service.start()),
+        Effect.provideService(IdleCompactionPauseGuard, bots.isHomeThreadPaused),
+      );
+    }),
   ).pipe(
     Layer.provide(CommandReceiptStore.layer),
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
+    Layer.provide(BotsRuntime.layer),
   ),
   BotsRuntime.workerLive,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
