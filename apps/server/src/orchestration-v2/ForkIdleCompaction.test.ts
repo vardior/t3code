@@ -386,6 +386,44 @@ const seed = Effect.gen(function* () {
 });
 
 describe("idle compaction admission", () => {
+  it.effect.each([120_001, 200_001])(
+    "does not enqueue settled %s-token work before 54 minutes",
+    (usedTokens) =>
+      Effect.gen(function* () {
+        const state = yield* seed;
+        const store = yield* ProjectionStore.ProjectionStoreV2;
+        yield* store.apply({
+          id: EventId.make("settled-provider-occupancy"),
+          type: "provider-thread.updated",
+          threadId,
+          occurredAt: at(0),
+          payload: { ...state.providerThreads[0]!, contextUsage: { usedTokens } },
+        });
+        yield* store.apply({
+          id: EventId.make("settled-occupancy"),
+          type: "provider-turn.updated",
+          threadId,
+          occurredAt: at(0),
+          payload: {
+            ...state.providerTurns[0]!,
+            tokenUsage: { usedTokens, maxTokens: 150_000, updatedAt: DateTime.formatIso(at(0)) },
+          },
+        });
+        const service = yield* ForkIdleCompactionService.make;
+        const o = yield* Orchestrator.OrchestratorV2;
+        yield* service.sweep;
+        assert.lengthOf((yield* o.getThreadRecords(threadId, ["messages"])).messages, 0);
+        yield* TestClock.adjust(54 * minute - 1);
+        yield* service.sweep;
+        assert.lengthOf((yield* o.getThreadRecords(threadId, ["messages"])).messages, 0);
+        yield* TestClock.adjust(1);
+        yield* service.sweep;
+        const messages = (yield* o.getThreadRecords(threadId, ["messages"])).messages;
+        assert.lengthOf(messages, usedTokens === 200_001 ? 1 : 0);
+        if (usedTokens === 200_001) assert.equal(messages[0]!.text, "/compact");
+      }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect(
     "checks bot pause at admission and admits after resume without consuming the generation",
     () =>

@@ -669,7 +669,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(BotsRuntime.layer),
   ),
-  BotsRuntime.workerLive,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   DatabaseStorage.layer.pipe(
     Layer.provide(ProjectionMaintenance.layer),
