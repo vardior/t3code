@@ -441,6 +441,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
     });
 
   return ProviderAdapter.ProviderAdapterV2.of({
+    supportsCompaction: true,
     instanceId: options.instanceId,
     driver: PI_PROVIDER,
     getCapabilities: Effect.fn("PiAdapter.getCapabilities")(function () {

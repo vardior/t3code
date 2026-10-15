@@ -1697,6 +1697,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
     flavor.enablePostSettleContinuation === true && continuationRequests !== undefined;
 
   return ProviderAdapter.ProviderAdapterV2.of({
+    supportsCompaction: flavor.supportsCompaction === true,
     instanceId: options.instanceId,
     driver,
     getCapabilities: Effect.fn("AcpAdapter.getCapabilities")(function () {

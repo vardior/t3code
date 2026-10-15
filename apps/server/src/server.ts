@@ -203,6 +203,8 @@ import * as BotsRuntime from "./bots/runtime.ts";
 import * as OpenItemService from "./openItems/OpenItemService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
+import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
+import * as ForkIdleCompactionService from "./orchestration-v2/ForkIdleCompactionService.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
 import * as IdleCompactionService from "./orchestration-v2/IdleCompactionService.ts";
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
@@ -652,6 +654,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,
+  Layer.effectDiscard(
+    ForkIdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
+  ).pipe(
+    Layer.provide(CommandReceiptStore.layer),
+    Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
+  ),
   BotsRuntime.workerLive,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   DatabaseStorage.layer.pipe(

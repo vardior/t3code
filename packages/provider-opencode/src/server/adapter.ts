@@ -937,6 +937,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
   const messageIdClock = yield* Ref.make({ epochMillis: -1, counter: 0 });
 
   return ProviderAdapter.ProviderAdapterV2.of({
+    supportsCompaction: true,
     instanceId: options.instanceId,
     driver: OPENCODE_PROVIDER,
     getCapabilities: Effect.fn("OpencodeAdapter.getCapabilities")(function () {

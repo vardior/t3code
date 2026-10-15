@@ -297,6 +297,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       ...(payload === undefined ? {} : { payload }),
     });
   return ProviderAdapter.ProviderAdapterV2.of({
+    supportsCompaction: true,
     instanceId: options.instanceId,
     driver: MUSE_PROVIDER,
     getCapabilities: Effect.fn("MuseAdapter.getCapabilities")(function () {

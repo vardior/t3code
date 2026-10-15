@@ -4129,6 +4129,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
   });
 
   return ProviderAdapter.ProviderAdapterV2.of({
+    supportsCompaction: true,
     instanceId,
     driver,
     getCapabilities: Effect.fn("OpencodeAdapter.getCapabilities")(function () {
