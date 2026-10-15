@@ -11,6 +11,7 @@ import {
   type ModelSelection,
   NodeId,
   type OrchestrationV2Run,
+  type OrchestrationV2DomainEvent,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -20,6 +21,10 @@ import {
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
+import {
+  derivePendingBackgroundWork,
+  pendingBackgroundTurnItems,
+} from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -1623,6 +1628,339 @@ it.layer(layerContinuationWorkerTest)("interrupted completion wakes", (it) => {
       );
     }),
   );
+});
+
+it.effect.each([
+  "native-completed",
+  "native-interrupted-disposed",
+  "roster-cleared",
+  "app-owned-completed",
+  "app-owned-acknowledged",
+  "recovery",
+] as const)("settles delegated work after %s without another child run event", (transition) => {
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const requests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
+    const now = yield* DateTime.now;
+    const parentThreadId = ThreadId.make(`thread:settlement-${transition}`);
+    const projectId = ProjectId.make(`project:settlement-${transition}`);
+    const parentRunId = RunId.make(`run:settlement-${transition}`);
+    const rootNodeId = NodeId.make(`node:settlement-${transition}`);
+    yield* seedParentWithTerminalTask({
+      threadId: parentThreadId,
+      projectId,
+      runId: parentRunId,
+      rootNodeId,
+      taskId: NodeId.make(`node:settlement-seed-${transition}`),
+      deliveryState: "acknowledged",
+      now,
+    });
+    const child = yield* seedRestartCancelledChild({
+      parentThreadId,
+      projectId,
+      parentRunId,
+      rootNodeId,
+      name: `settlement-child-${transition}`,
+      completionWake: "always",
+      continuationPending: false,
+      now,
+    });
+    const control = yield* seedRestartCancelledChild({
+      parentThreadId,
+      projectId,
+      parentRunId,
+      rootNodeId,
+      name: `settlement-control-${transition}`,
+      completionWake: "settled_only",
+      continuationPending: false,
+      now,
+    });
+    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+    const task = parent.subagents.find((row) => row.id === child.taskId)!;
+    const disposed = transition === "native-interrupted-disposed" || transition === "recovery";
+    const nested = {
+      ...task,
+      id: NodeId.make(`node:nested-${transition}`),
+      threadId: child.childThreadId,
+      runId: child.childRunId,
+      childThreadId: null,
+      origin: transition.startsWith("app-owned")
+        ? ("app_owned" as const)
+        : ("provider_native" as const),
+      ...(transition === "app-owned-acknowledged"
+        ? {
+            status: "completed" as const,
+            completionDelivery: { state: "pending" as const, observedByRunId: null },
+          }
+        : {}),
+    };
+    const providerThread = {
+      ...parent.providerThreads[0]!,
+      id: ProviderThreadId.make(`provider-thread:settlement-child-${transition}`),
+      appThreadId: child.childThreadId,
+      pendingBackgroundTasks: [{ taskId: "background-command", kind: "command" as const }],
+    };
+    const parentRun = parent.runs.find((row) => row.id === parentRunId)!;
+    yield* eventSink.write({
+      commandId: reconcileCommandId(`settlement-setup-${transition}`),
+      events: [
+        {
+          ...runEvent({
+            threadId: parentThreadId,
+            runId: parentRunId,
+            ordinal: 1,
+            status: "completed",
+            now,
+          }),
+          payload: {
+            ...parentRun,
+            status: "completed",
+            completedAt: now,
+            delegatedCompletion: {
+              disposition: disposed ? "disposed" : "open",
+              nextGeneration: 1,
+              delivery: null,
+            },
+          },
+        },
+        {
+          id: EventId.make(`event:settlement-item-${transition}`),
+          type: "turn-item.updated",
+          threadId: parentThreadId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`item:settlement-${transition}`),
+            type: "subagent",
+            threadId: parentThreadId,
+            runId: parentRunId,
+            nodeId: child.taskId,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            status: "running",
+            title: null,
+            startedAt: now,
+            completedAt: null,
+            updatedAt: now,
+            subagentId: child.taskId,
+            origin: "app_owned",
+            driver,
+            providerInstanceId: modelSelection.instanceId,
+            childThreadId: child.childThreadId,
+            prompt: task.prompt,
+            result: null,
+          },
+        },
+        {
+          id: EventId.make(`event:settlement-control-ack-${transition}`),
+          type: "subagent.updated",
+          threadId: parentThreadId,
+          occurredAt: now,
+          payload: {
+            ...parent.subagents.find((row) => row.id === control.taskId)!,
+            completionDelivery: { state: "acknowledged", observedByRunId: parentRunId },
+          },
+        },
+        ...(disposed
+          ? [
+              {
+                id: EventId.make(`event:settlement-disposed-${transition}`),
+                type: "subagent.updated" as const,
+                threadId: parentThreadId,
+                occurredAt: now,
+                payload: {
+                  ...task,
+                  completionDelivery: { state: "disposed" as const, observedByRunId: null },
+                },
+              },
+            ]
+          : []),
+        runEvent({
+          threadId: child.childThreadId,
+          runId: child.childRunId,
+          ordinal: 1,
+          status: "running",
+          now,
+        }),
+        transition === "roster-cleared"
+          ? {
+              id: EventId.make(`event:settlement-roster-${transition}`),
+              type: "provider-thread.updated",
+              threadId: child.childThreadId,
+              occurredAt: now,
+              payload: providerThread,
+            }
+          : {
+              id: EventId.make(`event:settlement-nested-${transition}`),
+              type: "subagent.updated",
+              threadId: child.childThreadId,
+              occurredAt: now,
+              payload: nested,
+            },
+      ],
+    });
+    const afterRoot = yield* eventSink.latestSequence();
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make(`event:settlement-answer-${transition}`),
+          type: "message.updated",
+          threadId: child.childThreadId,
+          runId: child.childRunId,
+          occurredAt: now,
+          payload: {
+            id: MessageId.make(`message:settlement-answer-${transition}`),
+            threadId: child.childThreadId,
+            runId: child.childRunId,
+            nodeId: null,
+            role: "assistant",
+            text: "Nested work is finished.",
+            attachments: [],
+            streaming: false,
+            createdBy: "agent",
+            creationSource: "provider",
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        runEvent({
+          threadId: child.childThreadId,
+          runId: child.childRunId,
+          ordinal: 1,
+          status: "completed",
+          now,
+        }),
+        runEvent({
+          threadId: control.childThreadId,
+          runId: control.childRunId,
+          ordinal: 1,
+          status: "completed",
+          now,
+        }),
+      ],
+    });
+    yield* eventSink.stream({ afterSequence: afterRoot, eventType: "subagent.updated" }).pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "subagent.updated" && stored.event.payload.id === control.taskId,
+      ),
+      Stream.take(1),
+      Stream.runDrain,
+    );
+    yield* orchestrator.recoverDelegatedTasks;
+    const waiting = yield* orchestrator.getThreadProjection(parentThreadId);
+    assert.equal(waiting.subagents.find((row) => row.id === child.taskId)?.status, "running");
+    assert.lengthOf(pendingBackgroundTurnItems(waiting), 1);
+    const afterSequence = yield* eventSink.latestSequence();
+    const settlement: OrchestrationV2DomainEvent =
+      transition === "roster-cleared"
+        ? {
+            id: EventId.make(`event:settlement-end-${transition}`),
+            type: "provider-thread.updated",
+            threadId: child.childThreadId,
+            occurredAt: now,
+            payload: { ...providerThread, pendingBackgroundTasks: [] },
+          }
+        : {
+            id: EventId.make(`event:settlement-end-${transition}`),
+            type: "subagent.updated",
+            threadId: child.childThreadId,
+            occurredAt: now,
+            payload: {
+              ...nested,
+              status: disposed ? "interrupted" : "completed",
+              completedAt: now,
+              ...(transition === "app-owned-acknowledged"
+                ? {
+                    completionDelivery: {
+                      state: "acknowledged",
+                      observedByRunId: child.childRunId,
+                    },
+                  }
+                : {}),
+            },
+          };
+    yield* eventSink.write({
+      ...(transition === "recovery"
+        ? { commandId: reconcileCommandId("settlement-recovery") }
+        : {}),
+      events: [settlement],
+    });
+    if (transition === "recovery") {
+      const archived = (yield* orchestrator.getThreadProjection(child.childThreadId)).thread;
+      yield* eventSink.write({
+        commandId: reconcileCommandId("settlement-archive"),
+        events: [
+          {
+            id: EventId.make("event:settlement-archive"),
+            type: "thread.archived",
+            threadId: child.childThreadId,
+            occurredAt: now,
+            payload: { ...archived, archivedAt: now },
+          },
+        ],
+      });
+      yield* orchestrator.recoverDelegatedTasks;
+    }
+    yield* eventSink.stream({ afterSequence, eventType: "context-transfer.created" }).pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "context-transfer.created" &&
+          stored.event.payload.sourceThreadId === child.childThreadId,
+      ),
+      Stream.take(1),
+      Stream.runDrain,
+    );
+    const finished = yield* orchestrator.getThreadProjection(parentThreadId);
+    const result = finished.subagents.find((row) => row.id === child.taskId)!;
+    assert.equal(result.status, "completed");
+    assert.equal(result.result, "Nested work is finished.");
+    assert.equal(result.completionDelivery?.state, disposed ? "disposed" : "claimed");
+    assert.equal(
+      finished.turnItems.find((row) => row.type === "subagent" && row.subagentId === child.taskId)
+        ?.status,
+      "completed",
+    );
+    assert.deepEqual(pendingBackgroundTurnItems(finished), []);
+    assert.deepEqual(derivePendingBackgroundWork({ ...finished, latestRun: finished.runs[0] }), []);
+    if (!disposed) {
+      yield* orchestrator.dispatch({
+        type: "delegated_task.completion-delivery.acknowledge",
+        commandId: CommandId.make(`command:settlement-ack-${transition}`),
+        parentThreadId,
+        taskId: child.taskId,
+        observedByRunId: parentRunId,
+      });
+    }
+    yield* orchestrator.recoverDelegatedTasks;
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(parentThreadId)).contextTransfers.filter(
+        (row) => row.sourceThreadId === child.childThreadId,
+      ).length,
+      1,
+    );
+    const barrierThreadId = ThreadId.make(`thread:offer-barrier-${transition}`);
+    yield* requests.offer({
+      threadId: barrierThreadId,
+      providerThreadId: parent.providerThreads[0]!.id,
+      driver,
+      detail: null,
+    });
+    const offers: Array<ProviderContinuationRequests.ProviderContinuationRequest> = [];
+    while (true) {
+      const request = yield* requests.take;
+      if (request.threadId === barrierThreadId) break;
+      offers.push(request);
+    }
+    assert.lengthOf(offers, disposed ? 0 : 1);
+    if (!disposed) {
+      assert.equal(offers[0]?.threadId, parentThreadId);
+      assert.equal(offers[0]?.delegatedCompletion?.parentRunId, parentRunId);
+    }
+  }).pipe(Effect.provide(Layer.merge(layerTest, ProviderContinuationRequests.layer)));
 });
 
 it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
