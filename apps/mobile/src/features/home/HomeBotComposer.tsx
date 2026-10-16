@@ -12,9 +12,10 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 import { Alert, Pressable, TextInput, View } from "react-native";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
-import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ControlPill } from "../../components/ui/ControlPill";
+import { Menu } from "../../components/ui/Menu";
 import { makeQueuedMessageMetadata } from "../../lib/commandMetadata";
 import { useDebouncedValue } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
@@ -102,7 +103,7 @@ export function HomeBotComposer(props: {
         className="max-h-32 min-h-11 font-sans text-base text-foreground"
       />
       <View className="flex-row items-center justify-between gap-2">
-        <ControlPillMenu
+        <Menu
           title="Send to"
           actions={props.bots.map((entry) => ({
             id: botRouteKey(entry),
@@ -142,7 +143,7 @@ export function HomeBotComposer(props: {
               type="monochrome"
             />
           </Pressable>
-        </ControlPillMenu>
+        </Menu>
         <ControlPill
           icon="arrow.up"
           accessibilityLabel={chosen ? `Send to ${chosen.bot.name}` : "Send"}

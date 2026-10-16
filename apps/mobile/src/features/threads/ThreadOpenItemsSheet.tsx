@@ -9,9 +9,9 @@ import { Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { MaterialButton } from "../../components/MaterialButton";
+import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
 import { relativeTime } from "../../lib/time";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
@@ -125,7 +125,7 @@ export function ThreadOpenItemsSheet({ route }: StaticScreenProps<OpenItemsTarge
                         : "Dropped"}
                     </Text>
                   </View>
-                  <MaterialButton
+                  <Button
                     label="Reopen"
                     tone="text"
                     disabled={!canOperate || busyItemId !== null}
@@ -256,13 +256,13 @@ function OpenItemCard(props: {
         className="min-h-11 rounded-xl border border-border-subtle px-3 font-sans text-base text-foreground"
       />
       <View className="flex-row items-center justify-between">
-        <MaterialButton
+        <Button
           label="Drop"
           tone="text"
           disabled={props.disabled}
           onPress={() => void props.onAct({ type: "drop" })}
         />
-        <MaterialButton
+        <Button
           label="Send"
           tone="secondary"
           disabled={props.disabled || reply.trim().length === 0}

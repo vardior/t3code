@@ -22,8 +22,8 @@ import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
-import { MaterialButton } from "../../components/MaterialButton";
+import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
@@ -198,13 +198,13 @@ function HomeMorningCard(props: {
               </Text>
             ) : (
               <View className="mt-2 flex-row gap-2">
-                <MaterialButton
+                <Button
                   label="Do it"
                   tone="primary"
                   disabled={!canDecide}
                   onPress={() => decide(finding, "accept")}
                 />
-                <MaterialButton
+                <Button
                   label="Skip"
                   disabled={!canDecide}
                   onPress={() => decide(finding, "skip")}

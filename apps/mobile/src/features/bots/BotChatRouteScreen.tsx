@@ -18,9 +18,9 @@ import * as Option from "effect/Option";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Keyboard, Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
-import { ScreenHeader } from "../../components/ScreenHeader";
-import { ScreenHeaderButton } from "../../components/ScreenHeaderButton";
+import { AppText as Text } from "../../components/ui/AppText";
+import { AppBar } from "../../components/ui/AppBar";
+import { ScreenHeaderButton } from "../../components/ui/ScreenHeaderButton";
 import { useEnvironmentServerConfig } from "../../state/entities";
 import { useThreadServerBrowserTabs } from "../../state/preview";
 import { useEnvironmentPresentation } from "../../state/presentation";
@@ -66,11 +66,7 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
   if (!bot || bot.homeThreadMissing)
     return (
       <View className="flex-1 bg-screen">
-        <ScreenHeader
-          title={bot?.name ?? "Bots"}
-          sidebar={false}
-          onBack={() => navigation.goBack()}
-        />
+        <AppBar title={bot?.name ?? "Bots"} sidebar={false} onBack={() => navigation.goBack()} />
         <Text
           className={
             connectionFailed || (bots.error && connectionReason === null)
@@ -221,7 +217,7 @@ function BotHeader(props: {
     }
   };
   return (
-    <ScreenHeader
+    <AppBar
       title={bot.name}
       subtitle={props.archived ? "Home thread archived" : bot.paused ? "Paused" : undefined}
       sidebar={false}

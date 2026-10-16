@@ -9,7 +9,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
 import { Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { botStatusLabel } from "../bots/botChat.logic";
 import { SortableBotList } from "../bots/SortableBotList";

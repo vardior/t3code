@@ -26,9 +26,9 @@ import { Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { ThemedSwitch } from "../../components/ThemedSwitch";
+import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
