@@ -1413,6 +1413,7 @@ it.effect("reads current bot home pause state without transcripts or cached paus
     const botDir = path.join(baseDir, "bots", "helper");
     const configPath = path.join(botDir, "bot.json");
     yield* fs.makeDirectory(botDir, { recursive: true });
+    yield* fs.writeFileString(path.join(baseDir, "bots", "BOTS.md"), "");
     const config = { name: "Helper", homeThreadId: "home", triageThreadId: "triage" };
     yield* fs.writeFileString(configPath, toJson(config));
     yield* withBots(

@@ -715,7 +715,12 @@ export const layer = Layer.effect(
         const now = yield* Clock.currentTimeMillis;
         for (const id of yield* readBotIds()) {
           const configPath = path.join(botsDir, id, "bot.json");
-          if (!(yield* fileSystem.exists(configPath))) continue;
+          if (
+            !(yield* fileSystem
+              .exists(configPath)
+              .pipe(Effect.catchCause(() => Effect.succeed(false))))
+          )
+            continue;
           const config = yield* readBotConfig(id);
           if (config.homeThreadId === threadId && isPaused(config, now)) return true;
         }
