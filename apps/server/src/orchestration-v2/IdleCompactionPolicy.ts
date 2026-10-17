@@ -57,8 +57,7 @@ export function idleCompactionCandidate(
     thread.deletedAt !== null ||
     thread.archivedAt !== null ||
     thread.settledAt !== null ||
-    thread.settledOverride === "settled" ||
-    thread.limitRecovery != null
+    thread.settledOverride === "settled"
   )
     return;
   if (isProviderNativeSubagentThread(thread)) return;
@@ -84,7 +83,9 @@ export function idleCompactionCandidate(
     run.queueHeld === true ||
     run.delegatedCompletion?.disposition === "stopped" ||
     run.completedAt === null ||
-    run.userMessageId.startsWith("idle-compact:")
+    run.userMessageId.startsWith("idle-compact:") ||
+    (thread.limitRecovery != null &&
+      (thread.limitRecovery.runId === run.id || Date.parse(thread.limitRecovery.resetAt) > now))
   )
     return;
   const provider = state.providerThreads.find((row) => row.id === thread.activeProviderThreadId);

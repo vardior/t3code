@@ -278,6 +278,30 @@ describe("idle compaction eligibility", () => {
     };
     assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
   });
+  it("waits on a pending usage limit but not on one a later run outlived", () => {
+    const state = fixture();
+    const limited = {
+      runId: state.runs[0]!.id,
+      resetAt: DateTime.formatIso(at(60 * minute)),
+      autoResume: true,
+    };
+    state.thread = { ...state.thread, limitRecovery: limited };
+    assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
+    state.thread = {
+      ...state.thread,
+      limitRecovery: { ...limited, resetAt: DateTime.formatIso(at(0)) },
+    };
+    assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
+    state.thread = {
+      ...state.thread,
+      limitRecovery: {
+        ...limited,
+        runId: RunId.make("run:earlier"),
+        resetAt: DateTime.formatIso(at(0)),
+      },
+    };
+    assert.isDefined(idleCompactionCandidate(state, 54 * minute));
+  });
   it("excludes background work and paused provider goals", () => {
     const state = fixture();
     state.providerThreads[0] = {
