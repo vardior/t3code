@@ -4405,6 +4405,7 @@ interface ActiveClaudeTurnContext {
   readonly heldRootFrames: Array<SDKMessage>;
   // Claude can run another model than requested, such as when an organization disallows it.
   executedModel: string | undefined;
+  readonly stoppedTasksAwaitingTurn: Set<string>;
 }
 
 interface ActiveClaudeProviderRetry {
@@ -10168,6 +10169,30 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           });
         });
 
+        const settleWakeOnRearmedStoppedTask = Effect.fnUntraced(function* (message: SDKMessage) {
+          const context = yield* Ref.get(activeTurn);
+          if (context === null || context.stoppedTasksAwaitingTurn.size === 0) return;
+          if (
+            isClaudeTurnStartMessage(message) ||
+            ((message.type === "assistant" || message.type === "user") &&
+              parentToolUseIdFromSdkMessage(message) === null)
+          ) {
+            context.stoppedTasksAwaitingTurn.clear();
+            return;
+          }
+          if (
+            message.type === "system" &&
+            message.subtype === "task_started" &&
+            context.stoppedTasksAwaitingTurn.has(message.task_id)
+          ) {
+            yield* finalizeActiveTurn({
+              context,
+              status: "completed",
+              completedAt: yield* DateTime.now,
+            });
+          }
+        });
+
         const handleRoutedSdkMessage = Effect.fnUntraced(function* (input: {
           readonly query: ClaudeAgentSdkQuerySession;
           readonly message: SDKMessage;
@@ -10181,6 +10206,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           for (const message of yield* takeReleasableSubagentFrames(input.message)) {
             yield* handleSdkMessageFrame({ query: input.query, message, replayed: true });
           }
+          yield* settleWakeOnRearmedStoppedTask(input.message);
         });
 
         const heldToolUseIds = (context: ActiveClaudeTurnContext): ReadonlySet<string> =>
@@ -11302,6 +11328,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               gatedFramesBeforeEcho: 0,
               heldRootFrames: [],
               executedModel: undefined,
+              stoppedTasksAwaitingTurn: new Set(),
             };
             const attachTurn = Effect.gen(function* () {
               querySession.lastTurn = context;
@@ -11468,7 +11495,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   yield* handleSdkMessage({ query: querySession.query, message: lastResult });
                   return;
                 }
-                if (wakeAbsorbed || (hasOpaqueTaskNotification && !context.nativeWakeStarted)) {
+                let rearmedStoppedTask = false;
+                if (!context.nativeWakeStarted) {
+                  for (const entry of drained) {
+                    if (entry.type !== "system") continue;
+                    if (entry.subtype === "task_notification" && entry.status === "stopped") {
+                      context.stoppedTasksAwaitingTurn.add(entry.task_id);
+                    } else if (
+                      entry.subtype === "task_started" &&
+                      context.stoppedTasksAwaitingTurn.has(entry.task_id)
+                    ) {
+                      rearmedStoppedTask = true;
+                    }
+                  }
+                }
+                if (
+                  wakeAbsorbed ||
+                  ((hasOpaqueTaskNotification || rearmedStoppedTask) && !context.nativeWakeStarted)
+                ) {
                   const completedAt = yield* DateTime.now;
                   yield* finalizeActiveTurn({ context, status: "completed", completedAt });
                 } else if (!context.nativeWakeStarted) {

@@ -6013,6 +6013,112 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect.each([
+    "after the wake opens",
+    "before the wake opens",
+    "inside Claude's turn",
+  ] as const)(
+    "settles a wake on a stopped task Claude re-arms %s, unless Claude began a turn",
+    (rearm) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        const taskId = "sso8ktim0";
+        const toolUseId = "toolu_artifact_watch";
+        const description = "live updates for artifact (auto-armed on publish)";
+        const watchStarted = (uuid: string, runId: string) =>
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: taskId,
+            run_id: runId,
+            tool_use_id: toolUseId,
+            description,
+            task_type: "monitor_ws",
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-artifact-watch"),
+            text: "Publish the board.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          watchStarted("00000000-0000-4000-8000-000000000931", "run-watch-1"),
+        );
+        yield* harness.offerAndWait(turnOneResult);
+
+        for (const frame of [
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_updated",
+            task_id: taskId,
+            run_id: "run-watch-1",
+            patch: { status: "killed" },
+            uuid: "00000000-0000-4000-8000-000000000932",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_notification",
+            task_id: taskId,
+            run_id: "run-watch-1",
+            tool_use_id: toolUseId,
+            status: "stopped",
+            output_file: `/tmp/${taskId}.output`,
+            summary: description,
+            uuid: "00000000-0000-4000-8000-000000000933",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          claudeSdkFrame({
+            type: "system",
+            subtype: "background_tasks_changed",
+            tasks: [],
+            uuid: "00000000-0000-4000-8000-000000000934",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        ]) {
+          yield* harness.offerAndWait(frame);
+        }
+        yield* Queue.take(harness.continuationReceipts);
+        const rearmed = watchStarted("00000000-0000-4000-8000-000000000935", "run-watch-2");
+        if (rearm === "before the wake opens") yield* harness.offerAndWait(rearmed);
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-artifact-watch-wake"),
+            text: "Background task completed.",
+            attachments: [],
+            providerTurnOrdinal: 2,
+            messageCreatedBy: "agent",
+            messageCreationSource: "provider",
+          }),
+        );
+        if (rearm === "inside Claude's turn") yield* harness.offerAndWait(wakeTurnInit);
+        if (rearm !== "before the wake opens") yield* harness.offerAndWait(rearmed);
+        if (rearm === "inside Claude's turn") yield* harness.offerAndWait(wakeResult);
+        yield* awaitUntil(() => harness.terminalEvents().length === 2, "wake run terminal");
+        assert.equal(harness.terminalEvents()[1]?.status, "completed");
+        assert.lengthOf(harness.continuationRequests, 1);
+        if (rearm === "inside Claude's turn") return;
+        yield* harness.offerAndWait(wakeTurnInit);
+        assert.lengthOf(harness.continuationRequests, 2);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
   it.effect.each(["completed", "interrupted"] as const)(
     "projects Claude thinking blocks when %s",
     (status) =>
