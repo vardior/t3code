@@ -228,7 +228,11 @@ const deliverRestartContinuation = Effect.fn("RestartContinuation.deliverRestart
     )
       return false;
     const laterRuns = projection.runs.filter(
-      (run) => run.id !== source.id && run.status !== "queued" && !cancelledBeforeStart(run) && runRanAfter(run, source),
+      (run) =>
+        run.id !== source.id &&
+        run.status !== "queued" &&
+        !cancelledBeforeStart(run) &&
+        runRanAfter(run, source),
     );
     if (input.resendOnly && laterRuns.length === 0) return false;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return false;

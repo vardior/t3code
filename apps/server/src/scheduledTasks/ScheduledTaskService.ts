@@ -590,7 +590,6 @@ export const layer = Layer.effect(
     const webhookFilteredLogWindows = yield* Ref.make<
       ReadonlyMap<ScheduledTaskId, ReadonlyArray<number>>
     >(new Map());
-    const serviceScope = yield* Effect.scope;
     const scheduledRunPermits = yield* Semaphore.make(8);
     const activeRuns = yield* Ref.make<ReadonlySet<ScheduledTaskId>>(new Set());
     // Notifications re-emit the full list; slow subscribers need only the newest dirty signal.

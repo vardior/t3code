@@ -6,6 +6,7 @@ import * as Schedule from "effect/Schedule";
 import * as SqlClient from "effect/sql/SqlClient";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import { isNativeMaintenanceCommand } from "./CommandPolicy.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import {
@@ -53,8 +54,7 @@ export const make = Effect.gen(function* () {
           const message = yield* orchestrator.getThreadRecords(threadId, ["messages"], {
             messageIds: [state.runs.find((run) => run.id === candidate.runId)!.userMessageId],
           });
-          if (message.messages.some((message) => Orchestrator.isNativeMaintenanceCommand(message)))
-            return;
+          if (message.messages.some(isNativeMaintenanceCommand)) return;
           const provider = yield* providers.get(state.thread.providerInstanceId);
           if (provider.supportsCompaction !== true) return;
           const commandId = CommandId.make(`idle-compact:${candidate.runId}`);
