@@ -224,6 +224,28 @@ describe("idle compaction eligibility", () => {
     assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
   });
 
+  it("is not held by a plan list a provider never closed", () => {
+    const state = fixture();
+    state.nodes.push({
+      id: NodeId.make("plan"),
+      threadId,
+      runId: null,
+      parentNodeId: null,
+      rootNodeId: NodeId.make("plan"),
+      kind: "todo_list",
+      status: "running",
+      countsForRun: false,
+      providerThreadId,
+      providerTurnId: null,
+      nativeItemRef: null,
+      runtimeRequestId: null,
+      checkpointScopeId: null,
+      startedAt: at(0),
+      completedAt: null,
+    });
+    assert.isDefined(idleCompactionCandidate(state, 54 * minute));
+  });
+
   it("requires strictly more than 200000 current tokens, at 54 minutes and before 60", () => {
     const state = fixture();
     assert.isUndefined(idleCompactionCandidate(state, 54 * minute - 1));
