@@ -17,6 +17,15 @@ describe("slackTextFromCommand", () => {
     );
   });
 
+  it("reads the text a shell variable carries into dm-send", () => {
+    expect(
+      slackTextFromCommand(
+        `cd ~/bots && msg='Prep: it'"'"'s at 14:45'; printf '%s' "$msg" | bin/dm-send --check && printf '%s' "\${msg}" | bin/dm-send`,
+      ),
+    ).toBe("Prep: it's at 14:45");
+    expect(slackTextFromCommand(`printf '%s' "$msg" | bin/dm-send`)).toBeNull();
+  });
+
   it("unwraps the shell -c wrapper some providers add", () => {
     expect(
       slackTextFromCommand(`/bin/zsh -lc "printf '%s' 'Wrapped hello' | /x/bin/dm-send"`),

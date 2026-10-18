@@ -14,13 +14,15 @@ export function slackTextFromCommand(command: string): string | null {
   if (commands.length === 1 && isShell(shell) && /^-[a-z]*c$/.test(flag ?? "") && script) {
     return slackTextFromCommand(script);
   }
+  const variables = new Map<string, string>();
   for (let index = 0; index < commands.length; index += 1) {
     const current = commands[index]!;
+    recordAssignments(current, variables);
     if (!isDmSend(current.words[0])) continue;
     if (current.heredoc !== null) return current.heredoc.trim() || null;
     const previous = commands[index - 1];
     if (previous === undefined || previous.separator !== "|") continue;
-    const text = stdoutOf(previous);
+    const text = stdoutOf(previous, variables);
     if (text !== null && text.trim()) return text.trim();
   }
   return null;
@@ -40,9 +42,38 @@ function isDmSend(word: string | undefined): boolean {
   return word !== undefined && (word === "dm-send" || word.endsWith("/dm-send"));
 }
 
-function stdoutOf(command: SimpleCommand): string | null {
-  const [name, ...args] = command.words;
-  if (name === "cat" && args.length === 0) return command.heredoc;
+const ASSIGNMENT = /^([A-Za-z_]\w*)=(.*)$/s;
+const VARIABLE_REFERENCE = /\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g;
+
+function recordAssignments(command: SimpleCommand, variables: Map<string, string>) {
+  const assignments = command.words.map((word) => ASSIGNMENT.exec(word));
+  if (assignments.length === 0 || assignments.some((match) => match === null)) return;
+  for (const match of assignments) variables.set(match![1]!, match![2]!);
+}
+
+function expandVariables(word: string, variables: ReadonlyMap<string, string>): string | null {
+  let unresolved = false;
+  const expanded = word.replace(VARIABLE_REFERENCE, (_, braced?: string, bare?: string) => {
+    const value = variables.get((braced ?? bare)!);
+    if (value === undefined) unresolved = true;
+    return value ?? "";
+  });
+  return unresolved ? null : expanded;
+}
+
+function stdoutOf(command: SimpleCommand, variables: ReadonlyMap<string, string>): string | null {
+  const [name, ...rawArgs] = command.words;
+  const args = rawArgs.map((arg) => expandVariables(arg, variables));
+  if (args.some((arg) => arg === null)) return null;
+  return stdoutOfArgs(name, args as string[], command.heredoc);
+}
+
+function stdoutOfArgs(
+  name: string | undefined,
+  args: ReadonlyArray<string>,
+  heredoc: string | null,
+): string | null {
+  if (name === "cat" && args.length === 0) return heredoc;
   if (name === "echo") return args.filter((arg) => arg !== "-n" && arg !== "-e").join(" ");
   if (name !== "printf" || args.length === 0) return null;
   const [format, ...values] = args as [string, ...string[]];
