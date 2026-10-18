@@ -38,7 +38,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
-import { relativeLabel, scheduleLabel } from "../settings/ScheduledTasksSettings";
+import { ScheduledRelativeLabel, scheduleLabel } from "../settings/ScheduledTasksSettings";
 import { Button } from "../ui/button";
 import { Sheet, SheetDescription, SheetHeader, SheetPopup, SheetTitle } from "../ui/sheet";
 import { Switch } from "../ui/switch";
@@ -422,7 +422,16 @@ function ScheduleRow(props: {
 
 function scheduleStatus(task: ScheduledTask) {
   if (!task.enabled) return "paused";
-  if (!task.checkCommand) return `next ${relativeLabel(task.nextRunAt)}`;
+  if (!task.checkCommand)
+    return (
+      <>
+        next <ScheduledRelativeLabel value={task.nextRunAt} />
+      </>
+    );
   if (!task.lastRunAt) return "checks first, never woke";
-  return `checks first, last woke ${relativeLabel(task.lastRunAt)}`;
+  return (
+    <>
+      checks first, last woke <ScheduledRelativeLabel value={task.lastRunAt} />
+    </>
+  );
 }
