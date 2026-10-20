@@ -21,6 +21,7 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 
 const decodeUpsertInput = Schema.decodeUnknownEffect(ScheduledTaskUpsertInput);
 
@@ -83,6 +84,10 @@ it.effect(
             Layer.provideMerge(
               ScheduledTaskService.layer.pipe(Layer.provide(NodeServices.layer)),
               Layer.mergeAll(
+                Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                  namedProjectsRoot: "/projects",
+                  isScratchProject: () => Effect.succeed(false),
+                }),
                 Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                   launch: (input) =>
                     Ref.update(launchedPrompts, (prompts) => [
@@ -186,6 +191,10 @@ it.effect("an edit that omits the check command keeps it, and null removes it", 
           Layer.mergeAll(
             NodeCrypto.layer,
             Scheduler.layer,
+            Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+              namedProjectsRoot: "/projects",
+              isScratchProject: () => Effect.succeed(false),
+            }),
             Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
             Layer.mock(ThreadManagementService.ThreadManagementService)({}),
             Layer.mock(SecretRequests.SecretRequests)({}),
@@ -219,6 +228,10 @@ it.effect("Run now starts the turn even when the check is quiet", () =>
             Layer.mergeAll(
               NodeCrypto.layer,
               Scheduler.layer,
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                namedProjectsRoot: "/projects",
+                isScratchProject: () => Effect.succeed(false),
+              }),
               Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                 launch: (input) =>
                   Ref.update(launchedPrompts, (prompts) => [
@@ -257,6 +270,10 @@ it.effect("an approval-required task fails without executing its check", () =>
               NodeServices.layer,
               NodeCrypto.layer,
               Scheduler.layer,
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                namedProjectsRoot: "/projects",
+                isScratchProject: () => Effect.succeed(false),
+              }),
               Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                 launch: () => Effect.die("Unexpected dispatch"),
               }),
@@ -350,6 +367,10 @@ it.effect(
                       dueWork = work.pipe(Effect.provideContext(context), Effect.orDie);
                     }),
                 }),
+                Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                  namedProjectsRoot: "/projects",
+                  isScratchProject: () => Effect.succeed(false),
+                }),
                 Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                   launch: (input) =>
                     Ref.update(launched, (ids) => [...ids, input.title]).pipe(
@@ -405,6 +426,10 @@ it.effect("a task paused during its check does not dispatch or record a wake", (
               NodeServices.layer,
               NodeCrypto.layer,
               Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                namedProjectsRoot: "/projects",
+                isScratchProject: () => Effect.succeed(false),
+              }),
               Layer.mock(ThreadLaunchService.ThreadLaunchService)({
                 launch: () => Effect.die("Unexpected dispatch"),
               }),

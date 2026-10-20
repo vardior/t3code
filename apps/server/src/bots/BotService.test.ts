@@ -46,6 +46,7 @@ import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import { BotSchedulePauseTransition } from "./BotConfig.ts";
 import * as BotService from "./BotService.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 
 const decodeBot = Schema.decodeUnknownEffect(BotSummary);
 
@@ -59,6 +60,10 @@ const scheduledTasksLayer = ScheduledTaskService.layer.pipe(
     Layer.mergeAll(
       NodeCrypto.layer,
       Scheduler.layer,
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/projects",
+        isScratchProject: () => Effect.succeed(false),
+      }),
       Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
       Layer.mock(ThreadManagementService.ThreadManagementService)({}),
       Layer.mock(SecretRequests.SecretRequests)({}),

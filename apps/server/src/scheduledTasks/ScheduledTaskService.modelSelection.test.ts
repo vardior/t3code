@@ -27,6 +27,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 
 const decodeUpsert = Schema.decodeEffect(ScheduledTaskUpsertInput);
 
@@ -77,6 +78,10 @@ it.effect(
           ),
           Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
         ),
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          namedProjectsRoot: "/projects",
+          isScratchProject: () => Effect.succeed(false),
+        }),
         Layer.mock(ThreadLaunchService.ThreadLaunchService)({
           launch: (input) =>
             orchestrator.getThreadProjection(ThreadId.make("home")).pipe(

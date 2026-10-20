@@ -448,6 +448,7 @@ it.effect(
 it.effect("runs a thread-bound automation on the provider the thread uses now", () => {
   const harness = makeHarness({ adapters: [adapter, claudeAdapter] });
   const layerScheduledTasks = ScheduledTasks.layer.pipe(
+    Layer.provide(NodeServices.layer),
     Layer.provide(
       Layer.mergeAll(
         harness.layer,
@@ -927,6 +928,7 @@ function scratchHarness() {
           } as never),
   });
   const layerScheduledTasks = ScheduledTasks.layer.pipe(
+    Layer.provide(NodeServices.layer),
     Layer.provide(
       Layer.mergeAll(
         harness.layer,
