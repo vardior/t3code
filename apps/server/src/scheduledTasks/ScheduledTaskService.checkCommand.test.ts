@@ -102,8 +102,9 @@ it.effect(
                 Layer.mock(SecretRequests.SecretRequests)({}),
                 NodeCrypto.layer,
                 Layer.mock(Scheduler.Scheduler)({
-                  register: <E, R>(_: string, work: Effect.Effect<void, E, R>) =>
+                  register: <E, R>(name: string, work: Effect.Effect<void, E, R>) =>
                     Effect.gen(function* () {
+                      if (name !== "scheduled-tasks") return;
                       const context = yield* Effect.context<R>();
                       dueWork = work.pipe(Effect.provideContext(context), Effect.orDie);
                     }),
@@ -361,8 +362,9 @@ it.effect(
                 NodeServices.layer,
                 NodeCrypto.layer,
                 Layer.mock(Scheduler.Scheduler)({
-                  register: <E, R>(_: string, work: Effect.Effect<void, E, R>) =>
+                  register: <E, R>(name: string, work: Effect.Effect<void, E, R>) =>
                     Effect.gen(function* () {
+                      if (name !== "scheduled-tasks") return;
                       const context = yield* Effect.context<R>();
                       dueWork = work.pipe(Effect.provideContext(context), Effect.orDie);
                     }),

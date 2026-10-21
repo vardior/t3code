@@ -47,7 +47,6 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
-import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -1058,7 +1057,7 @@ export const layer = Layer.effect(
                 reason: "The task was paused while its check command ran.",
               });
             }
-            return current;
+            return { task: current, threadId: null };
           }
         }
         const checkOutput =
@@ -1077,7 +1076,7 @@ export const layer = Layer.effect(
             ),
           );
           yield* notifyChanged;
-          return active;
+          return { task: active, threadId: null };
         }
 
         if (webhook === undefined) yield* markRunning(active.id, startedAtIso);
@@ -1259,7 +1258,7 @@ ${checkOutput}` : basePrompt;
         // The stored row can belong to a replacement, so report this dispatch separately.
         return { task: recorded, threadId, dispatchFailed: !runSucceeded };
       }).pipe(
-        trigger === "scheduled" ? scheduledRunPermits.withPermit : (effect) => effect,
+        (effect) => (trigger === "scheduled" ? scheduledRunPermits.withPermit(effect) : effect),
         Effect.onError((cause) =>
           releaseStuckRun(task, startedAtIso, errorMessage(cause), webhook?.deliveryId),
         ),
@@ -1599,7 +1598,7 @@ ${checkOutput}` : basePrompt;
         existingTask.enabled === enabled &&
         isSameSchedule(existingTask.schedule, schedule);
       if (!scheduleUnchanged)
-        yield* requireFutureOnce({ enabled: input.enabled, schedule }, now, id);
+        yield* requireFutureOnce({ enabled, schedule }, now, id);
       const task: ScheduledTask = {
         id,
         title: input.title,
@@ -1645,7 +1644,7 @@ ${checkOutput}` : basePrompt;
       }
       yield* notifyChanged;
       return { task: (yield* findTask(id)) ?? task };
-    }, withBotPauseLock);
+    }, (effect) => withBotPauseLock(effect));
 
     const setEnabled: ScheduledTaskService["Service"]["setEnabled"] = Effect.fn(
       "ScheduledTaskService.setEnabled",
@@ -1696,7 +1695,7 @@ ${checkOutput}` : basePrompt;
       return {
         task: { ...existing, enabled: input.enabled, nextRunAt: next, updatedAt: iso(now) },
       };
-    }, withBotPauseLock);
+    }, (effect) => withBotPauseLock(effect));
 
     const forgetWebhookTask = (id: ScheduledTaskId) =>
       Effect.all(

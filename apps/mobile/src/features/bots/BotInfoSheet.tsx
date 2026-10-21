@@ -220,6 +220,8 @@ function BotModelPicker(props: {
           providerInstanceId: selection.instanceId,
           providerGroups,
           selectedModel: selection,
+          prompt: "",
+          onPromptChange: () => undefined,
           onSelectModel: (option) => void save(withRememberedModelOptions(option.selection)),
           optionDescriptors,
           onUpdateOptionSelections: (options) => {

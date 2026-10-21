@@ -78,7 +78,7 @@ function isTurnItemPayload(
   );
 }
 
-function shouldPublishAgentAwarenessEvent(
+export function shouldPublishAgentAwarenessEvent(
   event: Pick<OrchestrationV2DomainEvent, "type"> & { readonly payload?: unknown },
 ): boolean {
   if (

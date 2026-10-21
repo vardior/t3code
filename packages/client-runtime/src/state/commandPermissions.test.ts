@@ -381,6 +381,8 @@ it.effect.each(["commit", "push", "commit_push", "create_pr", "commit_push_pr"] 
         yield* command.authorize(registry, env, withThread);
       }),
     ),
+);
+
 it.effect("gates open item answers on the target environment's operate grant", () =>
   Effect.scoped(
     Effect.gen(function* () {

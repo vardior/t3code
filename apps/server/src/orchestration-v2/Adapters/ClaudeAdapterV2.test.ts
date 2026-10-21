@@ -6105,7 +6105,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         if (rearm === "inside Claude's turn") yield* harness.offerAndWait(wakeTurnInit);
         if (rearm !== "before the wake opens") yield* harness.offerAndWait(rearmed);
         if (rearm === "inside Claude's turn") yield* harness.offerAndWait(wakeResult);
-        yield* awaitUntil(() => harness.terminalEvents().length === 2, "wake run terminal");
+        yield* harness.awaitTerminal(2);
         assert.equal(harness.terminalEvents()[1]?.status, "completed");
         assert.lengthOf(harness.continuationRequests, 1);
         if (rearm === "inside Claude's turn") return;
@@ -12507,14 +12507,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  it.effect.each([true, false])(
-    "carries a rejected wake rate limit into the continuation failure (event=%s)",
-    (standaloneEvent) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = yield* makeWakeHarness;
-          const now = yield* DateTime.now;
-          const resetsAt = 1790298600;
   it.effect("settles the wake run when Claude folds a queued prompt into the wake turn", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -12533,7 +12525,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }),
         );
         yield* Queue.offer(harness.sdkMessages, turnOneResult);
-        yield* awaitUntil(() => harness.terminalEvents().length === 1, "first turn terminal");
+        yield* harness.awaitTerminal(1);
 
         yield* harness.offerAndWait(wakeTurnInit);
         assert.lengthOf(harness.continuationRequests, 1);
@@ -12549,7 +12541,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             providerTurnOrdinal: 2,
           }),
         );
-        yield* awaitUntil(() => harness.offeredMessages.length === 2, "queued prompt offered");
+        yield* harness.until(() => harness.offeredMessages.length >= 2);
 
         yield* harness.offerAndWait(
           makeAssistantTextFrame({
@@ -12567,7 +12559,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             user_message_uuids: ["00000000-0000-4000-8000-000000000122", harness.promptUuid(1)],
           }),
         );
-        yield* awaitUntil(() => harness.terminalEvents().length === 2, "folded turn terminal");
+        yield* harness.awaitTerminal(2);
         assert.equal(harness.terminalEvents()[1]?.status, "completed");
 
         yield* harness.runtime.startTurn(
@@ -12583,7 +12575,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             messageCreationSource: "provider",
           }),
         );
-        yield* awaitUntil(() => harness.terminalEvents().length === 3, "wake run terminal");
+        yield* harness.awaitTerminal(3);
         assert.equal(harness.terminalEvents()[2]?.status, "completed");
         assert.lengthOf(harness.offeredMessages, 2);
       }).pipe(
@@ -12599,6 +12591,59 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       Effect.gen(function* () {
         const harness = yield* makeWakeHarness;
         const now = yield* DateTime.now;
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-notification-only"),
+            text: "Start opaque background work.",
+            attachments: [],
+          }),
+        );
+        yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
+        yield* Queue.offer(harness.sdkMessages, turnOneResult);
+        yield* harness.awaitTerminal(1);
+        assert.isTrue(yield* harness.hasPendingBackgroundWork);
+
+        yield* harness.offerAndWait(wakeNotification);
+        assert.lengthOf(harness.continuationRequests, 0);
+        assert.lengthOf(harness.terminalEvents(), 1);
+        assert.isFalse(yield* harness.hasPendingBackgroundWork);
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-notification-only-continuation"),
+            text: "Background task completed.",
+            attachments: [],
+            providerTurnOrdinal: 2,
+            messageCreatedBy: "agent",
+            messageCreationSource: "provider",
+          }),
+        );
+        yield* harness.awaitTerminal(2);
+        assert.equal(harness.terminalEvents()[1]?.status, "completed");
+        assert.lengthOf(harness.offeredMessages, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect.each([true, false])(
+    "carries a rejected wake rate limit into the continuation failure (event=%s)",
+    (standaloneEvent) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarness;
+          const now = yield* DateTime.now;
+          const resetsAt = 1790298600;
 
           yield* harness.runtime.startTurn(
             makeClaudeTestTurnInput({
