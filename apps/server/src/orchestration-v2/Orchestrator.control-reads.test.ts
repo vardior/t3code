@@ -38,6 +38,7 @@ import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -196,6 +197,78 @@ it.effect(
         ],
       );
     }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("preserves held messages when run ordinals have gaps", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:sparse-queue");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-sparse-queue"),
+      threadId,
+      projectId: ProjectId.make("project:sparse-queue"),
+      title: "Sparse queue",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const now = yield* DateTime.now;
+    for (const ordinal of [1, 3]) {
+      const runId = IdAllocator.derive.run({ threadId, ordinal });
+      yield* projections.apply({
+        id: EventId.make(`event:${runId}`),
+        type: "run.created",
+        threadId,
+        runId,
+        occurredAt: now,
+        payload: {
+          id: runId,
+          threadId,
+          ordinal,
+          providerInstanceId: instanceId,
+          modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make(`message:${ordinal}`),
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: ordinal === 3 ? "queued" : "completed",
+          ...(ordinal === 3 ? { queueHeld: true } : {}),
+          requestedAt: now,
+          startedAt: null,
+          completedAt: ordinal === 3 ? null : now,
+          checkpointId: null,
+          contextHandoffId: null,
+        },
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("send-sparse-queue"),
+      threadId,
+      messageId: MessageId.make("message:returning-user"),
+      text: "Continue the work",
+      attachments: [],
+      dispatchMode: { type: "defer_start" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
+    assert.deepEqual(
+      runs.map((run) => [run.ordinal, run.userMessageId]),
+      [
+        [1, "message:1"],
+        [3, "message:3"],
+        [4, "message:returning-user"],
+      ],
+    );
+    assert.isFalse(runs.some((run) => run.status === "queued" && run.queueHeld));
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("marks a never-visited thread's first completion unread", () =>
