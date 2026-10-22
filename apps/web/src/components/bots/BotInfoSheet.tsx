@@ -286,8 +286,6 @@ function BotModelPicker(props: {
           models={provider.models}
           model={selection.model}
           modelOptions={selection.options}
-          prompt=""
-          onPromptChange={() => {}}
           allowPromptInjectedEffort={false}
           planModeEnabled={settings.planModeEnabled}
           disabled={busy || !canOperate}

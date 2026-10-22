@@ -77,6 +77,9 @@ import * as PeerLinks from "./peer/PeerLinks.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as BotRouter from "./bots/BotRouter.ts";
+import * as Bots from "./bots/BotService.ts";
+import * as OpenItemService from "./openItems/OpenItemService.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -897,6 +900,9 @@ it.effect.each([
       const directStopped = yield* Deferred.make<void>();
       const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
       const configRpcServices = Layer.mergeAll(
+        Layer.mock(Bots.BotService)({}),
+        Layer.mock(BotRouter.BotRouter)({}),
+        Layer.mock(OpenItemService.OpenItemService)({}),
         layerUnusedConfigRpcServices,
         Layer.mock(ExternalLauncher.ExternalLauncher)({
           resolveAvailableEditors: () =>
