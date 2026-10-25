@@ -79,6 +79,7 @@ export function createBotFeedFilter(input: {
         const interruption = ownerInterruption(entry);
         return interruption ? [interruption] : [];
       }
+      if (entry.type === "html-render") return [entry];
       if (entry.type !== "message") return [];
       const kind = kinds.get(`message:${entry.message.id}`);
       if (kind === "bot") return [withLinks(entry, entry)];

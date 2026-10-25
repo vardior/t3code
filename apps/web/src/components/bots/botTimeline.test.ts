@@ -114,6 +114,21 @@ describe("botTimelineEntries", () => {
     ).toEqual([owner, partial, ownerStop]);
   });
 
+  it("keeps pages the bot published with html_render", () => {
+    const owner = messageEntry("owner", "user", "user");
+    const page: TimelineEntry = {
+      id: "page",
+      kind: "html-render",
+      createdAt: at,
+      runId: RunId.make("run"),
+      htmlRender: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
+    };
+    const reply = messageEntry("reply", "assistant");
+    expect(
+      botTimelineEntries([you("message:owner"), bot("message:reply")], [owner, page, reply]),
+    ).toEqual([owner, page, reply]);
+  });
+
   it("renders Slack items that have no thread message", () => {
     const [slack] = botTimelineEntries([bot("slack-send:item"), bot("message:gone")], []);
     expect(slack).toMatchObject({

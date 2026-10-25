@@ -109,6 +109,28 @@ describe("createBotFeedFilter", () => {
     expect(filter([owner, wake, reply])).toBe(entries);
   });
 
+  it("keeps pages the bot published with html_render", () => {
+    const owner = messageEntry("owner", "user", "owner", "user");
+    const page: ThreadFeedEntry = {
+      type: "html-render",
+      id: "page",
+      createdAt: at,
+      runId: RunId.make("run"),
+      render: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
+    };
+    const reply = messageEntry("reply", "assistant");
+    const filter = createBotFeedFilter({
+      items: [item("you", "message:owner"), item("bot", "message:reply")],
+      threadId,
+      knownEnvironmentIds: [],
+    });
+    expect(filter([owner, page, reply]).map((entry) => entry.id)).toEqual([
+      "owner",
+      "page",
+      "reply",
+    ]);
+  });
+
   it("keeps the interruption marker of an owner run only", () => {
     const owner = messageEntry("owner", "user", "owner", "user");
     const work = workFeed([

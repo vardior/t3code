@@ -47,7 +47,7 @@ export function botTimelineEntries(
     entry.kind === "message"
       ? visibleIds.has(`message:${entry.message.id}`) ||
         (entry.message.role === "user" && entry.message.createdBy === undefined)
-      : isOwnerRunInterruption(entry, ownerRunIds),
+      : entry.kind === "html-render" || isOwnerRunInterruption(entry, ownerRunIds),
   );
   for (const item of items) {
     if (item.id.startsWith("message:")) continue;
