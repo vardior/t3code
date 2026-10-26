@@ -502,6 +502,8 @@ describe("AgentAwarenessRelay", () => {
         shell({ latestRunId: RunId.make("latest-run"), status: input.status }),
       );
       yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
       assert.deepStrictEqual(
         publications.map(({ state }) => state?.phase ?? null),
         ["running", input.expected],
@@ -557,6 +559,8 @@ describe("AgentAwarenessRelay", () => {
         shell({ latestRunId: RunId.make("latest-run"), status: "completed" }),
       );
       yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
       assert.equal(publications[1]?.state?.phase, "completed");
       assert.deepStrictEqual(publications[1]?.state?.ownerNotification, ownerNotification);
     }),
@@ -578,6 +582,8 @@ describe("AgentAwarenessRelay", () => {
       yield* relay.publishThread(THREAD_ID);
       yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("latest-run"), status }));
       yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
       assert.equal(publications[1]?.state?.phase, phase);
       assert.deepStrictEqual(publications[1]?.state?.ownerNotification, ownerNotification);
     }),
