@@ -516,11 +516,12 @@ export const layer = Layer.effect(
       configuredBotsDir ||
       (Option.isSome(serverConfig) ? path.join(serverConfig.value.baseDir, "bots") : null);
     const pauseLock = yield* Semaphore.make(1);
-    const withBotPauseLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.gen(function* () {
-        if (yield* BotSchedulePauseTransition) return yield* effect;
-        return yield* effect.pipe(pauseLock.withPermit);
-      });
+    const withBotPauseLock = Effect.fn("ScheduledTaskService.withBotPauseLock")(function* <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ) {
+      if (yield* BotSchedulePauseTransition) return yield* effect;
+      return yield* effect.pipe(pauseLock.withPermit);
+    });
     const pausedBotsForSchedule = (id: ScheduledTaskId, threadId: ThreadId | null) =>
       Effect.gen(function* () {
         if (botsDir === null) return [];
@@ -562,8 +563,8 @@ export const layer = Layer.effect(
           taskError("Could not check whether this task's bot is paused.", { taskId: id, cause }),
         ),
       );
-    const assertBotScheduleCanEnable = (id: ScheduledTaskId, threadId: ThreadId | null) =>
-      Effect.gen(function* () {
+    const assertBotScheduleCanEnable = Effect.fn("ScheduledTaskService.assertBotScheduleCanEnable")(
+      function* (id: ScheduledTaskId, threadId: ThreadId | null) {
         const pausedBot = (yield* pausedBotsForSchedule(id, threadId))[0];
         if (pausedBot !== undefined) {
           return yield* taskError(
@@ -571,7 +572,8 @@ export const layer = Layer.effect(
             { taskId: id },
           );
         }
-      });
+      },
+    );
 
     const webhookPermits = yield* Ref.make<ReadonlyMap<ScheduledTaskId, Semaphore.Semaphore>>(
       new Map(),

@@ -3,7 +3,7 @@ import { ComponentCatalogScreen } from "./features/development/ComponentCatalogS
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
 import { PullRequestDiscussionScreen } from "./features/pull-requests/PullRequestDiscussionScreen";
-import { BotInfoSheet } from "./features/bots/BotInfoSheet";
+import { BotInfoSheet, BotModelSettingsRouteScreen } from "./features/bots/BotInfoSheet";
 import { BotChatRouteScreen } from "./features/bots/BotChatRouteScreen";
 import { createWorkspaceStackNavigator } from "./features/layout/createWorkspaceStackNavigator";
 import {
@@ -688,6 +688,18 @@ const RootStackConfig = createWorkspaceStackNavigator({
         headerShown: false,
         sheetAllowedDetents: formSheetDetents(0.65, 0.95),
         sheetGrabberVisible: true,
+      },
+    }),
+    BotModelSettings: createNativeStackScreen({
+      screen: BotModelSettingsRouteScreen,
+      options: {
+        gestureEnabled: true,
+        headerShown: false,
+        ...(Platform.OS === "android"
+          ? { presentation: "card" as const }
+          : {
+              ...THREAD_SETTINGS_SHEET_OPTIONS,
+            }),
       },
     }),
     BotInfo: createNativeStackScreen({

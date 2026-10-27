@@ -182,8 +182,8 @@ export const layer = Layer.effect(
         ...bots.filter((bot) => !orderedIds.has(bot.id)),
       ];
     };
-    const reorderBots = (names: ReadonlyArray<string>) =>
-      Effect.gen(function* () {
+    const reorderBots = Effect.fn("BotService.reorderBots")(
+      function* (names: ReadonlyArray<string>) {
         if (names.some((name) => !BOT_ID.test(name))) {
           return yield* new BotError({ message: "Invalid bot name in order" });
         }
@@ -199,7 +199,10 @@ export const layer = Layer.effect(
         );
         yield* PubSub.publish(changes, {});
         return {};
-      }).pipe(Effect.uninterruptible, orderLock.withPermit);
+      },
+      Effect.uninterruptible,
+      orderLock.withPermit,
+    );
 
     const homeThreadLookupLock = yield* Semaphore.make(1);
     let homeThreadIds = new Set<ThreadId>();
@@ -217,21 +220,23 @@ export const layer = Layer.effect(
         .readFileString(path.join(botsDir, id, "bot.json"))
         .pipe(Effect.flatMap(decodeBotConfig));
 
-    const cacheHomeThreadIds = (ids: Iterable<ThreadId>) =>
-      Effect.gen(function* () {
-        homeThreadIds = new Set(ids);
-        homeThreadIdsExpireAt = (yield* Clock.currentTimeMillis) + HOME_THREAD_CACHE_TTL_MS;
-      });
+    const cacheHomeThreadIds = Effect.fn("BotService.cacheHomeThreadIds")(function* (
+      ids: Iterable<ThreadId>,
+    ) {
+      homeThreadIds = new Set(ids);
+      homeThreadIdsExpireAt = (yield* Clock.currentTimeMillis) + HOME_THREAD_CACHE_TTL_MS;
+    });
 
-    const warnHomeThreadReadFailure = (cause: unknown) =>
-      Effect.gen(function* () {
-        if (homeThreadReadWarningLogged) return;
-        homeThreadReadWarningLogged = true;
-        yield* Effect.logWarning("Cannot read bot home threads", { botsDir, cause });
-      });
+    const warnHomeThreadReadFailure = Effect.fn("BotService.warnHomeThreadReadFailure")(function* (
+      cause: unknown,
+    ) {
+      if (homeThreadReadWarningLogged) return;
+      homeThreadReadWarningLogged = true;
+      yield* Effect.logWarning("Cannot read bot home threads", { botsDir, cause });
+    });
 
-    const refreshHomeThreadIds = () =>
-      Effect.gen(function* () {
+    const refreshHomeThreadIds = Effect.fn("BotService.refreshHomeThreadIds")(
+      function* () {
         const ids = yield* readBotIds();
         let readFailed = false;
         const configs = yield* Effect.forEach(ids, (id) =>
@@ -257,18 +262,17 @@ export const layer = Layer.effect(
         yield* cacheHomeThreadIds(
           configs.flatMap((config) => (config === null ? [] : [config.homeThreadId])),
         );
-      }).pipe(
-        Effect.catchCause((cause) =>
-          warnHomeThreadReadFailure(cause).pipe(Effect.andThen(cacheHomeThreadIds([]))),
-        ),
-      );
+      },
+      Effect.catchCause((cause) =>
+        warnHomeThreadReadFailure(cause).pipe(Effect.andThen(cacheHomeThreadIds([]))),
+      ),
+    );
 
-    const listWorkerIds = (homeThreadId: ThreadId) =>
-      Effect.gen(function* () {
-        const cached = workerIds.get(homeThreadId);
-        if (cached !== undefined) return cached;
-        const generation = workerGeneration;
-        const rows = yield* sql<{ readonly thread_id: string }>`
+    const listWorkerIds = Effect.fn("BotService.listWorkerIds")(function* (homeThreadId: ThreadId) {
+      const cached = workerIds.get(homeThreadId);
+      if (cached !== undefined) return cached;
+      const generation = workerGeneration;
+      const rows = yield* sql<{ readonly thread_id: string }>`
           SELECT t.thread_id
           FROM orchestration_v2_projection_threads t
           WHERE t.deleted_at IS NULL
@@ -285,16 +289,18 @@ export const layer = Layer.effect(
           ORDER BY t.created_at DESC
           LIMIT ${MAX_WORKERS_PER_BOT + 2}
         `;
-        const ids = rows.map((row) => row.thread_id);
-        if (generation === workerGeneration) workerIds.set(homeThreadId, ids);
-        return ids;
-      }).pipe(workerLookupLock.withPermit);
+      const ids = rows.map((row) => row.thread_id);
+      if (generation === workerGeneration) workerIds.set(homeThreadId, ids);
+      return ids;
+    }, workerLookupLock.withPermit);
 
-    const listWorkers = (homeThreadId: ThreadId, ownThreadIds: ReadonlySet<string>) =>
-      Effect.gen(function* () {
-        const ids = (yield* listWorkerIds(homeThreadId)).filter((id) => !ownThreadIds.has(id));
-        if (ids.length === 0) return [];
-        const rows = yield* sql<WorkerRow>`
+    const listWorkers = Effect.fn("BotService.listWorkers")(function* (
+      homeThreadId: ThreadId,
+      ownThreadIds: ReadonlySet<string>,
+    ) {
+      const ids = (yield* listWorkerIds(homeThreadId)).filter((id) => !ownThreadIds.has(id));
+      if (ids.length === 0) return [];
+      const rows = yield* sql<WorkerRow>`
           SELECT thread_id, title, created_at, status FROM (
             SELECT t.thread_id, t.title, t.created_at,
               (
@@ -308,13 +314,13 @@ export const layer = Layer.effect(
             LIMIT ${MAX_WORKERS_PER_BOT}
           ) ORDER BY created_at
         `;
-        return rows.map((row) => ({
-          threadId: ThreadId.make(row.thread_id),
-          title: row.title,
-          createdAt: row.created_at,
-          status: row.status,
-        }));
-      });
+      return rows.map((row) => ({
+        threadId: ThreadId.make(row.thread_id),
+        title: row.title,
+        createdAt: row.created_at,
+        status: row.status,
+      }));
+    });
 
     const isOwnerMessage = sql`
       m.role = 'user'
@@ -492,8 +498,8 @@ export const layer = Layer.effect(
         Effect.catchCause(() => Effect.succeed(null)),
       );
 
-    const readSlackDms = (botDir: string) =>
-      Effect.gen(function* () {
+    const readSlackDms = Effect.fn("BotService.readSlackDms")(
+      function* (botDir: string) {
         const file = yield* fileSystem.open(path.join(botDir, "dm-log.jsonl"));
         let position = Number((yield* file.stat).size);
         let leadingBytes = new Uint8Array(0);
@@ -527,10 +533,10 @@ export const layer = Layer.effect(
           if (read === 0) break;
         }
         return newestDms.toReversed();
-      }).pipe(
-        Effect.scoped,
-        Effect.catchCause(() => Effect.succeed([])),
-      );
+      },
+      Effect.scoped,
+      Effect.catchCause(() => Effect.succeed([])),
+    );
 
     const get = (input: BotGetInput) =>
       Effect.gen(function* () {
@@ -583,33 +589,32 @@ export const layer = Layer.effect(
         ),
       );
 
-    const list = () =>
-      Effect.gen(function* () {
-        const entries = yield* readBotIds().pipe(
-          Effect.mapError(
-            (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
-          ),
-        );
-        const bots = yield* Effect.forEach(
-          entries,
-          (id) => {
-            const botDir = path.join(botsDir, id);
-            return fileSystem.exists(path.join(botDir, "bot.json")).pipe(
-              Effect.catchCause(() => Effect.succeed(false)),
-              Effect.flatMap((exists) =>
-                exists ? readBot(id, botDir) : Effect.succeed(Option.none<BotSummary>()),
-              ),
-            );
-          },
-          { concurrency: 4 },
-        );
-        const summaries = bots.flatMap((bot) => Option.toArray(bot));
-        yield* cacheHomeThreadIds(summaries.map((bot) => bot.homeThreadId));
-        return { bots: inBotOrder(yield* readOrder(), summaries) };
-      });
+    const list = Effect.fn("BotService.list")(function* () {
+      const entries = yield* readBotIds().pipe(
+        Effect.mapError(
+          (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
+        ),
+      );
+      const bots = yield* Effect.forEach(
+        entries,
+        (id) => {
+          const botDir = path.join(botsDir, id);
+          return fileSystem.exists(path.join(botDir, "bot.json")).pipe(
+            Effect.catchCause(() => Effect.succeed(false)),
+            Effect.flatMap((exists) =>
+              exists ? readBot(id, botDir) : Effect.succeed(Option.none<BotSummary>()),
+            ),
+          );
+        },
+        { concurrency: 4 },
+      );
+      const summaries = bots.flatMap((bot) => Option.toArray(bot));
+      yield* cacheHomeThreadIds(summaries.map((bot) => bot.homeThreadId));
+      return { bots: inBotOrder(yield* readOrder(), summaries) };
+    });
 
-    const morning = () =>
-      Effect.gen(function* () {
+    const morning = Effect.fn("BotService.morning")(
+      function* () {
         const configs = yield* Effect.forEach(
           yield* readBotIds(),
           (id) =>
@@ -676,39 +681,39 @@ export const layer = Layer.effect(
             );
           }),
         };
-      }).pipe(
-        Effect.mapError((cause) =>
-          isBotError(cause)
-            ? cause
-            : new BotError({ message: "Cannot read what the bots did while you were away", cause }),
-        ),
-      );
+      },
+      Effect.mapError((cause) =>
+        isBotError(cause)
+          ? cause
+          : new BotError({ message: "Cannot read what the bots did while you were away", cause }),
+      ),
+    );
 
-    const readBotJob = (id: string) =>
-      Effect.gen(function* () {
+    const readBotJob = Effect.fn("BotService.readBotJob")(
+      function* (id: string) {
         const config = yield* readBotConfig(id);
         const charter = yield* readCharter(path.join(botsDir, id));
         return [{ id, job: (charter === null ? null : charterJob(charter)) ?? config.name }];
-      }).pipe(Effect.catchCause(() => Effect.succeed([])));
+      },
+      Effect.catchCause(() => Effect.succeed([])),
+    );
 
-    const listJobs = () =>
-      Effect.gen(function* () {
-        const ids = yield* readBotIds().pipe(
-          Effect.mapError(
-            (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
-          ),
-        );
-        const jobs = yield* Effect.forEach(ids, (id) => readBotJob(id), { concurrency: 4 });
-        return jobs.flat();
-      });
+    const listJobs = Effect.fn("BotService.listJobs")(function* () {
+      const ids = yield* readBotIds().pipe(
+        Effect.mapError(
+          (cause) => new BotError({ message: `Cannot read bots directory ${botsDir}`, cause }),
+        ),
+      );
+      const jobs = yield* Effect.forEach(ids, (id) => readBotJob(id), { concurrency: 4 });
+      return jobs.flat();
+    });
 
-    const isHomeThread = (threadId: ThreadId) =>
-      Effect.gen(function* () {
-        if ((yield* Clock.currentTimeMillis) >= homeThreadIdsExpireAt) {
-          yield* refreshHomeThreadIds();
-        }
-        return homeThreadIds.has(threadId);
-      }).pipe(homeThreadLookupLock.withPermit);
+    const isHomeThread = Effect.fn("BotService.isHomeThread")(function* (threadId: ThreadId) {
+      if ((yield* Clock.currentTimeMillis) >= homeThreadIdsExpireAt) {
+        yield* refreshHomeThreadIds();
+      }
+      return homeThreadIds.has(threadId);
+    }, homeThreadLookupLock.withPermit);
 
     const isHomeThreadPaused = (threadId: ThreadId) =>
       Effect.gen(function* () {

@@ -63,35 +63,33 @@ const make = Effect.gen(function* () {
   const readThread = (threadId: ThreadId) =>
     orchestrator.getThreadShell(threadId).pipe(
       Effect.mapError((cause) => new OpenItemError({ reason: "thread_unavailable", cause })),
-      Effect.flatMap((thread) =>
-        thread === null
-          ? Effect.fail(new OpenItemError({ reason: "thread_unavailable" }))
-          : Effect.succeed(thread),
+      Effect.filterOrFail(
+        (thread) => thread !== null,
+        () => new OpenItemError({ reason: "thread_unavailable" }),
       ),
     );
 
-  const apply = (
+  const apply = Effect.fn("OpenItemService.apply")(function* (
     threadId: ThreadId,
     change: OpenItemChange,
     command: (commandId: CommandId) => OrchestrationV2ServerCommand,
-  ) =>
-    Effect.gen(function* () {
-      const thread = yield* readThread(threadId);
-      const plan = planOpenItemChange(thread, change, DateTime.formatIso(yield* DateTime.now));
-      if (!plan.ok) return yield* new OpenItemError({ reason: plan.reason });
-      yield* orchestrator
-        .dispatch(command(CommandId.make(`open-item:${yield* randomUuidV4}`)))
-        .pipe(
-          Effect.mapError((cause) =>
-            cause._tag === "OrchestratorDispatchError" && isOpenItemError(cause.cause)
-              ? cause.cause
-              : new OpenItemError({ reason: "rejected", cause }),
-          ),
-        );
-      const items = (yield* readThread(threadId)).openItems ?? [];
-      const item = items.find((candidate) => candidate.id === change.itemId);
-      return item ?? (yield* new OpenItemError({ reason: "not_found" }));
-    });
+  ) {
+    const thread = yield* readThread(threadId);
+    const plan = planOpenItemChange(thread, change, DateTime.formatIso(yield* DateTime.now));
+    if (!plan.ok) return yield* new OpenItemError({ reason: plan.reason });
+    yield* orchestrator
+      .dispatch(command(CommandId.make(`open-item:${yield* randomUuidV4}`)))
+      .pipe(
+        Effect.mapError((cause) =>
+          cause._tag === "OrchestratorDispatchError" && isOpenItemError(cause.cause)
+            ? cause.cause
+            : new OpenItemError({ reason: "rejected", cause }),
+        ),
+      );
+    const items = (yield* readThread(threadId)).openItems ?? [];
+    const item = items.find((candidate) => candidate.id === change.itemId);
+    return item ?? (yield* new OpenItemError({ reason: "not_found" }));
+  });
 
   const notifyOwner = (threadId: ThreadId, item: OpenItem) =>
     Effect.gen(function* () {
@@ -173,27 +171,26 @@ const make = Effect.gen(function* () {
     };
   });
 
-  const ownerResolve = (
+  const ownerResolve = Effect.fn("OpenItemService.ownerResolve")(function* (
     input: OpenItemDropInput,
     resolution: { readonly status: OpenItemResolvedStatus; readonly answer?: string | undefined },
     text: (item: OpenItem) => string,
-  ) =>
-    Effect.gen(function* () {
-      const reply = yield* ownerReply(input, text);
-      return yield* apply(
-        input.threadId,
-        { type: "resolve", itemId: input.itemId, ...resolution },
-        (commandId) => ({
-          type: "thread.open-item.resolve",
-          commandId,
-          threadId: input.threadId,
-          itemId: input.itemId,
-          status: resolution.status,
-          ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
-          reply,
-        }),
-      );
-    });
+  ) {
+    const reply = yield* ownerReply(input, text);
+    return yield* apply(
+      input.threadId,
+      { type: "resolve", itemId: input.itemId, ...resolution },
+      (commandId) => ({
+        type: "thread.open-item.resolve",
+        commandId,
+        threadId: input.threadId,
+        itemId: input.itemId,
+        status: resolution.status,
+        ...(resolution.answer === undefined ? {} : { answer: resolution.answer }),
+        reply,
+      }),
+    );
+  });
 
   const answer = Effect.fn("OpenItemService.answer")(function* (input: OpenItemAnswerInput) {
     return yield* ownerResolve(

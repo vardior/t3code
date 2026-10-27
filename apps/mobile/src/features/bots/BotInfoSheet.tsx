@@ -18,10 +18,10 @@ import {
   type ModelSelection,
   type BotSummary,
   type ScheduledTask,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -42,10 +42,7 @@ import {
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
 import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
-import {
-  useExistingThreadSettingsRoutePresentation,
-  type ExistingThreadSettingsRouteSession,
-} from "../threads/ThreadSettingsSheet";
+import { ThreadSettingsPickerScreen } from "../threads/ThreadSettingsSheet";
 import { useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -136,26 +133,16 @@ export function BotInfoSheet({
   );
 }
 
-function BotModelPicker(props: {
-  readonly bot: BotSummary;
-  readonly environmentId: EnvironmentId;
-}) {
-  const { bot, environmentId } = props;
-  const shell = useThreadShell(scopeThreadRef(environmentId, bot.homeThreadId));
+function useBotModelSession(environmentId: EnvironmentId, homeThreadId: ThreadId) {
+  const shell = useThreadShell(scopeThreadRef(environmentId, homeThreadId));
   const thread = useAtomValue(
-    environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, bot.homeThreadId)),
+    environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, homeThreadId)),
   );
   const config = useEnvironmentServerConfig(environmentId);
   const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
   const setRuntimeMode = useAtomCommand(threadEnvironment.setRuntimeMode, { reportFailure: false });
-  const navigation = useNavigation();
-  const {
-    present,
-    clear,
-    session: presentedSession,
-  } = useExistingThreadSettingsRoutePresentation();
-  const ownerId = scopedThreadKey(environmentId, bot.homeThreadId);
+  const ownerId = scopedThreadKey(environmentId, homeThreadId);
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -198,7 +185,7 @@ function BotModelPicker(props: {
       try {
         const result = await updateMetadata({
           environmentId,
-          input: { threadId: bot.homeThreadId, modelSelection },
+          input: { threadId: homeThreadId, modelSelection },
         });
         if (result._tag === "Success") {
           updateComposerDraftSettings(ownerId, { modelSelection });
@@ -214,7 +201,6 @@ function BotModelPicker(props: {
 
     return shell && selection
       ? ({
-          ownerId,
           environmentId,
           projectId: shell.projectId,
           providerInstanceId: selection.instanceId,
@@ -237,7 +223,7 @@ function BotModelPicker(props: {
               return;
             void setRuntimeMode({
               environmentId,
-              input: { threadId: bot.homeThreadId, runtimeMode },
+              input: { threadId: homeThreadId, runtimeMode },
             }).then((result) => {
               if (result._tag === "Success") updateComposerDraftSettings(ownerId, { runtimeMode });
               else if (!isAtomCommandInterrupted(result)) {
@@ -246,7 +232,7 @@ function BotModelPicker(props: {
               }
             });
           },
-        } satisfies ExistingThreadSettingsRouteSession)
+        } satisfies Omit<ComponentProps<typeof ThreadSettingsPickerScreen>, "onClose">)
       : null;
   }, [
     shell,
@@ -257,13 +243,19 @@ function BotModelPicker(props: {
     optionDescriptors,
     updateMetadata,
     setRuntimeMode,
-    bot.homeThreadId,
+    homeThreadId,
   ]);
-  const presentedOwnerId = presentedSession?.ownerId;
-  useEffect(() => {
-    if (session && presentedOwnerId === ownerId) present(session);
-  }, [session, presentedOwnerId, ownerId, present]);
-  useEffect(() => () => clear(ownerId), [ownerId, clear]);
+  return { session, selection, selectedOption, config, canOperate, busy, error };
+}
+
+function BotModelPicker(props: {
+  readonly bot: BotSummary;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { bot, environmentId } = props;
+  const navigation = useNavigation();
+  const { session, selection, selectedOption, config, canOperate, busy, error } =
+    useBotModelSession(environmentId, bot.homeThreadId);
   return (
     <View>
       <Pressable
@@ -273,8 +265,9 @@ function BotModelPicker(props: {
         className="px-4 py-3 active:opacity-70 disabled:opacity-50"
         onPress={() => {
           if (!session) return;
-          present(session);
-          navigation.dispatch(StackActions.push("ThreadSettingsSheet"));
+          navigation.dispatch(
+            StackActions.push("BotModelSettings", { environmentId, threadId: bot.homeThreadId }),
+          );
         }}
       >
         <Text className="text-base text-foreground">
@@ -286,6 +279,30 @@ function BotModelPicker(props: {
           {error}
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+export function BotModelSettingsRouteScreen({
+  route,
+}: StaticScreenProps<{
+  readonly environmentId: string;
+  readonly threadId: string;
+}>) {
+  const navigation = useNavigation();
+  const { session, error } = useBotModelSession(
+    EnvironmentId.make(route.params.environmentId),
+    ThreadId.make(route.params.threadId),
+  );
+  if (!session) return <View className="flex-1 bg-sheet" />;
+  return (
+    <View className="flex-1 bg-sheet">
+      {error ? (
+        <Text accessibilityRole="alert" className="px-4 pt-3 text-sm text-danger-foreground">
+          {error}
+        </Text>
+      ) : null}
+      <ThreadSettingsPickerScreen {...session} onClose={() => navigation.goBack()} />
     </View>
   );
 }
