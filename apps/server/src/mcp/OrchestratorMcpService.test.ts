@@ -3814,6 +3814,7 @@ it.effect("approval-required callers cannot create or change scheduled check com
       }),
       ServerSettings.layerTest(),
       Layer.mock(SecretRequests.SecretRequests)({}),
+      Layer.mock(RemoteDelegation.RemoteDelegation)({}),
       Layer.mock(ScheduledTaskService.ScheduledTaskService)({
         list: () =>
           Effect.succeed({

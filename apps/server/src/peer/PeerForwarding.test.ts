@@ -1,3 +1,5 @@
+import * as BotService from "../bots/BotService.ts";
+import * as OpenItemService from "../openItems/OpenItemService.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -231,7 +233,13 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
-      Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(BotService.BotService)({}),
+          Layer.mock(OpenItemService.OpenItemService)({}),
+        ),
+      ),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
       Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
@@ -313,6 +321,8 @@ const makeLaptop = Effect.gen(function* () {
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(BotService.BotService)({}),
+        Layer.mock(OpenItemService.OpenItemService)({}),
         ServerSettings.layerTest(),
         Layer.mock(RemoteDelegation.RemoteDelegation)({}),
         Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),

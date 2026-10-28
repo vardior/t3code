@@ -1,3 +1,5 @@
+import * as BotService from "../bots/BotService.ts";
+import * as OpenItemService from "../openItems/OpenItemService.ts";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -163,7 +165,13 @@ const makeLaptop = Effect.gen(function* () {
     Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
-    Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(BotService.BotService)({}),
+        Layer.mock(OpenItemService.OpenItemService)({}),
+      ),
+    ),
     Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
     Layer.provide(

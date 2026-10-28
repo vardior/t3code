@@ -1,3 +1,5 @@
+import * as BotService from "../bots/BotService.ts";
+import * as OpenItemService from "../openItems/OpenItemService.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -511,7 +513,13 @@ const boxToolkitLayer = (thread: BoxThread) => {
       }),
     ),
     Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
-    Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(BotService.BotService)({}),
+        Layer.mock(OpenItemService.OpenItemService)({}),
+      ),
+    ),
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(NodeServices.layer),
   );
@@ -611,7 +619,13 @@ const makeLaptop = (
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
       Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
-      Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(BotService.BotService)({}),
+          Layer.mock(OpenItemService.OpenItemService)({}),
+        ),
+      ),
       Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
       Layer.fresh,

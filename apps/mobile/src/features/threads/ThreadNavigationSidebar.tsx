@@ -590,7 +590,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       bots={homeBots}
       threads={allThreads}
       environmentLabels={botEnvironmentLabels}
-      now={Date.parse(`${nowMinute}:00.000Z`)}
+      now={Date.parse(now)}
       onSelectBot={props.onSelectBot}
     />
   );

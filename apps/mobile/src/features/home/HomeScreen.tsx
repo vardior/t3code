@@ -767,7 +767,7 @@ export function HomeScreen(props: HomeScreenProps) {
         bots={homeBots}
         threads={props.threads}
         environmentLabels={botEnvironmentLabels}
-        now={Date.parse(`${nowMinute}:00.000Z`)}
+        now={Date.parse(now)}
         onSelectBot={handleSelectBot}
       />
     </>
