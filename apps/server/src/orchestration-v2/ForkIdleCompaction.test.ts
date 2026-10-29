@@ -246,6 +246,34 @@ describe("idle compaction eligibility", () => {
     assert.isDefined(idleCompactionCandidate(state, 54 * minute));
   });
 
+  it("is not held by a tool call a finished run never closed", () => {
+    const state = fixture();
+    state.runs.unshift({
+      ...state.runs[0]!,
+      id: RunId.make("earlier-run"),
+      ordinal: 0,
+      activeAttemptId: RunAttemptId.make("earlier-attempt"),
+    });
+    state.nodes.push({
+      id: NodeId.make("stale-exec"),
+      threadId,
+      runId: RunId.make("earlier-run"),
+      parentNodeId: null,
+      rootNodeId: NodeId.make("stale-exec"),
+      kind: "tool_call",
+      status: "running",
+      countsForRun: true,
+      providerThreadId,
+      providerTurnId: null,
+      nativeItemRef: null,
+      runtimeRequestId: null,
+      checkpointScopeId: null,
+      startedAt: at(0),
+      completedAt: null,
+    });
+    assert.isDefined(idleCompactionCandidate(state, 54 * minute));
+  });
+
   it("requires strictly more than 200000 current tokens, at 54 minutes and before 60", () => {
     const state = fixture();
     assert.isUndefined(idleCompactionCandidate(state, 54 * minute - 1));

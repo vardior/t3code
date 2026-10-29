@@ -64,7 +64,18 @@ export function idleCompactionCandidate(
   if (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > now) return;
   if ((thread.openItems ?? []).some((item) => item.status === "open")) return;
   if (state.runs.some((run) => live(run.status))) return;
-  if (state.nodes.some((node) => node.kind !== "todo_list" && live(node.status))) return;
+  const finishedRunIds = new Set(
+    state.runs.filter((run) => !live(run.status)).map((run) => run.id),
+  );
+  if (
+    state.nodes.some(
+      (node) =>
+        node.kind !== "todo_list" &&
+        live(node.status) &&
+        (node.runId === null || !finishedRunIds.has(node.runId)),
+    )
+  )
+    return;
   if (state.subagents.some((agent) => live(agent.status))) return;
   if (state.runtimeRequests.some((request) => request.status === "pending")) return;
   if (
