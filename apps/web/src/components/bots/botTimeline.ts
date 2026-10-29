@@ -27,11 +27,13 @@ function syntheticEntry(item: VisibleBotChatItem): TimelineEntry {
   return entry;
 }
 
-function isOwnerRunInterruption(entry: TimelineEntry, ownerRunIds: ReadonlySet<string | null>) {
+function isVisibleBotEvent(entry: TimelineEntry, ownerRunIds: ReadonlySet<string | null>) {
   return (
     entry.kind === "event" &&
-    entry.projectedItem.item.type === "run_interrupt_result" &&
-    ownerRunIds.has(entry.projectedItem.item.runId)
+    (entry.projectedItem.item.type === "secret_request" ||
+      entry.projectedItem.item.type === "link_request" ||
+      (entry.projectedItem.item.type === "run_interrupt_result" &&
+        ownerRunIds.has(entry.projectedItem.item.runId)))
   );
 }
 
@@ -47,7 +49,7 @@ export function botTimelineEntries(
     entry.kind === "message"
       ? visibleIds.has(`message:${entry.message.id}`) ||
         (entry.message.role === "user" && entry.message.createdBy === undefined)
-      : entry.kind === "html-render" || isOwnerRunInterruption(entry, ownerRunIds),
+      : entry.kind === "html-render" || isVisibleBotEvent(entry, ownerRunIds),
   );
   for (const item of items) {
     if (item.id.startsWith("message:")) continue;

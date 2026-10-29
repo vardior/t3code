@@ -1,7 +1,11 @@
 import type { VisibleBotChatItem } from "@t3tools/client-runtime/state/bot-chat-rows";
 import { MessageId, type ThreadId } from "@t3tools/contracts";
 
-import type { ThreadFeedEntry } from "../../lib/threadActivity";
+import {
+  isLinkRequestActivityGroup,
+  isSecretRequestActivityGroup,
+  type ThreadFeedEntry,
+} from "../../lib/threadActivity";
 import { botMarkdownThreadLinks } from "./botChat.logic";
 
 type MessageEntry = Extract<ThreadFeedEntry, { readonly type: "message" }>;
@@ -76,6 +80,8 @@ export function createBotFeedFilter(input: {
     if (lastResult !== null && entries === lastEntries) return lastResult;
     const next = entries.flatMap((entry): ThreadFeedEntry[] => {
       if (entry.type === "activity-group") {
+        if (isSecretRequestActivityGroup(entry) || isLinkRequestActivityGroup(entry))
+          return [entry];
         const interruption = ownerInterruption(entry);
         return interruption ? [interruption] : [];
       }

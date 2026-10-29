@@ -109,27 +109,44 @@ describe("createBotFeedFilter", () => {
     expect(filter([owner, wake, reply])).toBe(entries);
   });
 
-  it("keeps pages the bot published with html_render", () => {
-    const owner = messageEntry("owner", "user", "owner", "user");
-    const page: ThreadFeedEntry = {
-      type: "html-render",
-      id: "page",
-      createdAt: at,
-      runId: RunId.make("run"),
-      render: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
-    };
-    const reply = messageEntry("reply", "assistant");
-    const filter = createBotFeedFilter({
-      items: [item("you", "message:owner"), item("bot", "message:reply")],
-      threadId,
-      knownEnvironmentIds: [],
-    });
-    expect(filter([owner, page, reply]).map((entry) => entry.id)).toEqual([
-      "owner",
-      "page",
-      "reply",
-    ]);
-  });
+  it.each(["pending", "saved", "declined", "cancelled"] as const)(
+    "keeps published pages and native input cards when the secret is %s",
+    (secretStatus) => {
+      const owner = messageEntry("owner", "user", "owner", "user");
+      const page: ThreadFeedEntry = {
+        type: "html-render",
+        id: "page",
+        createdAt: at,
+        runId: RunId.make("run"),
+        render: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
+      };
+      const reply = messageEntry("reply", "assistant");
+      const filter = createBotFeedFilter({
+        items: [item("you", "message:owner"), item("bot", "message:reply")],
+        threadId,
+        knownEnvironmentIds: [],
+      });
+      const requests = workFeed([
+        {
+          ...turnItem("secret", "wake-run", 0),
+          type: "secret_request",
+          label: "API token",
+          reason: "Connect the service",
+          secretStatus,
+        },
+        ...(["pending", "linked", "declined", "cancelled", "failed"] as const).map(
+          (linkStatus, index) => ({
+            ...turnItem(`link-${linkStatus}`, "wake-run", index + 1),
+            type: "link_request" as const,
+            reason: "Connect the service",
+            linkStatus,
+          }),
+        ),
+      ]);
+      const entries = [owner, page, ...requests, reply];
+      expect(filter(entries)).toEqual(entries);
+    },
+  );
 
   it("keeps the interruption marker of an owner run only", () => {
     const owner = messageEntry("owner", "user", "owner", "user");

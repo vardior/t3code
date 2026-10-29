@@ -37,7 +37,7 @@ const workEntry: TimelineEntry = {
   entry: { id: "tool", createdAt: at, label: "Ran rg", tone: "tool" },
 };
 
-function interruption(runId: string): TimelineEntry {
+function interruption(runId: string) {
   const id = TurnItemId.make(`interrupt-${runId}`);
   const threadId = ThreadId.make("home");
   return {
@@ -68,7 +68,7 @@ function interruption(runId: string): TimelineEntry {
         message: "Stopped",
       },
     },
-  };
+  } satisfies TimelineEntry;
 }
 
 const you = (id: string): VisibleBotChatItem => ({
@@ -114,20 +114,54 @@ describe("botTimelineEntries", () => {
     ).toEqual([owner, partial, ownerStop]);
   });
 
-  it("keeps pages the bot published with html_render", () => {
-    const owner = messageEntry("owner", "user", "user");
-    const page: TimelineEntry = {
-      id: "page",
-      kind: "html-render",
-      createdAt: at,
-      runId: RunId.make("run"),
-      htmlRender: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
-    };
-    const reply = messageEntry("reply", "assistant");
-    expect(
-      botTimelineEntries([you("message:owner"), bot("message:reply")], [owner, page, reply]),
-    ).toEqual([owner, page, reply]);
-  });
+  it.each(["pending", "saved", "declined", "cancelled"] as const)(
+    "keeps published pages and native input cards when the secret is %s",
+    (secretStatus) => {
+      const owner = messageEntry("owner", "user", "user");
+      const page: TimelineEntry = {
+        id: "page",
+        kind: "html-render",
+        createdAt: at,
+        runId: RunId.make("run"),
+        htmlRender: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
+      };
+      const base = interruption("wake-run");
+      const secret: TimelineEntry = {
+        ...base,
+        id: "secret",
+        projectedItem: {
+          ...base.projectedItem,
+          item: {
+            ...base.projectedItem.item,
+            type: "secret_request",
+            label: "API token",
+            reason: "Connect the service",
+            secretStatus,
+          },
+        },
+      };
+      const links: TimelineEntry[] = (
+        ["pending", "linked", "declined", "cancelled", "failed"] as const
+      ).map((linkStatus) => ({
+        ...base,
+        id: `link-${linkStatus}`,
+        projectedItem: {
+          ...base.projectedItem,
+          item: {
+            ...base.projectedItem.item,
+            type: "link_request",
+            reason: "Connect the service",
+            linkStatus,
+          },
+        },
+      }));
+      const reply = messageEntry("reply", "assistant");
+      const entries = [owner, page, secret, ...links, reply];
+      expect(botTimelineEntries([you("message:owner"), bot("message:reply")], entries)).toEqual(
+        entries,
+      );
+    },
+  );
 
   it("renders Slack items that have no thread message", () => {
     const [slack] = botTimelineEntries([bot("slack-send:item"), bot("message:gone")], []);
