@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import type { NotificationResponse } from "expo-notifications";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -101,7 +101,6 @@ vi.mock("react-native", () => ({
   },
 }));
 
-import { loadPreferences, savePreferencesPatch } from "../persistence/imperative";
 import {
   loadPreferences,
   loadBotHomeThreads,

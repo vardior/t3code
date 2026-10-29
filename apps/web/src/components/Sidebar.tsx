@@ -3328,7 +3328,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ) : null}
           {!isSearchingThreads &&
           botsHoldThreads &&
-          !scopedProjectGroup &&
+          scopedProjectGroups.length === 0 &&
           settledThreads.length > 0 &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +

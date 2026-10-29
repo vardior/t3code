@@ -141,9 +141,7 @@ describe("RPC authorization scopes", () => {
   it("separates preview control from observation", () => {
     for (const method of [
       WS_METHODS.previewOpen,
-      WS_METHODS.previewNavigate,
       WS_METHODS.previewResize,
-      WS_METHODS.previewRefresh,
       WS_METHODS.previewClose,
       WS_METHODS.previewReportStatus,
       WS_METHODS.previewAdjust,

@@ -22,11 +22,7 @@ import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionForInstance,
 } from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
+import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useEnvironmentScope } from "../../state/session";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
@@ -188,14 +184,7 @@ function BotModelPicker(props: {
   const providers = config?.providers ?? [];
   const selection = shell?.modelSelection;
   const instanceEntries = useMemo(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providers),
-          settings,
-          shell?.projectId ?? null,
-        ),
-      ),
+    () => providerInstanceEntriesFor(providers, settings, shell?.projectId ?? null),
     [providers, settings, shell?.projectId],
   );
   const modelOptions = useMemo(
@@ -207,7 +196,6 @@ function BotModelPicker(props: {
   const getDisabledReason = (instanceId: ModelSelection["instanceId"], model: string) => {
     if (!shell) return null;
     const reason = getStartedThreadModelChangeBlockReason({
-      providers,
       hasStartedSession: shell.runtime !== null,
       supportsProviderSwitchingViaHandoff: supportsHandoff,
       currentModelSelection: shell.modelSelection,
