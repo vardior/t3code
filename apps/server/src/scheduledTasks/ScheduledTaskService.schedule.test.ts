@@ -253,6 +253,13 @@ it.effect(
         yield* TestClock.adjust("6 seconds");
         yield* TestClock.adjust("60 seconds");
         expect(yield* Deferred.await(launched)).toBe(created.task.title);
-      }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(NodeServices.layer),
+            Layer.provide(layerDependencies),
+          ),
+        ),
+      );
     }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

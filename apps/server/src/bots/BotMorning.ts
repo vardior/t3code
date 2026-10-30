@@ -6,7 +6,7 @@ import {
 import * as Hash from "effect/Hash";
 
 export const AWAY_THRESHOLD_MS = 6 * 60 * 60 * 1000;
-export const MIN_FINDINGS_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MIN_FINDINGS_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const FINDING_DECISION_PREFIXES = BotFindingDecision.literals.map((decision) =>
   botFindingDecisionMessage({ what: "", fix: "" }, decision),

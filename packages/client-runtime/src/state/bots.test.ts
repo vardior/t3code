@@ -1,3 +1,4 @@
+import * as NodeUtil from "node:util";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -119,7 +120,8 @@ it.effect("refreshes bots and details on every server invalidation across mounte
         const listReady = Latch.makeUnsafe();
         const detailReady = Latch.makeUnsafe();
         const stopList = registry.subscribe(list, (result) => {
-          if (AsyncResult.isSuccess(result) && result.value.bots === next) listReady.openUnsafe();
+          if (AsyncResult.isSuccess(result) && NodeUtil.isDeepStrictEqual(result.value.bots, next))
+            listReady.openUnsafe();
         });
         const stopDetail = registry.subscribe(detail, (result) => {
           if (AsyncResult.isSuccess(result) && result.value.charter === charter)

@@ -522,8 +522,8 @@ export const layer = Layer.effect(
       if (yield* BotSchedulePauseTransition) return yield* effect;
       return yield* effect.pipe(pauseLock.withPermit);
     });
-    const pausedBotsForSchedule = (id: ScheduledTaskId, threadId: ThreadId | null) =>
-      Effect.gen(function* () {
+    const pausedBotsForSchedule = Effect.fn("ScheduledTaskService.pausedBotsForSchedule")(
+      function* (id: ScheduledTaskId, threadId: ThreadId | null) {
         if (botsDir === null) return [];
         const entries = yield* fileSystem
           .readDirectory(botsDir)
@@ -558,11 +558,14 @@ export const layer = Layer.effect(
             ),
         );
         return bots.filter((bot) => bot !== null);
-      }).pipe(
-        Effect.mapError((cause) =>
-          taskError("Could not check whether this task's bot is paused.", { taskId: id, cause }),
+      },
+      (effect, id) =>
+        effect.pipe(
+          Effect.mapError((cause) =>
+            taskError("Could not check whether this task's bot is paused.", { taskId: id, cause }),
+          ),
         ),
-      );
+    );
     const assertBotScheduleCanEnable = Effect.fn("ScheduledTaskService.assertBotScheduleCanEnable")(
       function* (id: ScheduledTaskId, threadId: ThreadId | null) {
         const pausedBot = (yield* pausedBotsForSchedule(id, threadId))[0];
@@ -1153,39 +1156,39 @@ ${checkOutput}` : basePrompt;
           checked !== undefined && Result.isFailure(checked)
             ? Exit.fail(checked.failure)
             : active.threadId === null
-            ? yield* Effect.exit(
-                threadLaunch
-                  .launch({
-                    commandId,
-                    projectId: active.projectId,
-                    title: active.title,
-                    modelSelection: active.modelSelection,
-                    runtimeMode: active.runtimeMode,
-                    interactionMode: active.interactionMode,
-                    workspaceStrategy: active.workspaceStrategy,
-                    initialMessage: {
-                      messageId,
-                      scheduledTaskId: active.id,
-                      text: prompt,
-                      attachments: [],
-                    },
-                    createdBy: active.createdBy,
-                    creationSource: active.creationSource,
-                  })
-                  .pipe(
-                    Effect.map((launched) => launched.threadId),
-                    Effect.tap((threadId) =>
-                      threadMode === "new_thread" ? Effect.void : bindThread(active, threadId),
+              ? yield* Effect.exit(
+                  threadLaunch
+                    .launch({
+                      commandId,
+                      projectId: active.projectId,
+                      title: active.title,
+                      modelSelection: active.modelSelection,
+                      runtimeMode: active.runtimeMode,
+                      interactionMode: active.interactionMode,
+                      workspaceStrategy: active.workspaceStrategy,
+                      initialMessage: {
+                        messageId,
+                        scheduledTaskId: active.id,
+                        text: prompt,
+                        attachments: [],
+                      },
+                      createdBy: active.createdBy,
+                      creationSource: active.creationSource,
+                    })
+                    .pipe(
+                      Effect.map((launched) => launched.threadId),
+                      Effect.tap((threadId) =>
+                        threadMode === "new_thread" ? Effect.void : bindThread(active, threadId),
+                      ),
                     ),
+                )
+              : yield* Effect.exit(
+                  // The stored selection only seeds fresh threads. A bound run
+                  // follows the thread's current provider, so it passes none.
+                  sendBound(ThreadId.make(active.threadId), active.projectId, 2).pipe(
+                    Effect.as(ThreadId.make(active.threadId)),
                   ),
-              )
-            : yield* Effect.exit(
-                // The stored selection only seeds fresh threads. A bound run
-                // follows the thread's current provider, so it passes none.
-                sendBound(ThreadId.make(active.threadId), active.projectId, 2).pipe(
-                  Effect.as(ThreadId.make(active.threadId)),
-                ),
-              );
+                );
 
         const runSucceeded = result._tag === "Success";
         if (webhook !== undefined && runSucceeded) yield* Ref.set(webhook.dispatched, true);

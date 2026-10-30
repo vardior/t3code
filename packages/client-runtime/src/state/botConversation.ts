@@ -76,7 +76,7 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
   "waiting",
 ]);
 
-export function isActiveRunStatus(status: string | null | undefined): boolean {
+function isActiveRunStatus(status: string | null | undefined): boolean {
   return status != null && ACTIVE_RUN_STATUSES.has(status);
 }
 

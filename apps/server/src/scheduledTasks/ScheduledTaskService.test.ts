@@ -429,6 +429,7 @@ it.effect("a bound run follows its thread when promotion moves it mid-send", () 
     // read and the retry.
     const shellProjects = yield* Ref.make([promoted, scratch, promoted]);
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),

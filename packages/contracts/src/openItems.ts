@@ -7,7 +7,7 @@ import { IsoDateTime, OpenItemId, ThreadId, TrimmedNonEmptyString } from "./base
 
 export const OPEN_ITEM_MAX_OPEN_PER_THREAD = 20;
 export const OPEN_ITEM_MAX_RESOLVED_PER_THREAD = 10;
-export const OPEN_ITEM_MAX_OPTIONS = 4;
+const OPEN_ITEM_MAX_OPTIONS = 4;
 
 export const OpenItemTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(140));
 export const OpenItemDetail = TrimmedNonEmptyString.check(Schema.isMaxLength(600));
