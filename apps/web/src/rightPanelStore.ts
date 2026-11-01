@@ -106,6 +106,8 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
+  openItemIdsByThreadKey: Record<string, { ids: readonly string[]; keepVisible: boolean }>;
+  syncOpenItems: (ref: ScopedThreadRef, ids: readonly string[], keepVisible: boolean) => void;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
@@ -350,16 +352,23 @@ const updateThreadPanelVisibilityMap = (
 
 type RightPanelStoreData = Pick<
   RightPanelStoreState,
-  "byThreadKey" | "threadPanelVisibilityByThreadKey"
+  "byThreadKey" | "threadPanelVisibilityByThreadKey" | "openItemIdsByThreadKey"
 >;
 
 const updateThread = (
   state: RightPanelStoreData,
   threadKey: string,
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
-): RightPanelStoreData => {
+): Pick<RightPanelStoreData, "byThreadKey" | "threadPanelVisibilityByThreadKey"> => {
   const current = state.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
-  const byThreadKey = updateThreadStateMap(state.byThreadKey, threadKey, updater);
+  const outstanding = state.openItemIdsByThreadKey[threadKey];
+  const byThreadKey = updateThreadStateMap(state.byThreadKey, threadKey, (thread) => {
+    const next = updater(thread);
+    if (!outstanding?.keepVisible || outstanding.ids.length === 0) return next;
+    const activeExists = next.surfaces.some((surface) => surface.id === next.activeSurfaceId);
+    if (next.isOpen && next.surfaces.some((surface) => surface.id === "open-items")) return next;
+    return upsertSurface(next, singletonSurface("open-items"), !activeExists);
+  });
   const next = byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
   let threadPanelVisibilityByThreadKey = state.threadPanelVisibilityByThreadKey;
 
@@ -629,6 +638,26 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
     (set, get) => ({
       byThreadKey: {},
+      openItemIdsByThreadKey: {},
+      syncOpenItems: (ref, ids, keepVisible) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const previous = state.openItemIdsByThreadKey[threadKey];
+          const arrived = ids.some((id) => !previous?.ids.includes(id));
+          const next = {
+            ...state,
+            openItemIdsByThreadKey: {
+              ...state.openItemIdsByThreadKey,
+              [threadKey]: { ids, keepVisible },
+            },
+          };
+          return {
+            openItemIdsByThreadKey: next.openItemIdsByThreadKey,
+            ...automaticUpdate(next, threadKey, (current) =>
+              arrived ? upsertSurface(current, singletonSurface("open-items")) : current,
+            ),
+          };
+        }),
       pendingMaximizeThreadKey: null,
       requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
       consumeMaximizeRequest: (ref) => {
@@ -1141,10 +1170,13 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             !(threadKey in state.byThreadKey) &&
             !(threadKey in state.threadPanelVisibilityByThreadKey) &&
             !(threadKey in state.userActionRevisionByThreadKey) &&
-            !(threadKey in state.closeRevisionByThreadKey)
+            !(threadKey in state.closeRevisionByThreadKey) &&
+            !(threadKey in state.openItemIdsByThreadKey)
           ) {
             return state;
           }
+          const { [threadKey]: _openItems, ...openItemIdsByThreadKey } =
+            state.openItemIdsByThreadKey;
           const { [threadKey]: _removed, ...byThreadKey } = state.byThreadKey;
           const { [threadKey]: _visibility, ...threadPanelVisibilityByThreadKey } =
             state.threadPanelVisibilityByThreadKey;
@@ -1153,6 +1185,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           const { [threadKey]: _closeRevision, ...closeRevisionByThreadKey } =
             state.closeRevisionByThreadKey;
           return {
+            openItemIdsByThreadKey,
             byThreadKey,
             threadPanelVisibilityByThreadKey,
             userActionRevisionByThreadKey,

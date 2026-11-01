@@ -279,7 +279,7 @@ import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
 import { useSideChat } from "./chat/useSideChat";
 import type { ChatViewPresentation } from "./chatViewPresentation";
-import { hasUnseenOpenItem, openItemIds } from "@t3tools/client-runtime/state/open-items";
+import { openItemIds } from "@t3tools/client-runtime/state/open-items";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -384,7 +384,6 @@ const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_TURN_ITEMS: ThreadStructure["turnItems"] = [];
 const EMPTY_AUTO_UPDATE_ENVIRONMENTS: ReadonlyArray<EnvironmentPresentation> = [];
 const EMPTY_COMPOSER_BANNER_ITEMS: ReadonlyArray<ComposerBannerStackItem> = [];
-const seenOpenItemIdsByThreadKey = new Map<string, ReadonlySet<string>>();
 
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const EMPTY_BOT_TURN_DIFF_SUMMARIES: readonly never[] = [];
@@ -2383,21 +2382,17 @@ export default function ChatView(props: ChatViewProps) {
   };
   const addOpenItemsSurfaceStable = useStableCallback(addOpenItemsSurface);
   const activeOpenItems = activeThreadShell?.openItems;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the external right-panel store when unseen open items arrive
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- synchronizes unresolved items with the external right-panel store
   useEffect(() => {
-    if (activeThreadKey === null || activeThreadRef === null || activeOpenItems === undefined) {
-      return;
-    }
-    const seenIds = seenOpenItemIdsByThreadKey.get(activeThreadKey) ?? new Set<string>();
-    seenOpenItemIdsByThreadKey.set(activeThreadKey, openItemIds(activeOpenItems));
-    if (shouldUsePlanSidebarSheet || !hasUnseenOpenItem(seenIds, activeOpenItems)) return;
-    const panels = useRightPanelStore.getState();
-    panels.openProactive(
-      activeThreadRef,
-      { id: "open-items", kind: "open-items" },
-      panels.getUserActionRevision(activeThreadRef),
-    );
-  }, [activeOpenItems, activeThreadKey, activeThreadRef, shouldUsePlanSidebarSheet]);
+    if (embedded || activeThreadRef === null || activeOpenItems === undefined) return;
+    useRightPanelStore
+      .getState()
+      .syncOpenItems(
+        activeThreadRef,
+        [...openItemIds(activeOpenItems)],
+        !shouldUsePlanSidebarSheet,
+      );
+  }, [activeOpenItems, activeThreadRef, embedded, shouldUsePlanSidebarSheet]);
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
   const {
     acknowledgeActiveThreadWoke,

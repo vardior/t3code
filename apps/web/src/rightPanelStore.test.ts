@@ -23,6 +23,7 @@ beforeEach(() => {
   useClosedViewStore.setState({ entries: [] });
   useRightPanelStore.setState({
     byThreadKey: {},
+    openItemIdsByThreadKey: {},
     threadPanelVisibilityByThreadKey: {},
     userActionRevisionByThreadKey: {},
     closeRevisionByThreadKey: {},
@@ -40,6 +41,92 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
+  it("reveals unresolved arrivals without stealing focus for unchanged items", async () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "open-items");
+    store.close(refA);
+    await reloadRightPanelStore();
+    store.syncOpenItems(refA, ["first"], true);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "open-items",
+    );
+    store.openFile(refA, "notes.md");
+    store.syncOpenItems(refA, ["first"], true);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("file");
+    store.syncOpenItems(refA, ["first", "second"], true);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "open-items",
+    );
+    store.syncOpenItems(refA, ["second"], true);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refB)).toBeNull();
+    store.openFile(refA, "notes.md");
+    store.syncOpenItems(refA, [], true);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("file");
+    store.closeSurface(refA, "open-items");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toMatchObject([{ id: "file:notes.md" }]);
+  });
+
+  it.each([
+    { action: "close", close: () => useRightPanelStore.getState().close(refA) },
+    {
+      action: "toggle visibility",
+      close: () => useRightPanelStore.getState().toggleVisibility(refA),
+    },
+    { action: "toggle tab", close: () => useRightPanelStore.getState().toggle(refA, "open-items") },
+    {
+      action: "close tab",
+      close: () => useRightPanelStore.getState().closeSurface(refA, "open-items"),
+    },
+    { action: "close all", close: () => useRightPanelStore.getState().closeAllSurfaces(refA) },
+    {
+      action: "close others",
+      close: () => useRightPanelStore.getState().closeOtherSurfaces(refA, "diff"),
+    },
+    {
+      action: "close right",
+      close: () => useRightPanelStore.getState().closeSurfacesToRight(refA, "diff"),
+    },
+  ])(
+    "retains outstanding items through $action and releases after the last resolution",
+    ({ close }) => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.syncOpenItems(refA, ["first", "second"], true);
+      store.syncOpenItems(refA, ["second"], true);
+      close();
+      const retained = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+      expect(retained.isOpen).toBe(true);
+      expect(retained.surfaces).toContainEqual({ id: "open-items", kind: "open-items" });
+      store.syncOpenItems(refA, [], true);
+      close();
+      store.close(refA);
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+      ).toBe(false);
+    },
+  );
+
+  it("allows dismissing narrow sheets and releases retention when switching to a sheet", () => {
+    const store = useRightPanelStore.getState();
+    store.syncOpenItems(refA, ["first"], true);
+    store.syncOpenItems(refA, ["first"], false);
+    store.close(refA);
+    store.syncOpenItems(refA, ["first"], false);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
+    store.syncOpenItems(refA, ["first", "second"], false);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "open-items",
+    );
+    store.closeAllSurfaces(refA);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
+    store.syncOpenItems(refA, ["first", "second"], true);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "open-items",
+    );
+  });
+
   it("opens a hosted side chat's panel actions in its parent's panel until unhosted", () => {
     const store = useRightPanelStore.getState();
     const unhost = hostRightPanel(refB, refA);
