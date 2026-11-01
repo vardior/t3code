@@ -6051,8 +6051,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       } else if (
         command.deliveryIntent === "auto" &&
         projection.messages.some(
-          (message) =>
-            message.id === target?.userMessageId && isNativeMaintenanceCommand(message),
+          (message) => message.id === target?.userMessageId && isNativeMaintenanceCommand(message),
         )
       ) {
         dispatchMode = { type: "queue_after_active" };

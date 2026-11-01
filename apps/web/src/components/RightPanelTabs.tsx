@@ -700,7 +700,7 @@ function SurfaceIcon({
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "side-chat":
-      return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />
+      return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
     case "open-items":
       return <ListTodo className="size-3 shrink-0" />;
     case "device":
