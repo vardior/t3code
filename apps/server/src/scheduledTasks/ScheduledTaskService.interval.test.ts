@@ -22,6 +22,7 @@ import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 afterEach(() => vi.unstubAllEnvs());
 
 const dependencies = Layer.mergeAll(
+  NodeServices.layer,
   NodeCrypto.layer,
   Scheduler.layer,
   ManagedPolicy.layerTest(),
@@ -35,10 +36,7 @@ const dependencies = Layer.mergeAll(
   Layer.mock(ThreadManagementService.ThreadManagementService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
 );
-const serviceLayer = ScheduledTaskService.layer.pipe(
-  Layer.provide(dependencies),
-  Layer.provide(NodeServices.layer),
-);
+const serviceLayer = ScheduledTaskService.layer.pipe(Layer.provide(dependencies));
 const decodeInput = Schema.decodeUnknownEffect(ScheduledTaskUpsertInput);
 const input = {
   commandId: "interval-duration",
@@ -239,7 +237,7 @@ it.effect.each([
       yield* Effect.gen(function* () {
         const service = yield* ScheduledTaskService.ScheduledTaskService;
         const worktree = { type: "worktree", baseRef: "main" };
-        yield* service.upsert(
+        const created = yield* service.upsert(
           yield* decodeInput({
             ...onceInput,
             schedule: saved,
@@ -249,6 +247,7 @@ it.effect.each([
         const renamed = yield* service.upsert(
           yield* decodeInput({
             ...onceInput,
+            id: created.task.id,
             schedule: edited,
             workspaceStrategy: worktree,
             title: "Renamed",

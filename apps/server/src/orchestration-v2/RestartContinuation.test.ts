@@ -1440,7 +1440,7 @@ it.effect("re-sends the user's message when an automatic run wins the race to re
     assert.deepEqual(sentMessages(commands), [
       [
         MessageId.make(`message:restart-continuation:${runId}`),
-        "Continue where you left off.",
+        "Continue where you left off. Your last turn was cut short, so a command or other action it started may have finished or may still be running. Before you repeat one that changes state, confirm it did not take effect and is not still running; if you cannot tell, say so instead of repeating it.",
         runId,
       ],
       [MessageId.make(`message:restart-resend:${runId}`), userQuestion.text, undefined],
