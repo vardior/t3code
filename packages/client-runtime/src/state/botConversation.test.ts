@@ -617,7 +617,7 @@ describe("buildBotChat background replies", () => {
     ).toEqual(["you", "bot"]);
   });
 
-  it("shows the latest reply of an owner request that continues on background completions", () => {
+  it("keeps completed answers when an owner request continues on background completions", () => {
     const completion = (id: string, runId: string, createdAt: string) => ({
       ...message({
         id,
@@ -639,14 +639,14 @@ describe("buildBotChat background replies", () => {
       role: "user",
       runId: "run-ask",
       createdAt: "2026-10-01T00:01:00Z",
-      text: "Write the one-pager",
+      text: "Verify deployment and design provisioning",
     });
-    const holding = message({
-      id: "holding",
+    const designAnswer = message({
+      id: "designAnswer",
       role: "assistant",
       runId: "run-ask",
       createdAt: "2026-10-01T00:02:00Z",
-      text: "Holding the draft until the check finishes",
+      text: "Provisioning design: use a dedicated workspace",
     });
     const autoCompact = message({
       id: "auto-compact",
@@ -662,7 +662,7 @@ describe("buildBotChat background replies", () => {
       role: "assistant",
       runId: "run-done",
       createdAt: "2026-10-01T00:05:00Z",
-      text: "Here is the one-pager",
+      text: "Deployment verified",
     });
     const tick = { ...prompt, createdAt: at("2026-10-01T00:06:00Z") };
     const tickCompletion = completion("tick-done", "run-tick-done", "2026-10-01T00:08:00Z");
@@ -679,7 +679,7 @@ describe("buildBotChat background replies", () => {
         runs,
         messages: [
           ask,
-          holding,
+          designAnswer,
           autoCompact,
           completion("done", "run-done", "2026-10-01T00:04:00Z"),
           delivered,
@@ -690,12 +690,13 @@ describe("buildBotChat background replies", () => {
       }).map((item) => [item.kind, "text" in item ? item.text : null]);
 
     expect(chat([])).toEqual([
-      ["you", "Write the one-pager"],
-      ["bot", "Here is the one-pager"],
+      ["you", "Verify deployment and design provisioning"],
+      ["bot", "Provisioning design: use a dedicated workspace"],
+      ["bot", "Deployment verified"],
     ]);
     expect(chat([{ id: RunId.make("run-done"), status: "running" }])).toEqual([
-      ["you", "Write the one-pager"],
-      ["bot", "Holding the draft until the check finishes"],
+      ["you", "Verify deployment and design provisioning"],
+      ["bot", "Provisioning design: use a dedicated workspace"],
     ]);
 
     const taskResult = {
@@ -721,9 +722,24 @@ describe("buildBotChat background replies", () => {
       buildBotChat({
         ...input,
         runs: [],
-        messages: [ask, holding, tick, tickReply, taskResult, summary],
+        messages: [
+          ask,
+          designAnswer,
+          completion("done", "run-done", "2026-10-01T00:04:00Z"),
+          delivered,
+          tick,
+          tickCompletion,
+          tickReply,
+          taskResult,
+          summary,
+        ],
       }).map((item) => ("text" in item ? item.text : null)),
-    ).toEqual(["Write the one-pager", "Meeting summary"]);
+    ).toEqual([
+      "Verify deployment and design provisioning",
+      "Provisioning design: use a dedicated workspace",
+      "Deployment verified",
+      "Meeting summary",
+    ]);
   });
 
   it("keeps the answer to an owner request when a watch update follows", () => {

@@ -324,11 +324,8 @@ export function buildBotChat(input: {
     if (message.role !== "assistant" || message.streaming || message.runId === null) continue;
     if (!activeRunIds.has(message.runId)) finalReplyByRun.set(message.runId, message);
   }
-  const latestReplyRunIds = ownerRequests.flatMap(
-    (runIds) =>
-      runIds.findLast((runId) => !compactRunIds.has(runId) && finalReplyByRun.has(runId)) ?? [],
-  );
-  const replies = [...new Set([...latestReplyRunIds, ...notifiedRunIds])].flatMap((runId) =>
+  const ownerReplyRunIds = ownerRequests.flat();
+  const replies = [...new Set([...ownerReplyRunIds, ...notifiedRunIds])].flatMap((runId) =>
     compactRunIds.has(runId) ? [] : (finalReplyByRun.get(runId) ?? []),
   );
 
