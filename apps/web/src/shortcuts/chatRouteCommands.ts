@@ -97,6 +97,19 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
   const canOperatePreview = (environmentId: EnvironmentId) =>
     readEnvironmentScope(environmentId, AuthPreviewOperateScope);
 
+  const readContext = () => {
+    const threadRef = readRouteThreadRef();
+    return {
+      terminalOpen: threadRef
+        ? selectThreadTerminalUiState(
+            useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+            threadRef,
+          ).terminalOpen
+        : false,
+      previewOpen: readPreviewOpen(),
+    };
+  };
+
   const claim = (event: KeyboardEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -118,7 +131,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       if (threadRef && canOperatePreview(threadRef.environmentId)) dispatchPreviewAction(action);
     };
 
-  return registerCommands(
+  const unregisterNewThreadCommands = registerCommands(
     {
       "chat.newLocal": startNewLocal,
       "chat.newWithoutProject": (event) => {
@@ -145,6 +158,20 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         }
         startNewLocal(event);
       },
+    },
+    {
+      when: () =>
+        router.state.matches.some(
+          (match) => match.routeId === CHAT_ROUTE_ID || match.routeId === "/bots",
+        ) &&
+        !router.state.matches.some((match) => isAppModalPage(match.pathname)) &&
+        !isCommandPaletteOpen(),
+      context: readContext,
+    },
+  );
+
+  const unregisterChatCommands = registerCommands(
+    {
       "preview.toggle": (event) => {
         claim(event);
         const threadRef = readRouteThreadRef();
@@ -174,18 +201,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         router.state.matches.some((match) => match.routeId === CHAT_ROUTE_ID) &&
         !router.state.matches.some((match) => isAppModalPage(match.pathname)) &&
         !isCommandPaletteOpen(),
-      context: () => {
-        const threadRef = readRouteThreadRef();
-        return {
-          terminalOpen: threadRef
-            ? selectThreadTerminalUiState(
-                useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
-                threadRef,
-              ).terminalOpen
-            : false,
-          previewOpen: readPreviewOpen(),
-        };
-      },
+      context: readContext,
       onKeyDown: (event) => {
         if (event.key !== "Escape") return false;
         const selection = useThreadSelectionStore.getState();
@@ -195,4 +211,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       },
     },
   );
+
+  return () => {
+    unregisterNewThreadCommands();
+    unregisterChatCommands();
+  };
 }
