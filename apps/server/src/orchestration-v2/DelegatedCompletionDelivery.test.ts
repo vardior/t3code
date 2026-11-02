@@ -1699,7 +1699,9 @@ it.effect.each([
       ...parent.providerThreads[0]!,
       id: ProviderThreadId.make(`provider-thread:settlement-child-${transition}`),
       appThreadId: child.childThreadId,
-      pendingBackgroundTasks: [{ taskId: "background-command", kind: "command" as const }],
+      pendingBackgroundTasks: [
+        { taskId: "background-command", kind: "command" as const, awaited: true as const },
+      ],
     };
     const parentRun = parent.runs.find((row) => row.id === parentRunId)!;
     yield* eventSink.write({

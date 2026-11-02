@@ -1,3 +1,4 @@
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -82,7 +83,10 @@ it.effect(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             Layer.provideMerge(
-              ScheduledTaskService.layer.pipe(Layer.provide(NodeServices.layer)),
+              ScheduledTaskService.layer.pipe(
+                Layer.provide(ManagedPolicy.layerTest()),
+                Layer.provide(NodeServices.layer),
+              ),
               Layer.mergeAll(
                 Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
                   namedProjectsRoot: "/projects",
@@ -187,6 +191,7 @@ it.effect("an edit that omits the check command keeps it, and null removes it", 
   }).pipe(
     Effect.provide(
       ScheduledTaskService.layer.pipe(
+        Layer.provide(ManagedPolicy.layerTest()),
         Layer.provide(NodeServices.layer),
         Layer.provide(
           Layer.mergeAll(
@@ -224,6 +229,7 @@ it.effect("Run now starts the turn even when the check is quiet", () =>
     }).pipe(
       Effect.provide(
         ScheduledTaskService.layer.pipe(
+          Layer.provide(ManagedPolicy.layerTest()),
           Layer.provide(NodeServices.layer),
           Layer.provide(
             Layer.mergeAll(
@@ -266,6 +272,7 @@ it.effect("an approval-required task fails without executing its check", () =>
     }).pipe(
       Effect.provide(
         ScheduledTaskService.layer.pipe(
+          Layer.provide(ManagedPolicy.layerTest()),
           Layer.provide(
             Layer.mergeAll(
               NodeServices.layer,
@@ -357,6 +364,7 @@ it.effect(
       }).pipe(
         Effect.provide(
           ScheduledTaskService.layer.pipe(
+            Layer.provide(ManagedPolicy.layerTest()),
             Layer.provide(
               Layer.mergeAll(
                 NodeServices.layer,
@@ -423,6 +431,7 @@ it.effect("a task paused during its check does not dispatch or record a wake", (
     }).pipe(
       Effect.provide(
         ScheduledTaskService.layer.pipe(
+          Layer.provide(ManagedPolicy.layerTest()),
           Layer.provide(
             Layer.mergeAll(
               NodeServices.layer,

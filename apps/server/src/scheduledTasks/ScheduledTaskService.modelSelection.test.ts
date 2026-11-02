@@ -1,3 +1,4 @@
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -166,6 +167,13 @@ it.effect(
         assert.equal((yield* service.runNow({ id: unbound.id })).task.lastRunStatus, "succeeded");
         assert.deepEqual(launches[0]?.modelSelection, storedSelection);
         assert.deepEqual(launches[0]?.workspaceStrategy, input.workspaceStrategy);
-      }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(ManagedPolicy.layerTest()),
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDatabase, layerOrchestrator))),
 );

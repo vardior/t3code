@@ -1,3 +1,4 @@
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../peer/PeerLinkRequests.ts";
 import * as PeerLinks from "../peer/PeerLinks.ts";
@@ -59,6 +60,7 @@ const fromJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown
 const testLayer = Layer.mergeAll(SqlitePersistence.layerMemory, NodeServices.layer);
 
 const scheduledTasksLayer = ScheduledTaskService.layer.pipe(
+  Layer.provide(ManagedPolicy.layerTest()),
   Layer.provide(
     Layer.mergeAll(
       NodeCrypto.layer,
