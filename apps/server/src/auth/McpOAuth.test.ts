@@ -177,8 +177,8 @@ const register = (handler: Handler, redirect = REDIRECT) =>
     }),
   );
 
-const registeredClientId = (handler: Handler) =>
-  register(handler).pipe(
+const registeredClientId = (handler: Handler, redirect = REDIRECT) =>
+  register(handler, redirect).pipe(
     Effect.flatMap((response) => json<{ client_id: string }>(response)),
     Effect.map((body) => body.client_id),
   );
@@ -224,6 +224,12 @@ it.live("registers loopback and https clients and never redirects for an unverif
         "https://bot.example/callback#",
         "http://localhost/callback#",
         "javascript:alert(1)",
+        "claude://other.example/mcp-auth-callback/sdk",
+        "claude://claude.ai/mcp-auth-callback/other",
+        "claude://claude.ai/mcp-auth-callback/sdk?other=1",
+        "claude://user@claude.ai/mcp-auth-callback/sdk",
+        "claude://claude.ai:1234/mcp-auth-callback/sdk",
+        "claude://claude.ai/mcp-auth-callback/sdk#",
       ]) {
         const response = yield* register(handler, refused);
         expect(response.status).toBe(400);
@@ -349,99 +355,122 @@ it.live("signs in with a pairing code and issues a token only /mcp accepts", () 
   ),
 );
 
-it.live("signs in a hosted agent with an https callback that asked for a client secret", () =>
-  withRoutes((handler, auth) =>
-    Effect.gen(function* () {
-      const callbackUrl = "https://bot.example/oauth/callback";
-      const registered = yield* handler(
-        at("/oauth/mcp/register", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: encodeJson({
-            client_name: "Hosted bot",
-            redirect_uris: [callbackUrl],
-            token_endpoint_auth_method: "client_secret_post",
+it.live.each(["https://bot.example/oauth/callback", "claude://claude.ai/mcp-auth-callback/sdk"])(
+  "signs in a client with exact callback %s and optional client secret",
+  (callbackUrl) =>
+    withRoutes((handler, auth) =>
+      Effect.gen(function* () {
+        const registered = yield* handler(
+          at("/oauth/mcp/register", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: encodeJson({
+              client_name: "Hosted bot",
+              redirect_uris: [callbackUrl],
+              token_endpoint_auth_method: "client_secret_post",
+            }),
           }),
-        }),
-      );
-      expect(registered.status).toBe(201);
-      const client = (yield* json<unknown>(registered)) as {
-        client_id: string;
-        token_endpoint_auth_method: string;
-      };
-      expect(client.token_endpoint_auth_method).toBe("none");
+        );
+        expect(registered.status).toBe(201);
+        const client = (yield* json<unknown>(registered)) as {
+          client_id: string;
+          token_endpoint_auth_method: string;
+        };
+        expect(client.token_endpoint_auth_method).toBe("none");
 
-      const params = authorizeParams(client.client_id, callbackUrl);
-      const details = yield* handler(postJson("/oauth/mcp/approval", params)).pipe(
-        Effect.flatMap(json<Record<string, unknown>>),
-      );
-      expect(details).toMatchObject({ clientName: "Hosted bot", redirectHost: "bot.example" });
+        const params = authorizeParams(client.client_id, callbackUrl);
+        const details = yield* handler(postJson("/oauth/mcp/approval", params)).pipe(
+          Effect.flatMap(json<Record<string, unknown>>),
+        );
+        expect(details).toMatchObject({
+          clientName: "Hosted bot",
+          redirectHost: new URL(callbackUrl).host,
+        });
 
-      const pairing = yield* auth.issuePairingCredential();
-      const approved = yield* decide(handler, params, {
-        _tag: "pairing-code",
-        access: "approval-required",
-        code: pairing.credential,
-      });
-      const callback = new URL(approved.redirectTo!);
-      expect(`${callback.origin}${callback.pathname}`).toBe(callbackUrl);
+        const pairing = yield* auth.issuePairingCredential();
+        const approved = yield* decide(handler, params, {
+          _tag: "pairing-code",
+          access: "approval-required",
+          code: pairing.credential,
+        });
+        const callback = new URL(approved.redirectTo!);
+        expect(`${callback.protocol}//${callback.host}${callback.pathname}`).toBe(callbackUrl);
+        expect(callback.searchParams.get("state")).toBe("state-1");
+        expect(callback.searchParams.get("iss")).toBe(ORIGIN);
+        expect(McpOAuth.redirectMatches(callbackUrl, `${callbackUrl}?other=1`)).toBe(false);
+        const wrongPort = new URL(callbackUrl);
+        wrongPort.port = "1234";
+        expect(McpOAuth.redirectMatches(callbackUrl, wrongPort.href)).toBe(false);
 
-      const tokenResponse = yield* handler(
-        at(
-          "/oauth/mcp/token",
-          form({
-            grant_type: "authorization_code",
-            code: callback.searchParams.get("code")!,
-            redirect_uri: callbackUrl,
-            client_id: client.client_id,
-            client_secret: "unused",
-            code_verifier: verifier,
-          }),
-        ),
-      );
-      expect(tokenResponse.status).toBe(200);
-      const token = (yield* json<unknown>(tokenResponse)) as { access_token: string };
-      const signedIn = yield* auth.authenticateMcpClient(
-        HttpServerRequest.fromWeb(
-          at("/mcp", { headers: { authorization: `Bearer ${token.access_token}` } }),
-        ),
-      );
-      expect(signedIn).toMatchObject({ label: "Hosted bot", access: "approval-required" });
-    }),
-  ),
-);
-
-it.live("rejects a wrong PKCE verifier and spends the code", () =>
-  withRoutes((handler, auth) =>
-    Effect.gen(function* () {
-      const clientId = yield* registeredClientId(handler);
-      const pairing = yield* auth.issuePairingCredential();
-      const params = authorizeParams(clientId);
-      const approved = yield* decide(handler, params, {
-        _tag: "pairing-code",
-        access: "approval-required",
-        code: pairing.credential,
-      });
-      const code = new URL(approved.redirectTo!).searchParams.get("code")!;
-      const exchange = (codeVerifier: string) =>
-        handler(
+        const tokenResponse = yield* handler(
           at(
             "/oauth/mcp/token",
             form({
               grant_type: "authorization_code",
-              code,
-              redirect_uri: params.redirect_uri,
-              client_id: clientId,
-              code_verifier: codeVerifier,
+              code: callback.searchParams.get("code")!,
+              redirect_uri: callbackUrl,
+              client_id: client.client_id,
+              client_secret: "unused",
+              code_verifier: verifier,
             }),
           ),
         );
-      const wrong = yield* exchange("b".repeat(64));
-      expect(wrong.status).toBe(400);
-      expect(yield* json<unknown>(wrong)).toMatchObject({ error: "invalid_grant" });
-      expect((yield* exchange(verifier)).status).toBe(400);
-    }),
-  ),
+        expect(tokenResponse.status).toBe(200);
+        const token = (yield* json<unknown>(tokenResponse)) as { access_token: string };
+        const signedIn = yield* auth.authenticateMcpClient(
+          HttpServerRequest.fromWeb(
+            at("/mcp", { headers: { authorization: `Bearer ${token.access_token}` } }),
+          ),
+        );
+        expect(signedIn).toMatchObject({ label: "Hosted bot", access: "approval-required" });
+      }),
+    ),
+);
+
+it.live.each([REDIRECT, "claude://claude.ai/mcp-auth-callback/sdk"])(
+  "rejects wrong PKCE, client and redirect bindings for %s and spends the code",
+  (redirect) =>
+    withRoutes((handler, auth) =>
+      Effect.gen(function* () {
+        const clientId = yield* registeredClientId(handler, redirect);
+        const otherClientId = yield* registeredClientId(handler, "https://other.example/callback");
+        for (const [key, value] of [
+          ["code_verifier", "b".repeat(64)],
+          ["client_id", otherClientId],
+          ["redirect_uri", `${redirect}?other=1`],
+        ] as const) {
+          const pairing = yield* auth.issuePairingCredential();
+          const params = authorizeParams(
+            clientId,
+            redirect === REDIRECT ? "http://localhost:51234/callback" : redirect,
+          );
+          const approved = yield* decide(handler, params, {
+            _tag: "pairing-code",
+            access: "approval-required",
+            code: pairing.credential,
+          });
+          const code = new URL(approved.redirectTo!).searchParams.get("code")!;
+          const exchange = (binding: Record<string, string>) =>
+            handler(
+              at(
+                "/oauth/mcp/token",
+                form({
+                  grant_type: "authorization_code",
+                  code,
+                  redirect_uri: params.redirect_uri,
+                  client_id: clientId,
+                  code_verifier: verifier,
+                  ...binding,
+                }),
+              ),
+            );
+          const wrong = yield* exchange({ [key]: value });
+          expect(wrong.status).toBe(400);
+          expect(yield* json<unknown>(wrong)).toMatchObject({ error: "invalid_grant" });
+          expect((yield* exchange({})).status).toBe(400);
+        }
+      }),
+    ),
 );
 
 it.live(

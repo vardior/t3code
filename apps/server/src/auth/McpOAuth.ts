@@ -107,6 +107,7 @@ const parseRedirect = (value: string): URL | undefined => {
   try {
     const url = new URL(value);
     const allowed =
+      value === "claude://claude.ai/mcp-auth-callback/sdk" ||
       url.protocol === "https:" ||
       (url.protocol === "http:" && LOOPBACK_HOSTNAMES.has(url.hostname));
     return allowed && url.username === "" && url.password === "" ? url : undefined;
@@ -115,12 +116,11 @@ const parseRedirect = (value: string): URL | undefined => {
   }
 };
 
-/** Loopback redirects ignore port (RFC 8252 §7.3); HTTPS redirects match exactly. */
 export const redirectMatches = (registered: string, presented: string): boolean => {
   const left = parseRedirect(registered);
   const right = parseRedirect(presented);
   if (left === undefined || right === undefined) return false;
-  if (left.protocol === "https:" || right.protocol === "https:") return left.href === right.href;
+  if (left.protocol !== "http:" || right.protocol !== "http:") return left.href === right.href;
   return (
     left.hostname === right.hostname &&
     left.pathname === right.pathname &&
@@ -336,7 +336,7 @@ const make = Effect.gen(function* () {
         return yield* new AuthMcpRegistrationError({
           error: "invalid_redirect_uri",
           error_description:
-            "Redirect URIs must be https, or http on localhost, 127.0.0.1 or [::1].",
+            "Redirect URIs must be https, http on localhost, 127.0.0.1 or [::1], or claude://claude.ai/mcp-auth-callback/sdk.",
         });
       }
       // RFC 7591 allows ignoring unsupported registration options; all clients use public PKCE.
