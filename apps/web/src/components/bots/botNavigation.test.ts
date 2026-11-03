@@ -1,9 +1,18 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   parseBotsSearch,
+  parseBotsSidebarSearch,
+  pinnedThreadDestination,
+  isBotsSidebarLocation,
   resolveBotSelection,
   resolveThreadDestination,
   shouldSuppressThreadNotification,
@@ -66,5 +75,51 @@ describe("bot notification suppression", () => {
   it("suppresses known non-bots only when agent notifications are disabled", () => {
     expect(shouldSuppressThreadNotification(false, [], "worker")).toBe(true);
     expect(shouldSuppressThreadNotification(true, [], "worker")).toBe(false);
+  });
+});
+
+describe("pinned thread navigation", () => {
+  it("retains Bots context through direct load and removes it for ordinary thread navigation", async () => {
+    const root = createRootRoute();
+    const thread = createRoute({
+      getParentRoute: () => root,
+      path: "/$environmentId/$threadId",
+      validateSearch: parseBotsSidebarSearch,
+    });
+    const router = createRouter({
+      routeTree: root.addChildren([thread]),
+      history: createMemoryHistory({ initialEntries: ["/relay/worker?sidebar=bots"] }),
+    });
+    await router.load();
+    expect(isBotsSidebarLocation(router.state.location)).toBe(true);
+    await router.navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "relay", threadId: "worker" },
+      search: {},
+    });
+    expect(isBotsSidebarLocation(router.state.location)).toBe(false);
+    await router.navigate(
+      pinnedThreadDestination(scopeThreadRef(EnvironmentId.make("ssh"), threadId)),
+    );
+    expect(router.state.location.href).toBe("/ssh/home?sidebar=bots");
+    expect(isBotsSidebarLocation(router.state.location)).toBe(true);
+  });
+
+  it("keeps the standard environment-qualified thread route in Bots context", () => {
+    const ref = scopeThreadRef(EnvironmentId.make("relay"), ThreadId.make("worker"));
+    expect(pinnedThreadDestination(ref)).toEqual({
+      to: "/$environmentId/$threadId",
+      params: ref,
+      search: { sidebar: "bots" },
+    });
+    expect(parseBotsSidebarSearch({ sidebar: "bots", bot: "ignored" })).toEqual({
+      sidebar: "bots",
+    });
+    expect(parseBotsSidebarSearch({ sidebar: "threads" })).toEqual({});
+    expect(isBotsSidebarLocation({ pathname: "/relay/worker", search: { sidebar: "bots" } })).toBe(
+      true,
+    );
+    expect(isBotsSidebarLocation({ pathname: "/relay/worker", search: {} })).toBe(false);
+    expect(isBotsSidebarLocation({ pathname: "/bots", search: {} })).toBe(true);
   });
 });

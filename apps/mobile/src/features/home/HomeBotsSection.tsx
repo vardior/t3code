@@ -1,5 +1,6 @@
 import {
   botThreadShellStatus,
+  pinnedBotMenuThreads,
   botThreadShellStatusLabel,
   botNeedsYou,
 } from "@t3tools/client-runtime/state/bot-conversation";
@@ -22,6 +23,8 @@ export function HomeBotsSection(props: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly environmentLabels: ReadonlyMap<string, string>;
   readonly now: number;
+  readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
+  readonly searchQuery: string;
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
   const shells = useMemo(
@@ -48,7 +51,9 @@ export function HomeBotsSection(props: {
       bots: entries.map((entry) => entry.bot),
     }));
   }, [props.bots.bots]);
-  if (props.bots.bots.length === 0 && props.bots.errors.length === 0) return null;
+  const pins = pinnedBotMenuThreads(props.threads, props.bots.bots, props.searchQuery);
+  if (props.bots.bots.length === 0 && props.bots.errors.length === 0 && pins.length === 0)
+    return null;
   return (
     <View className="mb-4 px-4">
       <Text
@@ -97,6 +102,33 @@ export function HomeBotsSection(props: {
           )}
         />
       ))}
+      {pins.length > 0 ? (
+        <View>
+          <Text
+            accessibilityRole="header"
+            className="px-1 pt-4 pb-2 text-sm font-t3-medium text-foreground-muted"
+          >
+            Pinned threads
+          </Text>
+          {pins.map((thread) => (
+            <Pressable
+              key={scopedThreadKey(thread.environmentId, thread.id)}
+              accessibilityRole="button"
+              className="border-b border-border-subtle px-1 py-3 active:opacity-70"
+              onPress={() => props.onSelectThread(thread)}
+            >
+              <Text numberOfLines={1} className="text-base font-t3-medium text-foreground">
+                {thread.title}
+              </Text>
+              {props.environmentLabels.size > 1 ? (
+                <Text className="text-sm text-foreground-muted">
+                  {props.environmentLabels.get(thread.environmentId) ?? thread.environmentId}
+                </Text>
+              ) : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -1,4 +1,5 @@
 import { BotsDataProvider } from "./bots/BotsDataProvider";
+import { isBotsSidebarLocation } from "./bots/botNavigation";
 import { BotsSidebar } from "./bots/BotsSidebar";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -441,7 +442,12 @@ function AppSidebarLayoutContent({
   const pathname = useLocation({ select: (location) => location.pathname });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
-  const isOnBots = pathname === "/bots";
+  const botsSidebarLocation = useLocation({ select: isBotsSidebarLocation });
+  const [backgroundBotsSidebar, setBackgroundBotsSidebar] = useState(botsSidebarLocation);
+  if (!isAppModalPage(pathname) && backgroundBotsSidebar !== botsSidebarLocation) {
+    setBackgroundBotsSidebar(botsSidebarLocation);
+  }
+  const isOnBots = isAppModalPage(pathname) ? backgroundBotsSidebar : botsSidebarLocation;
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // A clamped drag may not change width, so viewport changes need a separate subscription.

@@ -51,3 +51,24 @@ export function shouldSuppressThreadNotification(
     !notifyAgentThreads && bots !== undefined && !bots.some((bot) => bot.homeThreadId === threadId)
   );
 }
+
+export function parseBotsSidebarSearch(raw: Record<string, unknown>): { sidebar?: "bots" } {
+  return raw.sidebar === "bots" ? { sidebar: "bots" } : {};
+}
+
+export function isBotsSidebarLocation(location: {
+  readonly pathname: string;
+  readonly search: Record<string, unknown>;
+}) {
+  return (
+    location.pathname === "/bots" || parseBotsSidebarSearch(location.search).sidebar === "bots"
+  );
+}
+
+export function pinnedThreadDestination(threadRef: ScopedThreadRef) {
+  return {
+    to: "/$environmentId/$threadId" as const,
+    params: threadRef,
+    search: { sidebar: "bots" as const },
+  };
+}

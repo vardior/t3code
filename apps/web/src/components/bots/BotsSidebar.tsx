@@ -17,14 +17,19 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { countOpenItems } from "@t3tools/client-runtime/state/open-items";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import type { BotSummary, EnvironmentId } from "@t3tools/contracts";
-import { useLocation, useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon } from "lucide-react";
-import { useMemo, useRef, useState, useEffect } from "react";
+import type { BotSummary, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { ArrowLeftIcon, PinIcon, PinOffIcon } from "lucide-react";
+import { useRef, useState, useEffect } from "react";
 import {
   resolveBotListOrder,
+  pinnedBotMenuThreads,
   botThreadShellStatus,
   botThreadShellStatusLabel,
   botNeedsYou,
@@ -33,6 +38,8 @@ import {
 
 import { isElectron } from "../../env";
 import { openCommandPalette } from "../../commandPaletteBus";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useThreadActions } from "../../hooks/useThreadActions";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { cn } from "../../lib/utils";
 import { startNewThreadFromContext } from "../../lib/chatThreadActions";
@@ -44,22 +51,20 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { SidebarChromeHeader, SidebarChromeFooter } from "../sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "../sidebar/SidebarThreadHeader";
 import { useNavigateToMainApp } from "../sidebar/mainAppLocation";
+import { toastManager } from "../ui/toast";
 import { Button } from "../ui/button";
 import { SidebarContent, SidebarGroup, useSidebar } from "../ui/sidebar";
 import { BotAvatar } from "./BotAvatar";
 import { useBotsData } from "./BotsDataProvider";
 import { BotsState } from "./BotsState";
-import { parseBotsSearch, resolveBotSelection } from "./botNavigation";
+import { parseBotsSearch, resolveBotSelection, pinnedThreadDestination } from "./botNavigation";
 import type { useEnvironmentBots } from "./useEnvironmentBots";
 
 export function BotsSidebar() {
   const { bots, queries } = useBotsData();
   const { environments } = useEnvironments();
   const threads = useThreadShells();
-  const shells = useMemo(
-    () => new Map(threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread])),
-    [threads],
-  );
+  const shells = new Map(threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]));
   const projects = useProjects();
   const newThreadContext = useHandleNewThread();
   const navigate = useNavigate();
@@ -68,6 +73,20 @@ export function BotsSidebar() {
   const search = useLocation({ select: (location) => parseBotsSearch(location.search) });
   const selected = resolveBotSelection(bots, search);
   const [query, setQuery] = useState("");
+  const pinnedThreads = pinnedBotMenuThreads(threads, bots, query);
+  const { confirmAndUnpinThread } = useThreadActions();
+  const activeThread = useParams({ strict: false });
+  const unpin = async (ref: ScopedThreadRef) => {
+    const result = await confirmAndUnpinThread(ref);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Failed to unpin thread",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    }
+  };
   const searchInputRef = useRef<HTMLInputElement>(null);
   const showEnvironmentLabels = new Set(bots.map((entry) => entry.environmentId)).size > 1;
   const closeMobileSidebar = () => {
@@ -125,7 +144,7 @@ export function BotsSidebar() {
               showNewThreadInProjectHint={projects.length > 1}
               searchInputRef={searchInputRef}
               searchQuery={query}
-              searchLabel="Search bots"
+              searchLabel="Search bots and pinned threads"
               onSearchQueryChange={setQuery}
               onSearchKeyDown={(event) => {
                 if (event.key === "Escape" && query.length > 0) {
@@ -186,6 +205,61 @@ export function BotsSidebar() {
             }}
           />
         ))}
+        {pinnedThreads.length > 0 ? (
+          <SidebarGroup>
+            <h2 className="px-3 py-2 text-xs font-medium text-muted-foreground">Pinned threads</h2>
+            {pinnedThreads.map((thread) => {
+              const ref = scopeThreadRef(thread.environmentId, thread.id);
+              const destination = pinnedThreadDestination(ref);
+              return (
+                <div
+                  key={`${thread.environmentId}:${thread.id}`}
+                  className="flex items-center gap-1"
+                >
+                  <button
+                    type="button"
+                    aria-current={
+                      activeThread.environmentId === thread.environmentId &&
+                      activeThread.threadId === thread.id
+                        ? "page"
+                        : undefined
+                    }
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-3 text-left hover:bg-accent/60",
+                      activeThread.environmentId === thread.environmentId &&
+                        activeThread.threadId === thread.id &&
+                        "bg-accent",
+                    )}
+                    onClick={() => {
+                      closeMobileSidebar();
+                      void navigate(destination);
+                    }}
+                  >
+                    <PinIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{thread.title}</span>
+                      {environments.length > 1 ? (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {environments.find(
+                            (entry) => entry.environmentId === thread.environmentId,
+                          )?.label ?? thread.environmentId}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Unpin ${thread.title}`}
+                    onClick={() => void unpin(ref)}
+                  >
+                    <PinOffIcon />
+                  </Button>
+                </div>
+              );
+            })}
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
       <SidebarChromeFooter />
     </>
@@ -220,6 +294,7 @@ function BotListItem(props: {
   const statusLabel = botStatusLabel({ paused: props.bot.paused, lastActivity });
   const wasWorking = useRef(working);
   const refresh = props.refresh;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refresh server bot data when its thread run settles
   useEffect(() => {
     if (wasWorking.current && !working) refresh();
     wasWorking.current = working;

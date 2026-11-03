@@ -587,8 +587,10 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
 
   const botsHeader = (
     <HomeBotsSection
+      searchQuery={props.searchQuery}
+      onSelectThread={handleSelectThread}
       bots={homeBots}
-      threads={allThreads}
+      threads={allThreads.filter((thread) => searchEnvironmentIds.includes(thread.environmentId))}
       environmentLabels={botEnvironmentLabels}
       now={Date.parse(now)}
       onSelectBot={props.onSelectBot}

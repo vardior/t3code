@@ -17,6 +17,7 @@ import {
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
+import { sortPinnedThreadsByOrderKey } from "./threadSort.ts";
 import { countOpenItems } from "./openItems.ts";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -28,6 +29,23 @@ import type { EnvironmentThreadShell } from "./models.ts";
 
 import { derivePendingThreadRequests } from "./threadRequests.ts";
 import type { ThreadHistoryMeta } from "./threadHistoryMerge.ts";
+
+export function pinnedBotMenuThreads<
+  T extends Pick<
+    EnvironmentThreadShell,
+    "environmentId" | "id" | "title" | "createdAt" | "pinnedAt" | "pinOrderKey" | "archivedAt"
+  >,
+>(threads: ReadonlyArray<T>, bots: Parameters<typeof threadsWithoutBotHomes>[1], query = "") {
+  const search = query.trim().toLocaleLowerCase();
+  return sortPinnedThreadsByOrderKey(
+    threadsWithoutBotHomes(threads, bots).filter(
+      (thread) =>
+        thread.pinnedAt != null &&
+        thread.archivedAt == null &&
+        thread.title.toLocaleLowerCase().includes(search),
+    ),
+  );
+}
 
 export function threadsWithoutBotHomes<
   T extends { readonly environmentId: EnvironmentId; readonly id: ThreadId },

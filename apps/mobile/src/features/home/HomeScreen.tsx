@@ -764,8 +764,12 @@ export function HomeScreen(props: HomeScreenProps) {
         onSelectBot={handleSelectBot}
       />
       <HomeBotsSection
+        searchQuery={props.searchQuery}
+        onSelectThread={selectThread}
         bots={homeBots}
-        threads={props.threads}
+        threads={props.threads.filter((thread) =>
+          searchEnvironmentIds.includes(thread.environmentId),
+        )}
         environmentLabels={botEnvironmentLabels}
         now={Date.parse(now)}
         onSelectBot={handleSelectBot}

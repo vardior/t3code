@@ -24,6 +24,7 @@ import {
   dismissBotMorning,
   EMPTY_BOT_MORNING_MEMORY,
   threadsWithoutBotHomes,
+  pinnedBotMenuThreads,
   parseThreadLink,
   rewriteThreadLinks,
   botChatHistoryStart,
@@ -1396,6 +1397,38 @@ describe("home bot threads", () => {
     expect(threadsWithoutBotHomes([home, otherHome], [{ environmentId, bot }])).toEqual([
       otherHome,
     ]);
+  });
+
+  it("selects live pins in pin order without duplicating environment-qualified bot homes", () => {
+    const pinned = {
+      ...home,
+      pinnedAt: "2026-11-03T00:00:00Z",
+      pinOrderKey: "m",
+      archivedAt: null,
+      createdAt: "2026-11-01T00:00:00Z",
+    };
+    const ordinary = {
+      ...pinned,
+      id: ThreadId.make("ordinary"),
+      title: "My task",
+      pinOrderKey: "a",
+    };
+    const remote = { ...pinned, environmentId: otherEnvironmentId, title: "Remote task" };
+    const unpinned = { ...ordinary, id: ThreadId.make("unpinned"), pinnedAt: null };
+    const archived = { ...ordinary, id: ThreadId.make("archived"), archivedAt: pinned.pinnedAt };
+    const entries = [{ environmentId, bot }];
+    expect(pinnedBotMenuThreads([remote, pinned, archived, unpinned, ordinary], entries)).toEqual([
+      ordinary,
+      remote,
+    ]);
+    expect(pinnedBotMenuThreads([ordinary, remote], entries, "REMOTE")).toEqual([remote]);
+    expect(pinnedBotMenuThreads([{ ...ordinary, pinnedAt: null }, remote], entries)).toEqual([
+      remote,
+    ]);
+    expect(pinnedBotMenuThreads([remote], entries)).toEqual([remote]);
+    expect(
+      pinnedBotMenuThreads([{ ...unpinned, pinnedAt: pinned.pinnedAt }], entries),
+    ).toHaveLength(1);
   });
 
   it("keeps the ordinary list when no bot summaries are available", () => {
