@@ -2562,7 +2562,7 @@ it.effect(
                     Effect.succeed(liveThreadShell(threadId, { activeRunId })),
                 }),
               ),
-              Layer.provideMerge(McpServer.McpServer.layer),
+              Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
               Layer.provide(Layer.mock(OrchestratorMcpService.OrchestratorMcpService)({})),
               Layer.provide(Layer.mock(ThreadMetadataMcpService.ThreadMetadataMcpService)({})),
               Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),

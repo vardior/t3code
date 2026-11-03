@@ -3790,6 +3790,7 @@ it.effect("approval-required callers cannot create or change scheduled check com
     const saved = yield* Ref.make<ReadonlyArray<string | null | undefined>>([]);
     const dependencies = Layer.mergeAll(
       NodeServices.layer,
+      NodeCrypto.layer,
       Layer.mock(ThreadManagementService.ThreadManagementService)({
         getThreadShell: () => Effect.succeed(liveThreadShell(threadId, { runtimeMode })),
         getThreadRecords: () =>

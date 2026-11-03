@@ -3446,7 +3446,9 @@ export default function ChatView(props: ChatViewProps) {
                     activeThreadShell?.latestRun ?? null,
                   )}
                   runningRunId={activeRunningTurnId}
-                  turnDiffSummaries={presentation ? EMPTY_BOT_TURN_DIFF_SUMMARIES : turnDiffSummaries}
+                  turnDiffSummaries={
+                    presentation ? EMPTY_BOT_TURN_DIFF_SUMMARIES : turnDiffSummaries
+                  }
                   activeThreadEnvironmentId={
                     displayedThreadRef?.environmentId ?? activeThread.environmentId
                   }

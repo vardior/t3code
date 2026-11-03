@@ -606,7 +606,10 @@ export const make = Effect.gen(function* () {
       autoCompaction ||
       (activityState?.phase === "completed" && !ownerStarted && ownerNotification === undefined) ||
       (threadShell !== null && !(yield* settings.getSettings).notifyAgentThreads && !botHome);
-    if (notificationsSuppressed && !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)) {
+    if (
+      notificationsSuppressed &&
+      !hasLivePublishedState(yield* Ref.get(publishedStateByThreadRef), threadId)
+    ) {
       return;
     }
     const stoppedWithOwnerNotification =
