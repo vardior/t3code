@@ -357,7 +357,7 @@ it.effect(
         const overlap = yield* service
           .runNow({ id: ScheduledTaskId.make("slow") })
           .pipe(Effect.flip);
-        assert.include(String(overlap.cause), "already running");
+        assert.equal(overlap.message, "Schedule task is already running.");
         yield* Deferred.succeed(release, undefined);
         yield* Deferred.await(slowDispatched);
         assert.deepEqual(yield* Ref.get(launched), ["fast", "slow"]);
