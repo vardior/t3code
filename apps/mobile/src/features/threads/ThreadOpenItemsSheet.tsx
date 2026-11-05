@@ -9,7 +9,7 @@ import { Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppBar } from "../../components/ui/AppBar";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { relativeTime } from "../../lib/time";
@@ -171,7 +171,7 @@ export function ThreadOpenItemsSheet({ route }: StaticScreenProps<OpenItemsTarge
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <AndroidSheetHeader title="Open items" onBack={() => navigation.goBack()} />
+      <AppBar sheet title="Open items" onBack={() => navigation.goBack()} />
       {content}
     </View>
   );

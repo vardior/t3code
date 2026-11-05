@@ -26,7 +26,7 @@ import { Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppBar } from "../../components/ui/AppBar";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
@@ -127,7 +127,7 @@ export function BotInfoSheet({
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <AndroidSheetHeader title="About bot" onBack={() => navigation.goBack()} />
+      <AppBar sheet title="About bot" onBack={() => navigation.goBack()} />
       {content}
     </View>
   );
@@ -241,7 +241,6 @@ function useBotModelSession(environmentId: EnvironmentId, homeThreadId: ThreadId
     environmentId,
     providerGroups,
     optionDescriptors,
-    updateMetadata,
     setRuntimeMode,
     homeThreadId,
   ]);

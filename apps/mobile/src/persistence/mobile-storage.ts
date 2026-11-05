@@ -270,7 +270,9 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
       writeJson(RECENT_THREAD_SHORTCUTS_KEY, { threads }),
     ),
     loadOpenItemNotificationMarks,
-    saveOpenItemNotificationMarks: (marks) => writeJson(OPEN_ITEM_NOTIFICATION_MARKS_KEY, marks),
+    saveOpenItemNotificationMarks: Effect.fn("MobileStorage.saveOpenItemNotificationMarks")((marks) =>
+      writeJson(OPEN_ITEM_NOTIFICATION_MARKS_KEY, marks),
+    ),
   });
 });
 

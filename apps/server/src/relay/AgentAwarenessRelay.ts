@@ -988,7 +988,7 @@ export const make = Effect.gen(function* () {
           Stream.drop(1),
           Stream.runForEach(() =>
             Effect.gen(function* () {
-              const snapshot = yield* threads.getShellSnapshot();
+              const snapshot = yield* threads.getAgentAwarenessSnapshot();
               const published = yield* Ref.get(publishedStateByThreadRef);
               const threadIds = new Set([
                 ...snapshot.threads.map((thread) => thread.id),

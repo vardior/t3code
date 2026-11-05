@@ -66,7 +66,7 @@ function ScopedBotChat(props: { readonly environmentId: EnvironmentId; readonly 
   if (!bot || bot.homeThreadMissing)
     return (
       <View className="flex-1 bg-screen">
-        <AppBar title={bot?.name ?? "Bots"} sidebar={false} onBack={() => navigation.goBack()} />
+        <AppBar title={bot?.name ?? "Bots"} onBack={() => navigation.goBack()} />
         <Text
           className={
             connectionFailed || (bots.error && connectionReason === null)
@@ -220,7 +220,6 @@ function BotHeader(props: {
     <AppBar
       title={bot.name}
       subtitle={props.archived ? "Home thread archived" : bot.paused ? "Paused" : undefined}
-      sidebar={false}
       onBack={() => navigation.goBack()}
       trailing={
         browserTab ? (
