@@ -67,9 +67,10 @@ describe("transitionTimelineFollow", () => {
 });
 
 describe("navigationReleasesFollow", () => {
-  const viewport = (contentScrollsUp: boolean, awayFromEnd: boolean) => ({
+  const viewport = (contentScrollsUp: boolean, awayFromEnd: boolean, restoringToEnd = false) => ({
     contentScrollsUp: () => contentScrollsUp,
     awayFromEnd: () => awayFromEnd,
+    restoringToEnd: () => restoringToEnd,
   });
 
   it("releases on upward input only when the content can scroll up", () => {
@@ -91,6 +92,21 @@ describe("navigationReleasesFollow", () => {
     ).toBe(false);
     expect(
       navigationReleasesFollow({ source: "pointer", onScrollbar: true }, viewport(true, false)),
+    ).toBe(true);
+  });
+
+  it("keeps following through clicks, touch and downward keys while a thread restores to its end", () => {
+    const restoring = viewport(true, true, true);
+    expect(navigationReleasesFollow({ source: "pointer", onScrollbar: false }, restoring)).toBe(
+      false,
+    );
+    expect(navigationReleasesFollow({ source: "touch" }, restoring)).toBe(false);
+    expect(
+      navigationReleasesFollow({ source: "key", key: "PageDown", direction: "down" }, restoring),
+    ).toBe(false);
+    expect(navigationReleasesFollow({ source: "wheel", direction: "up" }, restoring)).toBe(true);
+    expect(
+      navigationReleasesFollow({ source: "key", key: "PageUp", direction: "up" }, restoring),
     ).toBe(true);
   });
 

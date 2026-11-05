@@ -1,7 +1,7 @@
 import type { LegendListRef } from "@legendapp/list/react";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 import type { RememberedTimelinePosition } from "./timelineScrollAnchoring";
-import type { TimelineViewport } from "./timelineViewport";
+import { navigationReleasesFollow, type TimelineViewport } from "./timelineViewport";
 
 // A streaming reply moves the end every frame, so the target may never hold
 // still. Past this many frames the list's own end maintenance takes over.
@@ -41,6 +41,12 @@ export function settleListScroll(
     requestAnimationFrame(reconcile);
   });
 }
+
+const READER_AT_RESTORED_END = {
+  contentScrollsUp: () => true,
+  awayFromEnd: () => true,
+  restoringToEnd: () => true,
+};
 
 export const measuredEndOffset = (element: HTMLElement) =>
   element.scrollHeight - element.clientHeight;
@@ -87,13 +93,17 @@ export function startTimelinePositionRestore({
   // Reading history or finding: follow lets go before the restore claims the viewport.
   if (position?.atEnd === false || releaseForFind) viewport.navigate({ releasesFollow: true });
   const releaseScrollHold = viewport.holdProgrammaticScroll();
+  const restoresToEnd = position?.atEnd !== false;
+  const releaseEndHold = restoresToEnd ? viewport.holdRestoreToEnd() : () => {};
   const stop = () => {
     cancelled = true;
     releaseScrollHold();
+    releaseEndHold();
     unsubscribe();
   };
-  const unsubscribe = viewport.subscribe(() => {
+  const unsubscribe = viewport.subscribe((navigation) => {
     if (cancelled) return;
+    if (restoresToEnd && !navigationReleasesFollow(navigation, READER_AT_RESTORED_END)) return;
     stop();
     void list.scrollToOffset({ offset: viewport.scrollNode.scrollTop, animated: false });
     onPositioned(listIdentityKey);
@@ -116,7 +126,7 @@ export function startTimelinePositionRestore({
         listOpenedOn === listIdentityKey
         ? undefined
         : list.scrollToEnd({ animated: false });
-  const settlesAtEnd = position?.atEnd !== false && scrolling !== undefined;
+  const settlesAtEnd = restoresToEnd && scrolling !== undefined;
   void Promise.resolve(scrolling).then(async () => {
     if (cancelled) return;
     if (settlesAtEnd) {

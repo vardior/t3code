@@ -55,9 +55,27 @@ export interface TimelineViewport {
    * upward scroll it causes is not read as the user's. Returns the release.
    */
   readonly holdProgrammaticScroll: () => () => void;
+  readonly holdRestoreToEnd: () => () => void;
+  readonly restoringToEnd: () => boolean;
   /** Follow announces letting go, so the list can remember it is reading history. */
   readonly followReleased: () => void;
   readonly onFollowReleased: (listener: () => void) => () => void;
+}
+
+function createHoldCount() {
+  let holds = 0;
+  return {
+    held: () => holds > 0,
+    hold: () => {
+      holds += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        holds -= 1;
+      };
+    },
+  };
 }
 
 const UP_KEYS = new Set(["PageUp", "Home", "ArrowUp"]);
@@ -72,7 +90,8 @@ export function attachTimelineViewport(scrollNode: HTMLElement): TimelineViewpor
 } {
   const listeners = new Set<(navigation: TimelineNavigation) => void>();
   const followReleasedListeners = new Set<() => void>();
-  let programmaticHolds = 0;
+  const programmaticScroll = createHoldCount();
+  const restoreToEnd = createHoldCount();
   const emit = (navigation: TimelineNavigation) => {
     for (const listener of listeners) listener(navigation);
   };
@@ -128,7 +147,7 @@ export function attachTimelineViewport(scrollNode: HTMLElement): TimelineViewpor
       scrolledUp({
         top: scrollNode.scrollTop,
         height: scrollNode.scrollHeight,
-        programmatic: programmaticHolds > 0,
+        programmatic: programmaticScroll.held(),
       }) &&
       frameHasInput() &&
       // LegendList updates its scroll state on the next animation frame.
@@ -153,15 +172,9 @@ export function attachTimelineViewport(scrollNode: HTMLElement): TimelineViewpor
       return () => listeners.delete(listener);
     },
     navigate: ({ releasesFollow }) => emit({ source: "command", releasesFollow }),
-    holdProgrammaticScroll: () => {
-      programmaticHolds += 1;
-      let released = false;
-      return () => {
-        if (released) return;
-        released = true;
-        programmaticHolds -= 1;
-      };
-    },
+    holdProgrammaticScroll: programmaticScroll.hold,
+    holdRestoreToEnd: restoreToEnd.hold,
+    restoringToEnd: restoreToEnd.held,
     followReleased: () => {
       for (const listener of followReleasedListeners) listener();
     },
@@ -189,19 +202,24 @@ export function attachTimelineViewport(scrollNode: HTMLElement): TimelineViewpor
  */
 export function navigationReleasesFollow(
   navigation: TimelineNavigation,
-  viewport: { readonly contentScrollsUp: () => boolean; readonly awayFromEnd: () => boolean },
+  viewport: {
+    readonly contentScrollsUp: () => boolean;
+    readonly awayFromEnd: () => boolean;
+    readonly restoringToEnd: () => boolean;
+  },
 ): boolean {
+  const awayFromEnd = () => !viewport.restoringToEnd() && viewport.awayFromEnd();
   switch (navigation.source) {
     case "wheel":
       return navigation.direction === "up" && viewport.contentScrollsUp();
     case "key":
-      return navigation.direction === "up" ? viewport.contentScrollsUp() : viewport.awayFromEnd();
+      return navigation.direction === "up" ? viewport.contentScrollsUp() : awayFromEnd();
     case "pointer":
-      return navigation.onScrollbar ? viewport.contentScrollsUp() : viewport.awayFromEnd();
+      return navigation.onScrollbar ? viewport.contentScrollsUp() : awayFromEnd();
     case "touch":
       // Touch direction is not observable; an upward flick leaves the end
       // band within its first few events.
-      return viewport.awayFromEnd();
+      return awayFromEnd();
     case "scroll":
       return true;
     case "command":

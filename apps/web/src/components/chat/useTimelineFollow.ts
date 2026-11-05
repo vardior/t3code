@@ -343,6 +343,7 @@ export function useTimelineFollow(input: TimelineFollowInput) {
     const releases = navigationReleasesFollow(navigation, {
       contentScrollsUp: timelineRealContentOverflowsViewport,
       awayFromEnd,
+      restoringToEnd: () => viewportRef.current?.restoringToEnd() ?? false,
     });
     if (releases) releaseFollowForNavigation();
   };
