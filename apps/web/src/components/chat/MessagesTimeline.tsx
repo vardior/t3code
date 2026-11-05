@@ -101,6 +101,7 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import { TimelineMinimap } from "./TimelineMinimap";
+import { TimelineScrollbar } from "./TimelineScrollbar";
 import {
   type TimelineRowSharedState,
   type TimelineRowActivityState,
@@ -711,6 +712,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
+  const [timelineScrollNode, setTimelineScrollNode] = useState<HTMLElement | null>(null);
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
   // is not keyed per thread and reports no "new data" event, and the restore
@@ -1112,6 +1114,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     listRef.current = list;
     const scrollNode: HTMLElement | null = list?.getScrollableNode() ?? null;
     registerTimeline?.(scrollNode);
+    setTimelineScrollNode(scrollNode);
     const viewport = scrollNode ? attachTimelineViewport(scrollNode) : null;
     viewportRef.current = viewport;
     const detachViewport = viewport ? onViewportAttach?.(viewport) : undefined;
@@ -1329,12 +1332,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onScroll={handleScroll}
               onItemSizeChanged={scheduleMinimapRefresh}
               className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                "messages-timeline-scroll h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none] [scrollbar-width:none]",
                 topFadeEnabled && "topbar-scroll-fade",
               )}
               ListHeaderComponent={listHeader}
               ListFooterComponent={timelineListFooter}
             />
+            <div className="chat-composer-lane pointer-events-none absolute inset-0">
+              <div className="chat-content-lane relative h-full">
+                <TimelineScrollbar
+                  scrollNode={timelineScrollNode}
+                  onNavigate={(releasesFollow) => viewportRef.current?.navigate({ releasesFollow })}
+                />
+              </div>
+            </div>
             <TimelineMinimap
               items={minimapItems}
               hasPersistentGutter={minimapHasPersistentGutter}
