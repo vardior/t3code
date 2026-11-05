@@ -1070,7 +1070,9 @@ export const layer = Layer.effect(
         if (trigger === "scheduled" && checkOutput === "") {
           yield* sql`
             UPDATE scheduled_tasks
-            SET next_run_at = ${nextRunAt(active, startedAt)}
+            SET next_run_at = ${nextRunAt(active, startedAt)},
+                last_run_status = CASE last_run_status WHEN 'failed' THEN 'succeeded' ELSE last_run_status END,
+                last_run_error = NULL
             WHERE task_id = ${active.id} AND last_run_status <> 'running'
           `.pipe(
             Effect.mapError((cause) =>

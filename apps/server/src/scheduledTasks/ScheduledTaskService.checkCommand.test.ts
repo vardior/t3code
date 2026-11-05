@@ -64,6 +64,8 @@ it.effect(
       const sql = yield* SqlClient.SqlClient;
       const now = "2026-09-09T12:00:00.000Z";
       yield* insertCheckedTask(sql, { id: "quiet", next: now, checkCommand: "true" });
+      yield* insertCheckedTask(sql, { id: "recovered", next: now, checkCommand: "true" });
+      yield* sql`UPDATE scheduled_tasks SET last_run_status = 'failed', last_run_error = 'Check command timed out after 2 minutes', run_count = 4 WHERE task_id = 'recovered'`;
       yield* insertCheckedTask(sql, {
         id: "broken",
         next: now,
@@ -150,6 +152,10 @@ it.effect(
       assert.equal(quiet?.last_run_status, "never");
       assert.equal(quiet?.run_count, 0);
       assert.isTrue((quiet?.next_run_at ?? "") > now);
+      const recovered = byId.get("recovered");
+      assert.equal(recovered?.last_run_status, "succeeded");
+      assert.isNull(recovered?.last_run_error);
+      assert.equal(recovered?.run_count, 4);
       const broken = byId.get("broken");
       assert.equal(broken?.last_run_status, "failed");
       assert.equal(broken?.run_count, 1);
