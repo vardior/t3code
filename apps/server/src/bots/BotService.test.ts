@@ -126,6 +126,7 @@ const insertSchedule = (
     schedule_json: JSON.stringify({ type: "interval", everyMs: 900_000 }),
     project_id: "project-1",
     thread_id: schedule.threadId,
+    thread_mode: schedule.threadId === null ? "new_thread" : "continue",
     workspace_strategy_json: '{"type":"root"}',
     model_selection_json: '{"instanceId":"codex","model":"gpt-5"}',
     runtime_mode: "full-access",

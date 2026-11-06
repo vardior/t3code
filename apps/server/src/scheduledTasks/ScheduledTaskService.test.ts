@@ -500,6 +500,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
     const sends = yield* Ref.make<Array<{ threadId: ThreadId; freshContext?: boolean }>>([]);
     const launched = ThreadId.make("thread:fresh-session-task");
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
@@ -580,6 +581,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
 it.effect("a first run whose thread was deleted before it bound removes the task", () =>
   Effect.gen(function* () {
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
@@ -633,6 +635,7 @@ it.effect.each(["recreated under the same id", "moved to another project"] as co
       const launching = yield* Deferred.make<void>();
       const proceed = yield* Deferred.make<void>();
       const layer = ScheduledTaskService.layer.pipe(
+        Layer.provide(NodeServices.layer),
         Layer.provide(
           Layer.mergeAll(
             ManagedPolicy.layerTest(),

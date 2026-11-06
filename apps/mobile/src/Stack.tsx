@@ -552,7 +552,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     BotChat: createNativeStackScreen({
       screen: BotChatRouteScreen,
       linking: "bots/:environmentId/:botId",
-      options: GLASS_HEADER_OPTIONS,
+      options: pageRoute(),
     }),
     Thread: createNativeStackScreen({
       screen: ThreadRouteScreen,
@@ -683,33 +683,15 @@ const RootStackConfig = createWorkspaceStackNavigator({
     }),
     ThreadOpenItems: createNativeStackScreen({
       screen: ThreadOpenItemsSheet,
-      options: {
-        ...HORIZONTAL_FORM_SHEET_OPTIONS,
-        headerShown: false,
-        sheetAllowedDetents: formSheetDetents(0.65, 0.95),
-        sheetGrabberVisible: true,
-      },
+      options: sheetRoute({ detent: 0.65, androidMaxDetent: 0.95, header: "none" }),
     }),
     BotModelSettings: createNativeStackScreen({
       screen: BotModelSettingsRouteScreen,
-      options: {
-        gestureEnabled: true,
-        headerShown: false,
-        ...(Platform.OS === "android"
-          ? { presentation: "card" as const }
-          : {
-              ...THREAD_SETTINGS_SHEET_OPTIONS,
-            }),
-      },
+      options: THREAD_SETTINGS_ROUTE,
     }),
     BotInfo: createNativeStackScreen({
       screen: BotInfoSheet,
-      options: {
-        ...HORIZONTAL_FORM_SHEET_OPTIONS,
-        headerShown: false,
-        sheetAllowedDetents: formSheetDetents(0.5, 0.9),
-        sheetGrabberVisible: true,
-      },
+      options: sheetRoute({ detent: 0.5, androidMaxDetent: 0.9, header: "none" }),
     }),
     ThreadAgents: createNativeStackScreen({
       screen: ThreadAgentsSheet,
