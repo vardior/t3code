@@ -47,7 +47,7 @@ export function TimelineScrollbar(props: {
     if (!scrollNode || !track || !thumb) return;
     const paint = () => {
       const geometry = measureThumb(scrollNode, track.clientHeight);
-      track.hidden = geometry === null;
+      track.style.visibility = geometry ? "" : "hidden";
       if (!geometry) return;
       thumb.style.height = `${geometry.height}px`;
       thumb.style.transform = `translateY(${geometry.top}px)`;
