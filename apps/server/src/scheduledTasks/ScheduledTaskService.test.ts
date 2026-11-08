@@ -781,6 +781,7 @@ it.effect("checks a task's destination thread only when the destination changes"
     );
     const consumed = yield* Ref.make(0);
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),

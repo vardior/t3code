@@ -70,7 +70,10 @@ const scheduledTasksLayer = ScheduledTaskService.layer.pipe(
         isScratchProject: () => Effect.succeed(false),
       }),
       Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
-      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({
+        getThreadShell: () =>
+          Effect.succeed({ projectId: "project-1", archivedAt: null, deletedAt: null } as never),
+      }),
       Layer.mock(SecretRequests.SecretRequests)({}),
     ),
   ),
