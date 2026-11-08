@@ -274,8 +274,10 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
           yield* fileSystem.makeDirectory(path.join(sharedHome, "log"));
           yield* fileSystem.makeDirectory(path.join(sharedHome, "memories"));
           yield* fileSystem.makeDirectory(path.join(sharedHome, "tmp"));
+          yield* writeTextFile(path.join(sharedHome, "memories.lock"), "");
           yield* writeTextFile(path.join(sharedHome, "config.toml"), 'model = "gpt-5-codex"\n');
           yield* writeTextFile(path.join(shadowHome, "auth.json"), '{"shadow":true}\n');
+          yield* writeTextFile(path.join(shadowHome, "memories.lock"), "");
           yield* fileSystem.makeDirectory(path.join(shadowHome, "log"), { recursive: true });
           yield* fileSystem.makeDirectory(path.join(shadowHome, "memories"), { recursive: true });
           yield* fileSystem.makeDirectory(path.join(shadowHome, "tmp"), { recursive: true });
