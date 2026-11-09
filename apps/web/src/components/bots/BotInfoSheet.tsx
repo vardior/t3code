@@ -14,7 +14,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -183,14 +183,12 @@ function BotModelPicker(props: {
   const [error, setError] = useState<string | null>(null);
   const providers = config?.providers ?? [];
   const selection = shell?.modelSelection;
-  const instanceEntries = useMemo(
-    () => providerInstanceEntriesFor(providers, settings, shell?.projectId ?? null),
-    [providers, settings, shell?.projectId],
-  );
-  const modelOptions = useMemo(
-    () =>
-      getCustomModelOptionsByInstance(settings, providers, selection?.instanceId, selection?.model),
-    [settings, providers, selection],
+  const instanceEntries = providerInstanceEntriesFor(providers, settings, shell?.projectId ?? null);
+  const modelOptions = getCustomModelOptionsByInstance(
+    settings,
+    providers,
+    selection?.instanceId,
+    selection?.model,
   );
   const supportsHandoff = threadSupportsProviderHandoff(thread?.projection);
   const getDisabledReason = (instanceId: ModelSelection["instanceId"], model: string) => {
@@ -275,7 +273,6 @@ function BotModelPicker(props: {
           model={selection.model}
           modelOptions={selection.options}
           allowPromptInjectedEffort={false}
-          planModeEnabled={settings.planModeEnabled}
           disabled={busy || !canOperate}
           onModelOptionsChange={(options) => void save({ ...selection, options: options ?? [] })}
         />
