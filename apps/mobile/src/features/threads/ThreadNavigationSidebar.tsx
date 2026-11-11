@@ -145,7 +145,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     regenerateThreadTitle,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
-  const launchingThreads = useLaunchingThreads(threads);
+  const launchingThreads = useLaunchingThreads(allThreads);
   const activeNewTask = useActiveNewTask();
   const queuedThreadKeys = useQueuedThreadKeys();
   const selectDetail = useSelectWorkspaceDetail();
