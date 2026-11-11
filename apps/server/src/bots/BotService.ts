@@ -125,6 +125,7 @@ export class BotService extends Context.Service<
       BotError
     >;
     readonly reorderBots: (names: ReadonlyArray<string>) => Effect.Effect<{}, BotError>;
+    readonly getIdleCompactionThresholds: () => Effect.Effect<ReadonlyMap<ThreadId, number>>;
     readonly isHomeThreadPaused: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly notifyOwner: (
@@ -715,6 +716,30 @@ export const layer = Layer.effect(
       return homeThreadIds.has(threadId);
     }, homeThreadLookupLock.withPermit);
 
+    const getIdleCompactionThresholds = Effect.fn("BotService.getIdleCompactionThresholds")(
+      function* () {
+        const thresholds = new Map<ThreadId, number>();
+        for (const id of yield* readBotIds()) {
+          const config = yield* readBotConfig(id).pipe(Effect.catchCause(() => Effect.undefined));
+          const tokens = config?.idleCompactTokens;
+          if (
+            config !== undefined &&
+            typeof tokens === "number" &&
+            Number.isInteger(tokens) &&
+            tokens > 0
+          ) {
+            thresholds.set(config.homeThreadId, tokens);
+          }
+        }
+        return thresholds;
+      },
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Cannot read bot idle compaction thresholds", { cause }).pipe(
+          Effect.as(new Map<ThreadId, number>()),
+        ),
+      ),
+    );
+
     const isHomeThreadPaused = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
@@ -1005,6 +1030,7 @@ export const layer = Layer.effect(
       reorderBots,
       isHomeThread,
       isHomeThreadPaused,
+      getIdleCompactionThresholds,
       notifyOwner,
       getOwnerNotification,
       setPaused,

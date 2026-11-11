@@ -26,6 +26,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import {
   IdleCompactionAdmission,
   IdleCompactionPauseGuard,
+  IdleCompactionTokenThresholds,
   idleCompactionCandidate,
   sameIdleCompactionCandidate,
 } from "./IdleCompactionPolicy.ts";
@@ -170,12 +171,25 @@ describe("idle compaction eligibility", () => {
         updatedAt: DateTime.formatIso(at(0)),
       },
     };
-    assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
+    const candidate = idleCompactionCandidate(state, 54 * minute)!;
+    assert.isFalse(sameIdleCompactionCandidate(candidate, candidate));
     state.providerTurns[0] = {
       ...state.providerTurns[0]!,
       tokenUsage: { usedTokens: 200_001, updatedAt: DateTime.formatIso(at(0)) },
     };
-    assert.isDefined(idleCompactionCandidate(state, 54 * minute));
+    const eligible = idleCompactionCandidate(state, 54 * minute)!;
+    assert.isTrue(sameIdleCompactionCandidate(eligible, eligible));
+    const pilot = idleCompactionCandidate(state, 54 * minute, 120_000)!;
+    state.providerTurns[0] = {
+      ...state.providerTurns[0]!,
+      tokenUsage: { usedTokens: 130_000, updatedAt: DateTime.formatIso(at(0)) },
+    };
+    assert.isTrue(sameIdleCompactionCandidate(pilot, idleCompactionCandidate(state, 54 * minute)));
+    state.providerTurns[0] = {
+      ...state.providerTurns[0]!,
+      tokenUsage: { usedTokens: 120_000, updatedAt: DateTime.formatIso(at(0)) },
+    };
+    assert.isFalse(sameIdleCompactionCandidate(pilot, idleCompactionCandidate(state, 54 * minute)));
     state.providerThreads[0] = {
       ...state.providerThreads[0]!,
       contextUsage: null,
@@ -185,7 +199,9 @@ describe("idle compaction eligibility", () => {
         strength: "strong",
       },
     };
-    assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
+    assert.isFalse(
+      sameIdleCompactionCandidate(candidate, idleCompactionCandidate(state, 54 * minute)),
+    );
   });
   it("excludes pending approvals, unanswered user requests, and nested nodes", () => {
     for (const kind of ["user_input", "command"] as const) {
@@ -274,16 +290,11 @@ describe("idle compaction eligibility", () => {
     assert.isDefined(idleCompactionCandidate(state, 54 * minute));
   });
 
-  it("requires strictly more than 200000 current tokens, at 54 minutes and before 60", () => {
+  it("requires at least 54 minutes and less than 60 minutes of idle time", () => {
     const state = fixture();
     assert.isUndefined(idleCompactionCandidate(state, 54 * minute - 1));
     assert.isDefined(idleCompactionCandidate(state, 54 * minute));
     assert.isUndefined(idleCompactionCandidate(state, 60 * minute));
-    state.providerThreads[0] = {
-      ...state.providerThreads[0]!,
-      contextUsage: { usedTokens: 200_000, totalProcessedTokens: 1_000_000 },
-    };
-    assert.isUndefined(idleCompactionCandidate(state, 54 * minute));
   });
   it("ignores UI metadata and invalidates an old deadline on provider activity", () => {
     const state = fixture();
@@ -460,9 +471,44 @@ const seed = Effect.gen(function* () {
 });
 
 describe("idle compaction admission", () => {
-  it.effect.each([120_001, 200_001])(
-    "does not enqueue settled %s-token work before 54 minutes",
-    (usedTokens) =>
+  it.effect.each([
+    { name: "below default", usedTokens: 120_001, overrides: [], expected: 0 },
+    { name: "at default", usedTokens: 200_000, overrides: [], expected: 0 },
+    { name: "above default", usedTokens: 200_001, overrides: [], expected: 1 },
+    { name: "pilot home", usedTokens: 130_000, overrides: [[threadId, 120_000]], expected: 1 },
+    {
+      name: "at pilot threshold",
+      usedTokens: 120_000,
+      overrides: [[threadId, 120_000]],
+      expected: 0,
+    },
+    {
+      name: "ordinary thread",
+      usedTokens: 130_000,
+      overrides: [[ThreadId.make("pilot-home"), 120_000]],
+      expected: 0,
+    },
+    {
+      name: "other home",
+      usedTokens: 130_000,
+      overrides: [[ThreadId.make("other-home"), 120_000]],
+      expected: 0,
+    },
+    {
+      name: "higher threshold",
+      usedTokens: 210_000,
+      overrides: [[threadId, 220_000]],
+      expected: 0,
+    },
+    {
+      name: "above higher threshold",
+      usedTokens: 220_001,
+      overrides: [[threadId, 220_000]],
+      expected: 1,
+    },
+  ] as const)(
+    "applies the token threshold for $name only within the idle window",
+    ({ usedTokens, overrides, expected }) =>
       Effect.gen(function* () {
         const state = yield* seed;
         const store = yield* ProjectionStore.ProjectionStoreV2;
@@ -483,7 +529,11 @@ describe("idle compaction admission", () => {
             tokenUsage: { usedTokens, maxTokens: 150_000, updatedAt: DateTime.formatIso(at(0)) },
           },
         });
-        const service = yield* ForkIdleCompactionService.make;
+        const service = yield* ForkIdleCompactionService.make.pipe(
+          Effect.provideService(IdleCompactionTokenThresholds, () =>
+            Effect.succeed(new Map(overrides)),
+          ),
+        );
         const o = yield* Orchestrator.OrchestratorV2;
         yield* service.sweep;
         assert.lengthOf((yield* o.getThreadRecords(threadId, ["messages"])).messages, 0);
@@ -493,8 +543,8 @@ describe("idle compaction admission", () => {
         yield* TestClock.adjust(1);
         yield* service.sweep;
         const messages = (yield* o.getThreadRecords(threadId, ["messages"])).messages;
-        assert.lengthOf(messages, usedTokens === 200_001 ? 1 : 0);
-        if (usedTokens === 200_001) assert.equal(messages[0]!.text, "/compact");
+        assert.lengthOf(messages, expected);
+        if (expected === 1) assert.equal(messages[0]!.text, "/compact");
       }).pipe(Effect.provide(testLayer)),
   );
 

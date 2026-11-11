@@ -383,6 +383,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       reorderBots: unused,
       streamChanges: Stream.empty,
       isHomeThreadPaused: unused,
+      getIdleCompactionThresholds: unused,
       isHomeThread: () => Effect.succeed(options.homeThread ?? false),
       notifyOwner: unused,
       getOwnerNotification: () => Effect.succeed(options.ownerNotification),

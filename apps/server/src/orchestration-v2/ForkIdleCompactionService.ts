@@ -10,6 +10,8 @@ import { isNativeMaintenanceCommand } from "./CommandPolicy.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import {
+  DEFAULT_IDLE_COMPACT_TOKENS,
+  IdleCompactionTokenThresholds,
   IdleCompactionAdmission,
   IdleCompactionPauseGuard,
   idleCompactionCandidate,
@@ -19,6 +21,7 @@ import {
 } from "./IdleCompactionPolicy.ts";
 
 export const make = Effect.gen(function* () {
+  const getThresholds = yield* IdleCompactionTokenThresholds;
   const pauseGuard = yield* IdleCompactionPauseGuard;
   const sql = yield* SqlClient.SqlClient;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -26,8 +29,12 @@ export const make = Effect.gen(function* () {
   const providers = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
   const sweep = Effect.gen(function* () {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
-    const rows = yield* sql<{ readonly thread_id: string }>`
-      SELECT t.thread_id FROM orchestration_v2_projection_threads t
+    const thresholds = yield* getThresholds();
+    const tokenFloor = Math.min(DEFAULT_IDLE_COMPACT_TOKENS, ...thresholds.values());
+    const rows = yield* sql<{ readonly thread_id: string; readonly used_tokens: number }>`
+      SELECT t.thread_id,
+        coalesce(json_extract(pt.payload_json, '$.tokenUsage.usedTokens'), json_extract(p.payload_json, '$.contextUsage.usedTokens')) AS used_tokens
+      FROM orchestration_v2_projection_threads t
       JOIN orchestration_v2_projection_runs r ON r.run_id = (
         SELECT latest.run_id FROM orchestration_v2_projection_runs latest
         WHERE latest.thread_id = t.thread_id ORDER BY latest.ordinal DESC LIMIT 1
@@ -40,7 +47,7 @@ export const make = Effect.gen(function* () {
       WHERE t.deleted_at IS NULL AND t.archived_at IS NULL AND r.status = 'completed'
         AND r.completed_at <= ${DateTime.formatIso(DateTime.makeUnsafe(now - IDLE_COMPACTION_DELAY_MS))}
         AND r.completed_at > ${DateTime.formatIso(DateTime.makeUnsafe(now - IDLE_COMPACTION_EXPIRY_MS))}
-        AND coalesce(json_extract(pt.payload_json, '$.tokenUsage.usedTokens'), json_extract(p.payload_json, '$.contextUsage.usedTokens')) > 200000
+        AND coalesce(json_extract(pt.payload_json, '$.tokenUsage.usedTokens'), json_extract(p.payload_json, '$.contextUsage.usedTokens')) > ${tokenFloor}
         AND NOT EXISTS (SELECT 1 FROM orchestration_command_receipts receipt WHERE receipt.command_id = 'idle-compact:' || r.run_id)
     `;
     yield* Effect.forEach(
@@ -48,9 +55,11 @@ export const make = Effect.gen(function* () {
       (row) =>
         Effect.gen(function* () {
           const threadId = ThreadId.make(row.thread_id);
+          const tokenThreshold = thresholds.get(threadId) ?? DEFAULT_IDLE_COMPACT_TOKENS;
+          if (row.used_tokens <= tokenThreshold) return;
           const state = yield* orchestrator.getThreadRecords(threadId, idleCompactionFields);
-          const candidate = idleCompactionCandidate(state, now);
-          if (candidate === undefined) return;
+          const candidate = idleCompactionCandidate(state, now, tokenThreshold);
+          if (candidate === undefined || candidate.usedTokens <= tokenThreshold) return;
           const message = yield* orchestrator.getThreadRecords(threadId, ["messages"], {
             messageIds: [state.runs.find((run) => run.id === candidate.runId)!.userMessageId],
           });

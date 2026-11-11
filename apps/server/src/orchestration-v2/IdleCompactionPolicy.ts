@@ -10,6 +10,8 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
+export const DEFAULT_IDLE_COMPACT_TOKENS = 200_000;
+
 export const IDLE_COMPACTION_DELAY_MS = 54 * 60 * 1_000;
 export const IDLE_COMPACTION_EXPIRY_MS = 60 * 60 * 1_000;
 
@@ -18,6 +20,8 @@ export interface IdleCompactionCandidate {
   readonly runId: RunId;
   readonly providerTurnId: ProviderTurnId;
   readonly activityAt: number;
+  readonly usedTokens: number;
+  readonly tokenThreshold: number;
 }
 
 export const IdleCompactionAdmission = Context.Reference<IdleCompactionCandidate | undefined>(
@@ -29,6 +33,12 @@ export const IdleCompactionPauseGuard = Context.Reference<
   (threadId: ThreadId) => Effect.Effect<boolean>
 >("t3/orchestration-v2/IdleCompactionPauseGuard", {
   defaultValue: () => () => Effect.succeed(false),
+});
+
+export const IdleCompactionTokenThresholds = Context.Reference<
+  () => Effect.Effect<ReadonlyMap<ThreadId, number>>
+>("t3/orchestration-v2/IdleCompactionTokenThresholds", {
+  defaultValue: () => () => Effect.succeed(new Map()),
 });
 
 export const idleCompactionFields = [
@@ -51,6 +61,7 @@ const live = (status: string) =>
 export function idleCompactionCandidate(
   state: IdleCompactionState,
   now: number,
+  tokenThreshold = DEFAULT_IDLE_COMPACT_TOKENS,
 ): IdleCompactionCandidate | undefined {
   const { thread } = state;
   if (
@@ -120,8 +131,6 @@ export function idleCompactionCandidate(
   )
     return;
   const measuredUsage = latestNativeContextUsage(state, provider);
-  if ((measuredUsage?.usage.usedTokens ?? provider.contextUsage?.usedTokens ?? 0) <= 200_000)
-    return;
   const activityAt = Math.max(
     DateTime.toEpochMillis(run.completedAt),
     DateTime.toEpochMillis(turn.completedAt),
@@ -137,7 +146,14 @@ export function idleCompactionCandidate(
   const age = now - activityAt;
   if (!Number.isFinite(age) || age < IDLE_COMPACTION_DELAY_MS || age >= IDLE_COMPACTION_EXPIRY_MS)
     return;
-  return { threadId: thread.id, runId: run.id, providerTurnId: turn.id, activityAt };
+  return {
+    threadId: thread.id,
+    runId: run.id,
+    providerTurnId: turn.id,
+    activityAt,
+    usedTokens: measuredUsage?.usage.usedTokens ?? provider.contextUsage?.usedTokens ?? 0,
+    tokenThreshold,
+  };
 }
 
 export function sameIdleCompactionCandidate(
@@ -146,6 +162,7 @@ export function sameIdleCompactionCandidate(
 ): boolean {
   return (
     right !== undefined &&
+    right.usedTokens > left.tokenThreshold &&
     left.threadId === right.threadId &&
     left.runId === right.runId &&
     left.providerTurnId === right.providerTurnId &&
