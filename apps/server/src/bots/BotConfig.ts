@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 const BotConfigFile = Schema.Struct({
   name: Schema.String,
   homeThreadId: ThreadId,
+  idleCompactTokens: Schema.optional(Schema.Unknown),
   triageThreadId: Schema.optional(ThreadId),
   dmRelayThreadId: Schema.optional(ThreadId),
   scheduledTaskId: Schema.optional(ScheduledTaskId),

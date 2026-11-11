@@ -379,6 +379,28 @@ it.effect("lists only summaries and gets charter, Slack DMs and spawned workers"
         for (const botId of ["missing", "broken", "../helper", "", "Release Bot"]) {
           expect((yield* bots.get({ botId }).pipe(Effect.flip))._tag).toBe("BotError");
         }
+        expect(Array.from(yield* bots.getIdleCompactionThresholds())).toEqual([]);
+        for (const { idleCompactTokens, expected } of [
+          { idleCompactTokens: 120_000, expected: [["home", 120_000]] },
+          { idleCompactTokens: 220_000, expected: [["home", 220_000]] },
+          ...[0, -1, 1.5, "120000", null, true, {}, []].map((idleCompactTokens) => ({
+            idleCompactTokens,
+            expected: [],
+          })),
+        ]) {
+          yield* fs.writeFileString(
+            path.join(root, "helper", "bot.json"),
+            toJson({
+              name: "Helper",
+              homeThreadId: "home",
+              triageThreadId: "triage",
+              scheduledTaskId: "task-1",
+              idleCompactTokens,
+            }),
+          );
+          expect(Array.from(yield* bots.getIdleCompactionThresholds())).toEqual(expected);
+          expect((yield* bots.list()).bots.map((bot) => bot.id)).toEqual(["helper"]);
+        }
         return yield* bots.get({ botId: "helper" });
       }),
     );

@@ -201,7 +201,10 @@ import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as BotsRuntime from "./bots/runtime.ts";
 import { BotService } from "./bots/BotService.ts";
-import { IdleCompactionPauseGuard } from "./orchestration-v2/IdleCompactionPolicy.ts";
+import {
+  IdleCompactionPauseGuard,
+  IdleCompactionTokenThresholds,
+} from "./orchestration-v2/IdleCompactionPolicy.ts";
 import * as OpenItemService from "./openItems/OpenItemService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
@@ -662,6 +665,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       yield* ForkIdleCompactionService.make.pipe(
         Effect.flatMap((service) => service.start()),
         Effect.provideService(IdleCompactionPauseGuard, bots.isHomeThreadPaused),
+        Effect.provideService(IdleCompactionTokenThresholds, bots.getIdleCompactionThresholds),
       );
     }),
   ).pipe(
