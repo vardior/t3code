@@ -179,7 +179,7 @@ function selectOpenCodeRuntimeTextGeneration(
         v2: v2.generateTranscriptionPostProcessing(input),
       }),
     generateBotRoute: (input) =>
-      byOpenCodeRuntime(probe.get, {
+      byOpenCodeRuntime(resolve, {
         v1: v1.generateBotRoute(input),
         v2: v2.generateBotRoute(input),
       }),
