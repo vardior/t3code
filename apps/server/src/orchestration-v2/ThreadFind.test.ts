@@ -803,6 +803,50 @@ describe("V2 history materialization", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("pages adjacent conversations from a snapshot cursor anchored to filtered work", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const items = Array.from({ length: 61 }, (_, turn) => [
+        item(`user:${turn}`, turn * 3, `request ${turn}`, "user_message"),
+        item(`reply:${turn}`, turn * 3 + 1, `reply ${turn}`),
+        {
+          ...item(`tool:${turn}`, turn * 3 + 2, ""),
+          type: "command_execution" as const,
+          input: "pwd",
+          output: "work".repeat(10_000),
+          exitCode: 0,
+        },
+      ]).flat();
+      yield* putItems(items);
+      const snapshot = yield* projection.getThreadSnapshot(threadId);
+      let cursor: string | null = encodeThreadHistoryCursor({
+        snapshotSequence: snapshot.snapshotSequence,
+        sourceThreadId: threadId,
+        sourceItemId: "tool:59",
+        position: 2,
+      });
+      for (const firstTurn of [40, 20, 0]) {
+        assert.isNotNull(cursor);
+        const page: OrchestrationV2ThreadHistoryPage = yield* projection.getThreadHistoryPage(
+          threadId,
+          cursor!,
+          undefined,
+          true,
+        );
+        assert.deepEqual(
+          page.items.map((row) => row.sourceItemId),
+          Array.from({ length: 20 }, (_, offset) => [
+            `user:${firstTurn + offset}`,
+            `reply:${firstTurn + offset}`,
+          ]).flat(),
+        );
+        assert.equal(page.hasMoreHistory, firstTurn !== 0);
+        cursor = page.nextCursor;
+      }
+      assert.isNull(cursor);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("pages long turns without duplicating or skipping messages", () =>
     Effect.gen(function* () {
       const projection = yield* setup;
