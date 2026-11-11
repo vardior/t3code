@@ -390,7 +390,7 @@ describe("bot chat run status", () => {
 
 describe("bot chat automatic history", () => {
   const history = { hasMoreHistory: true, historyCursor: "earlier", loading: false, error: null };
-  const input = { hasOwnerMessage: false, history, autoLoadedPages: 0 };
+  const input = { hasOwnerMessage: false, history };
 
   it("loads through wake-only pages until an owner message appears", () => {
     const wake = message({
@@ -420,9 +420,7 @@ describe("bot chat automatic history", () => {
     }
   });
 
-  it("stops after five pages and waits during loads or errors", () => {
-    expect(shouldLoadEarlierBotChatHistory({ ...input, autoLoadedPages: 4 })).toBe(true);
-    expect(shouldLoadEarlierBotChatHistory({ ...input, autoLoadedPages: 5 })).toBe(false);
+  it("waits during loads or errors and stops when history is exhausted", () => {
     for (const change of [
       { hasMoreHistory: false },
       { historyCursor: null },

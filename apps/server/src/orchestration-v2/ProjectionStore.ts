@@ -5991,7 +5991,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const index = yield* readTimelineIndex(threadId, new Set(), workMode !== undefined);
+            const index = yield* readTimelineIndex(
+              threadId,
+              new Set(),
+              !conversationOnly && workMode !== undefined,
+            );
             if (index.records.thread.deletedAt !== null)
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
             const revisions = yield* sql<{
@@ -6005,7 +6009,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               position,
               canonicalPosition: position,
             }));
-            const historyItems = workMode === "deferred" ? deferWorkHistoryRows(indexed) : indexed;
+            const historyItems =
+              conversationOnly && throughEntryId === undefined
+                ? indexed.filter((row) => isConversationHistoryItem(row.item))
+                : workMode === "deferred"
+                  ? deferWorkHistoryRows(indexed)
+                  : indexed;
             const selection = yield* Effect.try({
               try: () => {
                 const policy = olderHistoryPagePolicy({ items: indexed, cursor, throughEntryId });

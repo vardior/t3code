@@ -6,6 +6,7 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { conversationThreadHistory } from "@t3tools/client-runtime/state/thread-history-merge";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
   botChatHistoryStart,
@@ -107,7 +108,7 @@ function BotConversation(props: {
   const detail = useBotDetail(environmentId, bot.id);
   const thread = useEnvironmentThread(environmentId, threadId);
   const projection = Option.getOrNull(thread.data);
-  const history = thread.history;
+  const history = conversationThreadHistory(thread.history);
   const projectChat = useMemo(() => createBotChatProjector(), []);
   const items = useMemo(() => {
     const messages = projection?.messages ?? [];
@@ -118,6 +119,7 @@ function BotConversation(props: {
       messages,
       runs: projection?.runs ?? [],
       turnItems: projection?.turnItems ?? [],
+      visibleTurnItems: projection?.visibleTurnItems ?? [],
     });
   }, [projectChat, bot, detail.data, projection, history.hasMoreHistory]);
   const workingLabel = useMemo(() => botWorkingLabel(projection), [projection]);
@@ -146,15 +148,14 @@ function BotConversation(props: {
   const loadEarlier = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
-  const autoHistory = useRef({ pages: 0, cursor: null as string | null });
+  const autoHistory = useRef<string | null>(null);
   const hasOwnerMessage = items.some((item) => item.kind === "you");
   useEffect(() => {
     if (projection === null || thread.status === "deleted") return;
-    if (autoHistory.current.cursor === history.historyCursor) return;
-    const autoLoadedPages = autoHistory.current.pages;
-    if (!shouldLoadEarlierBotChatHistory({ hasOwnerMessage, history, autoLoadedPages })) return;
-    autoHistory.current = { pages: autoLoadedPages + 1, cursor: history.historyCursor };
-    void loadEarlier({ environmentId, input: { threadId } });
+    if (autoHistory.current === history.historyCursor) return;
+    if (!shouldLoadEarlierBotChatHistory({ hasOwnerMessage, history })) return;
+    autoHistory.current = history.historyCursor;
+    void loadEarlier({ environmentId, input: { threadId, conversationOnly: true } });
   }, [environmentId, hasOwnerMessage, history, loadEarlier, projection, thread.status, threadId]);
 
   const refreshBots = props.refresh;

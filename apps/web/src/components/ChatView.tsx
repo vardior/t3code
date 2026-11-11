@@ -281,6 +281,7 @@ import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
 import { useSideChat } from "./chat/useSideChat";
+import { conversationThreadHistory } from "@t3tools/client-runtime/state/thread-history-merge";
 import type { ChatViewPresentation } from "./chatViewPresentation";
 import { openItemIds } from "@t3tools/client-runtime/state/open-items";
 import { useRemoteOpenState } from "~/remoteOpen";
@@ -536,7 +537,10 @@ export default function ChatView(props: ChatViewProps) {
     activeProviderThread,
   );
   const serverVisibleTurnItems = useQuietThreadVisibleTurnItems(routeThreadDetailRef);
-  const serverThreadHistory = useThreadHistory(routeThreadDetailRef);
+  const rawServerThreadHistory = useThreadHistory(routeThreadDetailRef);
+  const serverThreadHistory = presentation
+    ? conversationThreadHistory(rawServerThreadHistory)
+    : rawServerThreadHistory;
   const threadHistoryControls = (() => {
     if (routeThreadDetailRef === null || !shouldShowLoadEarlierControl(serverThreadHistory)) {
       return undefined;
@@ -550,6 +554,7 @@ export default function ChatView(props: ChatViewProps) {
           environmentId: routeThreadDetailRef.environmentId,
           input: {
             threadId: routeThreadDetailRef.threadId,
+            conversationOnly: presentation !== undefined,
             ...(throughEntryId === undefined ? {} : { throughEntryId }),
           },
         });

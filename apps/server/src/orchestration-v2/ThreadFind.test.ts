@@ -765,6 +765,44 @@ describe("V2 history materialization", () => {
       }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("pages conversation rows through tool-heavy agent runs", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const items = [
+        item("owner", 0, "Hello", "user_message"),
+        item("reply", 1, "Owner reply"),
+        ...Array.from({ length: 8 }, (_, index) => [
+          {
+            ...item(`wake:${index}`, index * 101 + 2, "Wake", "user_message"),
+            createdBy: "agent" as const,
+            creationSource: "mcp" as const,
+          },
+          ...Array.from({ length: 100 }, (_, tool) => ({
+            ...item(`tool:${index}:${tool}`, index * 101 + tool + 3, ""),
+            type: "command_execution" as const,
+            input: "pwd",
+            output: "work".repeat(10_000),
+            exitCode: 0,
+          })),
+        ]).flat(),
+      ];
+      yield* putItems(items);
+      const snapshot = yield* projection.getThreadSnapshot(threadId);
+      const cursor = encodeThreadHistoryCursor({
+        snapshotSequence: snapshot.snapshotSequence,
+        sourceThreadId: threadId,
+        sourceItemId: "absent",
+        position: items.length,
+      });
+      const page = yield* projection.getThreadHistoryPage(threadId, cursor, undefined, true);
+      assert.deepEqual(
+        page.items.map((row) => row.sourceItemId),
+        ["owner", "reply", ...Array.from({ length: 8 }, (_, index) => `wake:${index}`)],
+      );
+      assert.isFalse(page.hasMoreHistory);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("pages long turns without duplicating or skipping messages", () =>
     Effect.gen(function* () {
       const projection = yield* setup;

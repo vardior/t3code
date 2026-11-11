@@ -287,8 +287,14 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     threadState,
     loadWork: (anchorId: string) =>
       historyController.loadEarlier(TARGET.environmentId, THREAD_ID, undefined, anchorId),
-    loadEarlier: (throughEntryId?: string) =>
-      historyController.loadEarlier(TARGET.environmentId, THREAD_ID, throughEntryId),
+    loadEarlier: (throughEntryId?: string, conversationOnly?: boolean) =>
+      historyController.loadEarlier(
+        TARGET.environmentId,
+        THREAD_ID,
+        throughEntryId,
+        undefined,
+        conversationOnly,
+      ),
     reconcilePendingWork: historyController.reconcilePendingWork(TARGET.environmentId, THREAD_ID),
     inputs,
     observed,
@@ -1049,6 +1055,63 @@ describe("EnvironmentThreads", () => {
           message: "History did not advance.",
         });
         expect((yield* SubscriptionRef.get(harness.threadState)).history.loading).toBe(false);
+      }),
+    );
+    it.effect("loads bot conversation without consuming the full thread's work cursor", () =>
+      Effect.gen(function* () {
+        const prompt = {
+          ...command("owner", "completed", 0, 0),
+          type: "user_message" as const,
+          messageId: MessageId.make("owner"),
+          inputIntent: "turn_start" as const,
+          createdBy: "user" as const,
+          creationSource: "web" as const,
+          text: "Hello",
+          attachments: [],
+        };
+        const wake = {
+          ...prompt,
+          id: TurnItemId.make("wake"),
+          messageId: MessageId.make("wake"),
+          createdBy: "agent" as const,
+        };
+        const requests: Array<[string | null, string | null]> = [];
+        const harness = yield* makeHarness({
+          cached: cachedItem(command("tail", "completed")),
+          cachedHistory: { historyCursor: "older", hasMoreHistory: true },
+          historyHttpClient: HttpClient.make((request, url) => {
+            const view = url.searchParams.get("view");
+            const cursor = url.searchParams.get("cursor");
+            requests.push([view, cursor]);
+            return Effect.succeed(
+              view === "conversation"
+                ? historyPage(
+                    request,
+                    [localRow(cursor === "older" ? wake : prompt, 0)],
+                    cursor === "older" ? "owner" : null,
+                  )
+                : historyPage(request, [localRow(command("work", "completed"), 0)], null),
+            );
+          }),
+        });
+        expect(yield* harness.loadEarlier(undefined, true)).toEqual({ _tag: "loaded" });
+        const state = yield* SubscriptionRef.get(harness.threadState);
+        expect(state.history).toMatchObject({
+          historyCursor: "older",
+          hasMoreHistory: true,
+          loading: false,
+          conversation: { historyCursor: null, hasMoreHistory: false },
+        });
+        expect(
+          Option.getOrThrow(state.data).visibleTurnItems.map((row) => row.sourceItemId),
+        ).toEqual(["owner", "wake", "tail"]);
+        expect(yield* harness.loadEarlier(undefined, true)).toEqual({ _tag: "noop" });
+        expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+        expect(requests).toEqual([
+          ["conversation", "older"],
+          ["conversation", "owner"],
+          [null, "older"],
+        ]);
       }),
     );
     it.effect("loads deferred work on demand and resumes a failed page", () =>
