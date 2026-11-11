@@ -14,6 +14,8 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
+import * as Duration from "effect/Duration";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Etag from "effect/http/Etag";
 import * as HttpPlatform from "effect/http/HttpPlatform";
@@ -113,11 +115,14 @@ const withRoutes = <A, E>(
 ) =>
   Effect.gen(function* () {
     const random = yield* SecureRandom.SecureRandom;
-    const context = Context.make(SecureRandom.SecureRandom, random);
+    const clock = yield* Clock.Clock;
+    const context = Context.make(SecureRandom.SecureRandom, random).pipe(
+      Context.add(Clock.Clock, clock),
+    );
     let routerAuth: EnvironmentAuth.EnvironmentAuth["Service"] | undefined;
     const layerRoutes = makeLayerRoutes((auth) => {
       routerAuth = auth;
-    }, linkState);
+    }, linkState).pipe(Layer.provide(Layer.succeed(Clock.Clock, clock)));
     return yield* Effect.acquireUseRelease(
       Effect.sync(() => HttpRouter.toWebHandler(layerRoutes, { disableLogger: true })),
       (web) =>
@@ -163,13 +168,14 @@ const decide = (
     ),
   );
 
-const register = (handler: Handler, redirect = REDIRECT) =>
+const register = (handler: Handler, redirect = REDIRECT, peerLink = false) =>
   handler(
     at("/oauth/mcp/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: encodeJson({
         client_name: "Claude Code",
+        ...(peerLink ? { software_id: MCP_PEER_LINK_SOFTWARE_ID } : {}),
         redirect_uris: [redirect],
         grant_types: ["authorization_code", "refresh_token"],
         token_endpoint_auth_method: "none",
@@ -177,8 +183,8 @@ const register = (handler: Handler, redirect = REDIRECT) =>
     }),
   );
 
-const registeredClientId = (handler: Handler, redirect = REDIRECT) =>
-  register(handler, redirect).pipe(
+const registeredClientId = (handler: Handler, redirect = REDIRECT, peerLink = false) =>
+  register(handler, redirect, peerLink).pipe(
     Effect.flatMap((response) => json<{ client_id: string }>(response)),
     Effect.map((body) => body.client_id),
   );
@@ -210,6 +216,7 @@ it.live("derives discovery metadata from the origin the client reached", () =>
         token_endpoint: `${ORIGIN}/oauth/mcp/token`,
         registration_endpoint: `${ORIGIN}/oauth/mcp/register`,
         code_challenge_methods_supported: ["S256"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
       });
     }),
   ),
@@ -238,7 +245,9 @@ it.live("registers loopback and https clients and never redirects for an unverif
 
       const registered = yield* register(handler);
       expect(registered.status).toBe(201);
-      const { client_id: clientId } = (yield* json<unknown>(registered)) as { client_id: string };
+      const registration = yield* json<{ client_id: string; grant_types: string[] }>(registered);
+      expect(registration.grant_types).toEqual(["authorization_code", "refresh_token"]);
+      const clientId = registration.client_id;
 
       const forged = yield* handler(
         at(
@@ -325,9 +334,11 @@ it.live("signs in with a pairing code and issues a token only /mcp accepts", () 
       expect(tokenResponse.status).toBe(200);
       const token = (yield* json<unknown>(tokenResponse)) as {
         access_token: string;
+        refresh_token: string;
         scope: string;
       };
       expect(token.scope).toBe("orchestration:read orchestration:operate");
+      expect(token.refresh_token).toEqual(expect.any(String));
 
       expect((yield* exchange(verifier)).status).toBe(400);
 
@@ -351,6 +362,188 @@ it.live("signs in with a pairing code and issues a token only /mcp accepts", () 
         }),
       );
       expect(ticket.status).toBe(401);
+    }),
+  ),
+);
+
+const signInForRefresh = (
+  handler: Handler,
+  auth: EnvironmentAuth.EnvironmentAuth["Service"],
+  access: AuthMcpClientAccess = "auto",
+  peerLink = false,
+) =>
+  Effect.gen(function* () {
+    const clientId = yield* registeredClientId(handler, REDIRECT, peerLink);
+    const pairing = yield* auth.issuePairingCredential();
+    const params = authorizeParams(clientId);
+    const approved = yield* decide(handler, params, {
+      _tag: "pairing-code",
+      access,
+      code: pairing.credential,
+    });
+    const response = yield* handler(
+      at(
+        "/oauth/mcp/token",
+        form({
+          grant_type: "authorization_code",
+          code: new URL(approved.redirectTo!).searchParams.get("code")!,
+          redirect_uri: params.redirect_uri,
+          client_id: clientId,
+          code_verifier: verifier,
+        }),
+      ),
+    );
+    expect(response.status).toBe(200);
+    const tokens = yield* json<{
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+      scope: string;
+    }>(response);
+    expect(tokens.refresh_token).toEqual(expect.any(String));
+    return { clientId, tokens };
+  });
+
+const mcpRequest = (token: string) =>
+  HttpServerRequest.fromWeb(at("/mcp", { headers: { authorization: `Bearer ${token}` } }));
+
+it.effect.each([
+  { access: "read-only", peerLink: false },
+  { access: "full-access", peerLink: true },
+] as const)(
+  "refreshes an expired $access session and preserves its peer link flag",
+  ({ access, peerLink }) =>
+    withRoutes((handler, auth) =>
+      Effect.gen(function* () {
+        const { clientId, tokens } = yield* signInForRefresh(handler, auth, access, peerLink);
+        const original = yield* auth.authenticateMcpClient(mcpRequest(tokens.access_token));
+        expect(tokens.expires_in).toBe(30 * 24 * 60 * 60);
+        expect(
+          yield* auth
+            .authenticateMcpClient(mcpRequest(tokens.refresh_token))
+            .pipe(Effect.isFailure),
+        ).toBe(true);
+        yield* TestClock.adjust(Duration.days(30));
+        expect(
+          yield* auth.authenticateMcpClient(mcpRequest(tokens.access_token)).pipe(Effect.isFailure),
+        ).toBe(true);
+        const refresh = () =>
+          handler(
+            at(
+              "/oauth/mcp/token",
+              form({
+                grant_type: "refresh_token",
+                refresh_token: tokens.refresh_token,
+                client_id: clientId,
+              }),
+            ),
+          );
+        const response = yield* refresh();
+        expect(response.status).toBe(200);
+        const renewed = yield* json<typeof tokens>(response);
+        expect(renewed.access_token).not.toBe(tokens.access_token);
+        expect(renewed.refresh_token).not.toBe(tokens.refresh_token);
+        expect(renewed.scope).toBe(tokens.scope);
+        expect(renewed.expires_in).toBe(30 * 24 * 60 * 60);
+        const current = yield* auth.authenticateMcpClient(mcpRequest(renewed.access_token));
+        expect(current).toMatchObject({ label: "Claude Code", access, peerLink });
+        expect(current.sessionId).not.toBe(original.sessionId);
+        const replay = yield* refresh();
+        expect(replay.status).toBe(400);
+        expect(yield* json<unknown>(replay)).toMatchObject({ error: "invalid_grant" });
+        yield* auth.revokeSession(current.sessionId);
+        const revoked = yield* handler(
+          at(
+            "/oauth/mcp/token",
+            form({
+              grant_type: "refresh_token",
+              refresh_token: renewed.refresh_token,
+              client_id: clientId,
+            }),
+          ),
+        );
+        expect(revoked.status).toBe(400);
+        expect(yield* json<unknown>(revoked)).toMatchObject({ error: "invalid_grant" });
+      }),
+    ),
+);
+
+it.effect.each([
+  "access-token",
+  "different-client",
+  "different-resource",
+  "tampered",
+  "expired",
+  "revoked",
+  "missing-token",
+  "missing-client",
+  "unknown-client",
+] as const)("rejects a refresh grant with %s", (scenario) =>
+  withRoutes((handler, auth) =>
+    Effect.gen(function* () {
+      const { clientId, tokens } = yield* signInForRefresh(handler, auth);
+      const body: Record<string, string> = {
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token,
+        client_id: clientId,
+        resource: `${ORIGIN}/mcp`,
+      };
+      if (scenario === "access-token") body.refresh_token = tokens.access_token;
+      if (scenario === "different-client")
+        body.client_id = yield* registeredClientId(handler, "https://other.example/callback");
+      if (scenario === "different-resource") body.resource = "https://other.example/mcp";
+      if (scenario === "tampered")
+        body.refresh_token = `${tokens.refresh_token.split(".")[0]}.invalid`;
+      if (scenario === "expired") yield* TestClock.adjust(Duration.days(90));
+      if (scenario === "revoked") {
+        const session = yield* auth.authenticateMcpClient(mcpRequest(tokens.access_token));
+        yield* auth.revokeSession(session.sessionId);
+      }
+      if (scenario === "missing-token") delete body.refresh_token;
+      if (scenario === "missing-client") delete body.client_id;
+      if (scenario === "unknown-client") body.client_id = "unknown-client";
+      const response = yield* handler(at("/oauth/mcp/token", form(body)));
+      expect(response.status).toBe(400);
+      expect(yield* json<unknown>(response)).toMatchObject({
+        error:
+          scenario === "missing-token" || scenario === "missing-client"
+            ? "invalid_request"
+            : scenario === "unknown-client"
+              ? "invalid_client"
+              : "invalid_grant",
+      });
+    }),
+  ),
+);
+
+it.effect("allows only one concurrent refresh and revokes the old access token", () =>
+  withRoutes((handler, auth) =>
+    Effect.gen(function* () {
+      const { clientId, tokens } = yield* signInForRefresh(handler, auth);
+      const refresh = () =>
+        handler(
+          at(
+            "/oauth/mcp/token",
+            form({
+              grant_type: "refresh_token",
+              refresh_token: tokens.refresh_token,
+              client_id: clientId,
+              resource: `${ORIGIN}/mcp`,
+            }),
+          ),
+        );
+      const responses = yield* Effect.all([refresh(), refresh()], { concurrency: "unbounded" });
+      expect(responses.map((response) => response.status).toSorted()).toEqual([200, 400]);
+      const renewed = yield* json<typeof tokens>(
+        responses.find((response) => response.status === 200)!,
+      );
+      const winner = yield* auth.authenticateMcpClient(mcpRequest(renewed.access_token));
+      expect((yield* auth.listSessions()).map((session) => session.sessionId)).toEqual([
+        winner.sessionId,
+      ]);
+      expect(
+        yield* auth.authenticateMcpClient(mcpRequest(tokens.access_token)).pipe(Effect.isFailure),
+      ).toBe(true);
     }),
   ),
 );

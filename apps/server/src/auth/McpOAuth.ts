@@ -9,7 +9,8 @@ import {
   AuthMcpTokenError,
   type AuthMcpTokenRequest,
   type AuthMcpTokenResult,
-  type AuthMcpClientAccess,
+  AuthMcpClientAccess,
+  AuthSessionId,
   type AuthEnvironmentScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -25,6 +26,7 @@ import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
+import * as Duration from "effect/Duration";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -38,6 +40,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as PayloadSigner from "./PayloadSigner.ts";
+import * as AuthSessions from "../persistence/AuthSessions.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import {
@@ -53,6 +56,7 @@ import { requestUrl } from "../requestUrl.ts";
 
 const SIGNING_SECRET_NAME = "mcp-oauth-signing-key";
 const AUTHORIZATION_CODE_TTL_MS = 60_000;
+const REFRESH_TOKEN_TTL_MS = Duration.toMillis(Duration.days(90));
 const MAX_CLIENT_NAME_LENGTH = 100;
 const MAX_REDIRECT_URIS = 5;
 const MAX_REDIRECT_URI_LENGTH = 512;
@@ -94,7 +98,7 @@ export const authorizationServerMetadata = (
   token_endpoint: `${urls.issuer}/oauth/mcp/token`,
   registration_endpoint: `${urls.issuer}/oauth/mcp/register`,
   response_types_supported: ["code"],
-  grant_types_supported: ["authorization_code"],
+  grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
   token_endpoint_auth_methods_supported: ["none"],
   scopes_supported: MCP_OAUTH_SCOPES,
@@ -193,6 +197,22 @@ interface PendingCode {
   readonly expiresAtMs: number;
 }
 
+const RefreshTokenClaims = Schema.Struct({
+  v: Schema.Literal(1),
+  kind: Schema.Literal("mcp-refresh"),
+  sid: AuthSessionId,
+  clientId: Schema.String,
+  access: AuthMcpClientAccess,
+  peerLink: Schema.Boolean,
+  clientName: Schema.String,
+  resource: Schema.String,
+  exp: Schema.Number,
+});
+const decodeRefreshTokenClaims = Schema.decodeUnknownOption(
+  Schema.fromJsonString(RefreshTokenClaims),
+);
+const encodeRefreshTokenClaims = Schema.encodeEffect(Schema.fromJsonString(RefreshTokenClaims));
+
 export type ApprovalDecision = Exclude<AuthMcpApprovalDecision, { readonly _tag: "deny" }>;
 
 export class McpOAuth extends Context.Service<
@@ -255,6 +275,7 @@ export const redirectForError = (error: McpOAuthRedirectError, issuer: string) =
 
 const make = Effect.gen(function* () {
   const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
+  const authSessions = yield* AuthSessions.AuthSessionRepository;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const random = yield* SecureRandom.SecureRandom;
   const digester = yield* Digest.Digest;
@@ -265,6 +286,9 @@ const make = Effect.gen(function* () {
   );
   const signer = yield* PayloadSigner.fromSecret(
     yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32).pipe(Effect.orDie),
+  );
+  const refreshSigner = yield* PayloadSigner.fromSecret(
+    yield* secretStore.getOrCreateRandom("server-signing-key", 32).pipe(Effect.orDie),
   );
   const codes = yield* Ref.make<ReadonlyMap<string, PendingCode>>(new Map());
 
@@ -503,12 +527,120 @@ const make = Effect.gen(function* () {
       iss: authorization.issuer,
     });
 
+  const tokenError = (error: AuthMcpTokenError["error"], description: string) =>
+    new AuthMcpTokenError({ error, error_description: description });
+
+  const issueTokens = Effect.fn("McpOAuth.issueTokens")(function* (
+    grant: Pick<PendingCode, "clientId" | "clientName" | "access" | "peerLink" | "resource">,
+    request: HttpServerRequest.HttpServerRequest,
+    previousSessionId?: AuthSessionId,
+  ) {
+    const now = yield* Clock.currentTimeMillis;
+    const issued = yield* environmentAuth
+      .issueMcpClientSession({
+        label: grant.clientName,
+        access: grant.access,
+        peerLink: grant.peerLink,
+        client: deriveAuthClientMetadata({ request }),
+      })
+      .pipe(Effect.mapError(() => tokenError("invalid_grant", "The session could not be issued.")));
+    return yield* Effect.gen(function* () {
+      const body = yield* encodeRefreshTokenClaims({
+        v: 1,
+        kind: "mcp-refresh",
+        sid: issued.sessionId,
+        clientId: grant.clientId,
+        clientName: grant.clientName,
+        access: grant.access,
+        peerLink: grant.peerLink,
+        resource: grant.resource,
+        exp: now + REFRESH_TOKEN_TTL_MS,
+      }).pipe(
+        Effect.map(base64UrlEncode),
+        Effect.mapError(() =>
+          tokenError("invalid_grant", "The refresh token could not be issued."),
+        ),
+      );
+      const signature = yield* refreshSigner.sign(body);
+      if (previousSessionId !== undefined) {
+        const revoked = yield* environmentAuth
+          .revokeSession(previousSessionId)
+          .pipe(
+            Effect.mapError(() => tokenError("invalid_grant", "The session could not be rotated.")),
+          );
+        if (!revoked)
+          return yield* tokenError(
+            "invalid_grant",
+            "The refresh token has already been used or revoked.",
+          );
+      }
+      return {
+        access_token: issued.token,
+        refresh_token: `${body}.${signature}`,
+        token_type: "Bearer" as const,
+        expires_in: Math.max(0, Math.floor((issued.expiresAt.epochMilliseconds - now) / 1000)),
+        scope: encodeOAuthScope(mcpClientScopes(grant.access)),
+      };
+    }).pipe(
+      Effect.onError(() => environmentAuth.revokeSession(issued.sessionId).pipe(Effect.orDie)),
+    );
+  }, Effect.uninterruptible);
+
+  const refreshTokens = Effect.fn("McpOAuth.refreshTokens")(function* (
+    request: HttpServerRequest.HttpServerRequest,
+    urls: McpOAuthUrls,
+    token: AuthMcpTokenRequest,
+  ) {
+    const refreshToken = token.refresh_token && Redacted.value(token.refresh_token);
+    const clientId = token.client_id;
+    if (!refreshToken || !clientId) {
+      return yield* tokenError("invalid_request", "refresh_token and client_id are required.");
+    }
+    if ((yield* parseClientId(clientId)) === undefined) {
+      return yield* tokenError("invalid_client", "The client is unknown.");
+    }
+    const invalidGrant = () =>
+      tokenError("invalid_grant", "The refresh token is invalid or expired.");
+    const [body, signature, extra] = refreshToken.split(".");
+    if (
+      !body ||
+      !signature ||
+      extra !== undefined ||
+      !(yield* refreshSigner.verify(body, signature))
+    ) {
+      return yield* invalidGrant();
+    }
+    const json = Option.liftThrowable(base64UrlDecodeUtf8)(body);
+    const decoded = Option.flatMap(json, decodeRefreshTokenClaims);
+    if (Option.isNone(decoded)) return yield* invalidGrant();
+    const claims = decoded.value;
+    const now = yield* Clock.currentTimeMillis;
+    if (
+      claims.exp <= now ||
+      claims.clientId !== clientId ||
+      claims.resource !== urls.resource ||
+      (token.resource !== undefined && token.resource !== claims.resource)
+    ) {
+      return yield* invalidGrant();
+    }
+    const session = yield* authSessions
+      .getById({ sessionId: claims.sid })
+      .pipe(Effect.mapError(invalidGrant));
+    if (Option.isNone(session) || session.value.revokedAt !== null) {
+      return yield* invalidGrant();
+    }
+    return yield* issueTokens(claims, request, claims.sid);
+  });
+
   const exchangeCode: McpOAuth["Service"]["exchangeCode"] = Effect.fn("McpOAuth.exchangeCode")(
     function* ({ request, urls, token }) {
-      const fail = (error: AuthMcpTokenError["error"], description: string) =>
-        new AuthMcpTokenError({ error, error_description: description });
+      const fail = tokenError;
+      if (token.grant_type === "refresh_token") return yield* refreshTokens(request, urls, token);
       if (token.grant_type !== "authorization_code") {
-        return yield* fail("unsupported_grant_type", "Only authorization_code is supported.");
+        return yield* fail(
+          "unsupported_grant_type",
+          "Only authorization_code and refresh_token are supported.",
+        );
       }
       const { redirect_uri: redirectUri, client_id: clientId } = token;
       const code = token.code && Redacted.value(token.code);
@@ -542,28 +674,7 @@ const make = Effect.gen(function* () {
       ) {
         return yield* fail("invalid_grant", "The authorization code is invalid or expired.");
       }
-      const issued = yield* environmentAuth
-        .issueMcpClientSession({
-          label: pending.clientName,
-          access: pending.access,
-          peerLink: pending.peerLink,
-          client: deriveAuthClientMetadata({ request }),
-        })
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.logError("Could not issue an MCP client session.", { cause }).pipe(
-              Effect.andThen(
-                Effect.fail(fail("invalid_grant", "The session could not be issued.")),
-              ),
-            ),
-          ),
-        );
-      return {
-        access_token: issued.token,
-        token_type: "Bearer",
-        expires_in: Math.max(0, Math.floor((issued.expiresAt.epochMilliseconds - now) / 1000)),
-        scope: encodeOAuthScope(mcpClientScopes(pending.access)),
-      };
+      return yield* issueTokens(pending, request);
     },
   );
 
