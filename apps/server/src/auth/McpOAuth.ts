@@ -287,9 +287,6 @@ const make = Effect.gen(function* () {
   const signer = yield* PayloadSigner.fromSecret(
     yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32).pipe(Effect.orDie),
   );
-  const refreshSigner = yield* PayloadSigner.fromSecret(
-    yield* secretStore.getOrCreateRandom("server-signing-key", 32).pipe(Effect.orDie),
-  );
   const codes = yield* Ref.make<ReadonlyMap<string, PendingCode>>(new Map());
 
   const sign = (domain: string, payload: string) => signer.sign(`${domain}.${payload}`);
@@ -561,7 +558,7 @@ const make = Effect.gen(function* () {
           tokenError("invalid_grant", "The refresh token could not be issued."),
         ),
       );
-      const signature = yield* refreshSigner.sign(body);
+      const signature = yield* sign("mcp-refresh-token", body);
       if (previousSessionId !== undefined) {
         const revoked = yield* environmentAuth
           .revokeSession(previousSessionId)
@@ -606,7 +603,7 @@ const make = Effect.gen(function* () {
       !body ||
       !signature ||
       extra !== undefined ||
-      !(yield* refreshSigner.verify(body, signature))
+      !(yield* signer.verify(`mcp-refresh-token.${body}`, signature))
     ) {
       return yield* invalidGrant();
     }
