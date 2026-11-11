@@ -5,6 +5,10 @@ import type {
 import { isOrchestrationV2TurnItemVisible } from "@t3tools/shared/orchestrationV2Timeline";
 
 export type ThreadHistoryMeta = {
+  readonly conversation?: {
+    readonly historyCursor: string | null;
+    readonly hasMoreHistory: boolean;
+  };
   readonly historyCursor: string | null;
   readonly hasMoreHistory: boolean;
   readonly loading: boolean;
@@ -12,6 +16,10 @@ export type ThreadHistoryMeta = {
   readonly expanded: boolean;
   readonly latestLocalTurnOrdinal: number | null;
 };
+
+export function conversationThreadHistory(history: ThreadHistoryMeta): ThreadHistoryMeta {
+  return history.conversation === undefined ? history : { ...history, ...history.conversation };
+}
 
 export const EMPTY_THREAD_HISTORY_META: ThreadHistoryMeta = {
   historyCursor: null,
@@ -174,6 +182,7 @@ export function applyHistoryPageMeta(
   },
 ): ThreadHistoryMeta {
   return {
+    ...current,
     historyCursor: page.nextCursor,
     hasMoreHistory: page.hasMoreHistory,
     loading: false,

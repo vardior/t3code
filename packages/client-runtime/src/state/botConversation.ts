@@ -261,15 +261,13 @@ export function shouldLoadEarlierBotChatHistory(input: {
     ThreadHistoryMeta,
     "hasMoreHistory" | "historyCursor" | "loading" | "error"
   >;
-  readonly autoLoadedPages: number;
 }): boolean {
   return (
     !input.hasOwnerMessage &&
     input.history.hasMoreHistory &&
     input.history.historyCursor !== null &&
     !input.history.loading &&
-    input.history.error === null &&
-    input.autoLoadedPages < 5
+    input.history.error === null
   );
 }
 

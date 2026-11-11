@@ -10,6 +10,8 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import { botChatItemsEqual, createBotChatProjector, visibleBotChatItem } from "./botChatRows.ts";
 import { shouldLoadEarlierBotChatHistory } from "./botConversation.ts";
+import { mergeOlderHistoryIntoProjection } from "./threadHistoryMerge.ts";
+import { v2Projection } from "./orchestrationV2TestFixtures.ts";
 
 const bot = {
   id: "bot",
@@ -124,10 +126,70 @@ describe("bot chat row projection", () => {
     const history = { hasMoreHistory: true, historyCursor: "earlier", loading: false, error: null };
     for (const items of [hidden, project({ ...input, messages: [message, ...input.messages] })]) {
       const hasOwnerMessage = items.some((item) => item.kind === "you");
-      expect(
-        shouldLoadEarlierBotChatHistory({ hasOwnerMessage, history, autoLoadedPages: 1 }),
-      ).toBe(!hasOwnerMessage);
+      expect(shouldLoadEarlierBotChatHistory({ hasOwnerMessage, history })).toBe(!hasOwnerMessage);
     }
+  });
+
+  it("shows an owner's paged messages and reply after agent-started tool work", () => {
+    const owner: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("owner-item"),
+      type: "user_message",
+      messageId: message.id,
+      inputIntent: "turn_start",
+      createdBy: "user",
+      creationSource: "web",
+      text: message.text,
+      attachments: [],
+    };
+    const reply: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("reply-item"),
+      type: "assistant_message",
+      messageId: MessageId.make("reply"),
+      text: "Owner reply",
+      streaming: false,
+    };
+    const work = Array.from({ length: 8 }, (_, run) => {
+      const runId = RunId.make(`agent-${run}`);
+      return [
+        {
+          ...owner,
+          id: TurnItemId.make(`wake-${run}`),
+          messageId: MessageId.make(`wake-${run}`),
+          runId,
+          createdBy: "agent" as const,
+          creationSource: "mcp" as const,
+        },
+        ...Array.from({ length: 25 }, (_, tool) => ({
+          ...notification,
+          id: TurnItemId.make(`tool-${run}-${tool}`),
+          runId,
+          toolName: "t3-code.thread_read",
+        })),
+      ];
+    }).flat();
+    const rows = [owner, reply, ...work].map((item, position) => ({
+      position,
+      visibility: "local" as const,
+      sourceThreadId: bot.homeThreadId,
+      sourceItemId: item.id,
+      item,
+    }));
+    const initial = {
+      ...v2Projection,
+      thread: { ...v2Projection.thread, id: bot.homeThreadId },
+      messages: [],
+      turnItems: work,
+      visibleTurnItems: rows.slice(2),
+    };
+    const project = createBotChatProjector();
+    expect(project({ ...initial, bot })).toEqual([]);
+    const loaded = mergeOlderHistoryIntoProjection(initial, rows.slice(0, 2));
+    expect(project({ ...loaded, bot })).toMatchObject([
+      { kind: "you", text: "Hello" },
+      { kind: "bot", text: "Owner reply" },
+    ]);
   });
 
   it("keeps the row list unchanged while an assistant streams, then adds its settled reply", () => {

@@ -42,6 +42,7 @@ import { fetchEnvironmentThreadHistoryPage } from "./threadHistoryHttp.ts";
 import {
   applyHistoryPageMeta,
   clearActiveHistoryLoading,
+  conversationThreadHistory,
   EMPTY_THREAD_HISTORY_META,
   isActiveHistoryRequestCursor,
   mergeOlderHistoryIntoProjection,
@@ -689,26 +690,29 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const loadEarlier = Effect.fn("EnvironmentThreadState.loadEarlier")(function* (
     throughEntryId?: string,
     workAnchorId?: string,
+    conversationOnly = false,
   ): Effect.fn.Return<ThreadHistoryController.ThreadHistoryLoadEarlierResult> {
     const workCursor = (latest: EnvironmentThreadState) =>
       Option.getOrNull(latest.data)?.visibleTurnItems.find(
         (row) => row.sourceItemId === workAnchorId,
       )?.item.deferredWork?.cursor ?? null;
+    const historyFor = (history: ThreadHistoryMeta) =>
+      conversationOnly ? conversationThreadHistory(history) : history;
     const current = yield* SubscriptionRef.get(state);
     const initialCursor =
-      workAnchorId === undefined ? current.history.historyCursor : workCursor(current);
+      workAnchorId === undefined ? historyFor(current.history).historyCursor : workCursor(current);
     if (
       current.status === "deleted" ||
       Option.isNone(current.data) ||
       initialCursor === null ||
-      (workAnchorId === undefined && !current.history.hasMoreHistory)
+      (workAnchorId === undefined && !historyFor(current.history).hasMoreHistory)
     )
       return { _tag: "noop" };
     if (workAnchorId === undefined && current.history.loading) return { _tag: "busy" };
     let requestCursor = initialCursor;
     const isCurrent = (latest: EnvironmentThreadState) =>
       workAnchorId === undefined
-        ? isActiveHistoryRequestCursor(requestCursor, latest.history)
+        ? isActiveHistoryRequestCursor(requestCursor, historyFor(latest.history))
         : workCursor(latest) === requestCursor;
     const staleResult = (
       latest: EnvironmentThreadState,
@@ -718,7 +722,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         : { _tag: "noop" };
     if (workAnchorId === undefined)
       yield* patchHistoryMeta((history) =>
-        isActiveHistoryRequestCursor(requestCursor, history)
+        isActiveHistoryRequestCursor(requestCursor, historyFor(history))
           ? { ...history, loading: true, error: null }
           : history,
       );
@@ -753,9 +757,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         const views =
           workAnchorId !== undefined
             ? ["work" as const]
-            : throughEntryId === undefined
-              ? [undefined]
-              : ["conversation" as const, undefined];
+            : conversationOnly
+              ? ["conversation" as const]
+              : throughEntryId === undefined
+                ? [undefined]
+                : ["conversation" as const, undefined];
         let nextCursor: string | null = null;
         for (const view of views) {
           const pageResult = yield* fetchEnvironmentThreadHistoryPage({
@@ -770,7 +776,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           if (Result.isFailure(pageResult))
             return yield* failLoad(formatHistoryError(pageResult.failure));
           const page = pageResult.success;
-          const complete = view !== "conversation";
+          const complete = conversationOnly || view !== "conversation";
           const keepPaging =
             complete &&
             (workAnchorId !== undefined
@@ -818,7 +824,18 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                         : latest.status,
                     history:
                       workAnchorId === undefined && complete
-                        ? { ...applyHistoryPageMeta(latest.history, page), loading: keepPaging }
+                        ? conversationOnly
+                          ? {
+                              ...latest.history,
+                              conversation: {
+                                historyCursor: page.nextCursor,
+                                hasMoreHistory: page.hasMoreHistory,
+                              },
+                              expanded: true,
+                              loading: keepPaging,
+                              error: null,
+                            }
+                          : { ...applyHistoryPageMeta(latest.history, page), loading: keepPaging }
                         : { ...latest.history, expanded: true },
                   },
                 ];
@@ -837,7 +854,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       Effect.onInterrupt(() =>
         SubscriptionRef.update(state, (latest) => ({
           ...latest,
-          history: clearActiveHistoryLoading(requestCursor, latest.history),
+          history: {
+            ...latest.history,
+            loading: clearActiveHistoryLoading(requestCursor, historyFor(latest.history)).loading,
+          },
         })),
       ),
     );
@@ -909,8 +929,8 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   if (Option.isSome(historyController)) {
     const scope = yield* Scope.Scope;
     const registration = yield* historyController.value.register(environmentId, threadId, {
-      loadEarlier: (throughEntryId, workAnchorId) =>
-        loadEarlier(throughEntryId, workAnchorId).pipe(
+      loadEarlier: (throughEntryId, workAnchorId, conversationOnly) =>
+        loadEarlier(throughEntryId, workAnchorId, conversationOnly).pipe(
           Effect.forkIn(scope),
           Effect.flatMap(Fiber.join),
         ),

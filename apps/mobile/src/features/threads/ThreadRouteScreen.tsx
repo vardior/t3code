@@ -124,6 +124,7 @@ import {
 import { useStartSideChat } from "./useStartSideChat";
 import type { ThreadInspectorMode, ThreadInspectorTarget } from "./thread-inspector-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
+import { conversationThreadHistory } from "@t3tools/client-runtime/state/thread-history-merge";
 import type { ThreadRoutePresentation } from "./threadRoutePresentation";
 
 function firstRouteParam(value: string | string[] | undefined): string | null {
@@ -401,7 +402,9 @@ function ThreadRouteContent(
     reportFailure: false,
   });
   const historyControls = (() => {
-    const history = selectedThreadDetailState.history;
+    const history = props.presentation
+      ? conversationThreadHistory(selectedThreadDetailState.history)
+      : selectedThreadDetailState.history;
     if (!selectedThread) {
       return undefined;
     }
@@ -415,13 +418,20 @@ function ThreadRouteContent(
       onLoadEarlier: () => {
         void loadEarlierHistory({
           environmentId: selectedThread.environmentId,
-          input: { threadId: selectedThread.id },
+          input: {
+            threadId: selectedThread.id,
+            conversationOnly: props.presentation !== undefined,
+          },
         });
       },
       onLoadThrough: (throughEntryId: string) => {
         void loadEarlierHistory({
           environmentId: selectedThread.environmentId,
-          input: { threadId: selectedThread.id, throughEntryId },
+          input: {
+            threadId: selectedThread.id,
+            throughEntryId,
+            conversationOnly: props.presentation !== undefined,
+          },
         });
       },
     };

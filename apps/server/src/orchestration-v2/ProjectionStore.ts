@@ -106,6 +106,7 @@ import {
   deferWorkHistoryRows,
   selectDeferredWorkPage,
   encodeThreadHistoryCursor,
+  decodeThreadHistoryCursor,
   olderHistoryPagePolicy,
   selectHistoryPageFromCursor,
   selectRecentTimelineWindow,
@@ -5991,7 +5992,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const index = yield* readTimelineIndex(threadId, new Set(), workMode !== undefined);
+            const index = yield* readTimelineIndex(
+              threadId,
+              new Set(),
+              !conversationOnly && workMode !== undefined,
+            );
             if (index.records.thread.deletedAt !== null)
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
             const revisions = yield* sql<{
@@ -6005,10 +6010,37 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               position,
               canonicalPosition: position,
             }));
-            const historyItems = workMode === "deferred" ? deferWorkHistoryRows(indexed) : indexed;
+            const historyItems =
+              conversationOnly && throughEntryId === undefined
+                ? indexed.filter((row) => isConversationHistoryItem(row.item))
+                : workMode === "deferred"
+                  ? deferWorkHistoryRows(indexed)
+                  : indexed;
             const selection = yield* Effect.try({
               try: () => {
-                const policy = olderHistoryPagePolicy({ items: indexed, cursor, throughEntryId });
+                const decodedCursor = decodeThreadHistoryCursor(cursor);
+                const anchor = indexed.find(
+                  (row) =>
+                    row.sourceThreadId === decodedCursor.st &&
+                    row.sourceItemId === decodedCursor.si,
+                );
+                const historyCursor =
+                  anchor === undefined
+                    ? cursor
+                    : encodeThreadHistoryCursor({
+                        snapshotSequence: decodedCursor.seq,
+                        sourceThreadId: decodedCursor.st,
+                        sourceItemId: decodedCursor.si,
+                        position: decodedCursor.inclusive
+                          ? anchor.item.ordinal
+                          : anchor.canonicalPosition,
+                        inclusive: decodedCursor.inclusive === true,
+                      });
+                const policy = olderHistoryPagePolicy({
+                  items: indexed,
+                  cursor: historyCursor,
+                  throughEntryId,
+                });
                 const page =
                   workMode === "work"
                     ? selectDeferredWorkPage({
@@ -6020,7 +6052,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       })
                     : selectHistoryPageFromCursor({
                         items: historyItems,
-                        cursor,
+                        cursor: historyCursor,
                         snapshotSequence,
                         rowEncodedBytes: () => 0,
                         policy,

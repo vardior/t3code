@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { conversationThreadHistory } from "@t3tools/client-runtime/state/thread-history-merge";
 import { createBotChatProjector } from "@t3tools/client-runtime/state/bot-chat-rows";
 import {
   botChatHistoryStart,
@@ -62,7 +63,7 @@ export function BotChat(props: {
   const shell = useThreadShell(threadRef);
   useBotPreviewShortcuts(threadRef);
   const projection = useThreadProjection(threadRef)?.projection ?? null;
-  const history = useThreadHistory(threadRef);
+  const history = conversationThreadHistory(useThreadHistory(threadRef));
   const detail = useEnvironmentQuery(
     serverEnvironment.bots.get({ environmentId, input: { botId: bot.id } }),
   );
@@ -76,6 +77,7 @@ export function BotChat(props: {
       messages,
       runs: projection?.runs ?? [],
       turnItems: projection?.turnItems ?? [],
+      visibleTurnItems: projection?.visibleTurnItems ?? [],
     });
   }, [projectChat, bot, detail.data, history.hasMoreHistory, projection]);
   const workingLabel = useMemo(() => botWorkingLabel(projection), [projection]);
@@ -95,15 +97,14 @@ export function BotChat(props: {
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     reportFailure: false,
   });
-  const autoHistory = useRef({ pages: 0, cursor: null as string | null });
+  const autoHistory = useRef<string | null>(null);
   const hasOwnerMessage = items.some((item) => item.kind === "you");
   useEffect(() => {
     if (projection === null) return;
-    if (autoHistory.current.cursor === history.historyCursor) return;
-    const autoLoadedPages = autoHistory.current.pages;
-    if (!shouldLoadEarlierBotChatHistory({ hasOwnerMessage, history, autoLoadedPages })) return;
-    autoHistory.current = { pages: autoLoadedPages + 1, cursor: history.historyCursor };
-    void loadEarlierHistory({ environmentId, input: { threadId } });
+    if (autoHistory.current === history.historyCursor) return;
+    if (!shouldLoadEarlierBotChatHistory({ hasOwnerMessage, history })) return;
+    autoHistory.current = history.historyCursor;
+    void loadEarlierHistory({ environmentId, input: { threadId, conversationOnly: true } });
   }, [environmentId, hasOwnerMessage, history, loadEarlierHistory, projection, threadId]);
 
   const working = workingLabel !== null;

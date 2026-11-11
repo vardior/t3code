@@ -1,3 +1,4 @@
+import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
 import { buildBotChat, type BotChatItem } from "./botConversation.ts";
 
@@ -24,12 +25,37 @@ export function botChatItemsEqual(left: BotChatItem, right: BotChatItem): boolea
 }
 
 export function createBotChatProjector() {
-  type Input = Parameters<typeof buildBotChat>[0];
+  type Input = Parameters<typeof buildBotChat>[0] & {
+    readonly visibleTurnItems?: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>;
+  };
+  type ChatMessage = Input["messages"][number];
+  const projectedMessages = new WeakMap<OrchestrationV2TurnItem, ChatMessage>();
   let previous = new Map<string, VisibleBotChatItem>();
   let previousInput: Input | null = null;
   let result: VisibleBotChatItem[] = [];
   return (input: Input) => {
-    const messages = input.messages.filter(
+    const byId = new Map(input.messages.map((message) => [message.id, message]));
+    const historyMessages: ChatMessage[] = [];
+    for (const { item } of input.visibleTurnItems ?? []) {
+      if (item.type !== "user_message" && item.type !== "assistant_message") continue;
+      let message = byId.get(item.messageId) ?? projectedMessages.get(item);
+      if (message === undefined) {
+        message = {
+          ...item,
+          createdBy: item.type === "user_message" ? item.createdBy : "agent",
+          creationSource: item.type === "user_message" ? item.creationSource : "provider",
+          id: item.messageId,
+          role: item.type === "user_message" ? "user" : "assistant",
+          attachments: item.attachments ?? [],
+          streaming: item.type === "assistant_message" && item.streaming,
+          createdAt: item.startedAt ?? item.updatedAt,
+        };
+        projectedMessages.set(item, message);
+      }
+      historyMessages.push(message);
+      byId.delete(item.messageId);
+    }
+    const messages = [...historyMessages, ...byId.values()].filter(
       (message) => message.role !== "assistant" || !message.streaming,
     );
     const turnItems = input.turnItems.filter(
