@@ -128,6 +128,7 @@ export class BotService extends Context.Service<
     readonly getIdleCompactionThresholds: () => Effect.Effect<ReadonlyMap<ThreadId, number>>;
     readonly isHomeThreadPaused: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly isHomeThread: (threadId: ThreadId) => Effect.Effect<boolean>;
+    readonly homeThreadIds: () => Effect.Effect<ReadonlySet<ThreadId>>;
     readonly notifyOwner: (
       threadId: ThreadId | undefined,
       input: RelayOwnerNotification,
@@ -709,12 +710,15 @@ export const layer = Layer.effect(
       return jobs.flat();
     });
 
-    const isHomeThread = Effect.fn("BotService.isHomeThread")(function* (threadId: ThreadId) {
+    const currentHomeThreadIds = Effect.fn("BotService.homeThreadIds")(function* () {
       if ((yield* Clock.currentTimeMillis) >= homeThreadIdsExpireAt) {
         yield* refreshHomeThreadIds();
       }
-      return homeThreadIds.has(threadId);
+      return homeThreadIds as ReadonlySet<ThreadId>;
     }, homeThreadLookupLock.withPermit);
+
+    const isHomeThread = (threadId: ThreadId) =>
+      currentHomeThreadIds().pipe(Effect.map((ids) => ids.has(threadId)));
 
     const getIdleCompactionThresholds = Effect.fn("BotService.getIdleCompactionThresholds")(
       function* () {
@@ -1029,6 +1033,7 @@ export const layer = Layer.effect(
       listJobs,
       reorderBots,
       isHomeThread,
+      homeThreadIds: currentHomeThreadIds,
       isHomeThreadPaused,
       getIdleCompactionThresholds,
       notifyOwner,
