@@ -151,6 +151,8 @@ function panel(activeSurface: RightPanelSurface) {
   const noop = () => {};
   const props: RightPanelTabsProps = {
     mode: "inline",
+    onAddOpenItems: noop,
+    openItemsAvailable: false,
     keybindings: [],
     getShortcutContext: () => ({
       terminalFocus: false,

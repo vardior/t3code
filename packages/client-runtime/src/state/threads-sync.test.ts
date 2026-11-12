@@ -1119,6 +1119,10 @@ describe("EnvironmentThreads", () => {
           }),
         });
         expect(yield* harness.loadEarlier(undefined, true)).toEqual({ _tag: "loaded" });
+        expect(
+          (yield* SubscriptionRef.get(harness.threadState)).history.conversation,
+        ).toMatchObject({ historyCursor: "owner", hasMoreHistory: true });
+        expect(yield* harness.loadEarlier(undefined, true)).toEqual({ _tag: "loaded" });
         const state = yield* SubscriptionRef.get(harness.threadState);
         expect(state.history).toMatchObject({
           historyCursor: "older",

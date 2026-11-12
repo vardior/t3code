@@ -217,6 +217,9 @@ it.effect("keeps one queued occurrence of a recurring task while its bound threa
       readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
     }>({ runs: [activeRun], messages: [] });
     const runDueWork = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    const runDueWorkSettled = Effect.flatten(Ref.get(runDueWork)).pipe(
+      Effect.andThen(TestClock.adjust("0 millis")),
+    );
     const layerDependencies = Layer.mergeAll(
       NodeCrypto.layer,
       ManagedPolicy.layerTest(),
@@ -293,7 +296,7 @@ it.effect("keeps one queued occurrence of a recurring task while its bound threa
 
       for (let interval = 0; interval < 3; interval++) {
         yield* TestClock.adjust("61 seconds");
-        yield* Effect.flatten(Ref.get(runDueWork));
+        yield* runDueWorkSettled;
       }
 
       const queuedOccurrencesOf = (taskId: typeof task.id) =>
@@ -326,7 +329,7 @@ it.effect("keeps one queued occurrence of a recurring task while its bound threa
         ),
       }));
       yield* TestClock.adjust("61 seconds");
-      yield* Effect.flatten(Ref.get(runDueWork));
+      yield* runDueWorkSettled;
       expect(yield* queuedOccurrences).toBe(1);
 
       // A one-time task's only scheduled occurrence still sends behind a queued Run now.
@@ -347,9 +350,16 @@ it.effect("keeps one queued occurrence of a recurring task while its bound threa
       );
       yield* service.runNow({ id: once.id });
       yield* TestClock.adjust("61 seconds");
-      yield* Effect.flatten(Ref.get(runDueWork));
+      yield* runDueWorkSettled;
       expect(yield* queuedOccurrencesOf(once.id)).toBe(2);
-    }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
+    }).pipe(
+      Effect.provide(
+        ScheduledTaskService.layer.pipe(
+          Layer.provide(NodeServices.layer),
+          Layer.provide(layerDependencies),
+        ),
+      ),
+    );
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 

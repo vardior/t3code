@@ -386,6 +386,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       isHomeThreadPaused: unused,
       getIdleCompactionThresholds: unused,
       isHomeThread: () => Effect.succeed(options.homeThread ?? false),
+      homeThreadIds: unused,
       notifyOwner: unused,
       getOwnerNotification: () => Effect.succeed(options.ownerNotification),
     }),

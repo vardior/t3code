@@ -761,14 +761,15 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
           Effect.andThen(
             options.projections?.getSettlementCandidates(threadId, readOptions) ??
               Ref.get(snapshots).pipe(
-                Effect.map((snapshot) =>
-                  snapshot.threads.filter(
-                    (thread) =>
-                      (threadId === undefined || thread.id === threadId) &&
-                      (!readOptions?.subagentOnly ||
-                        (thread.lineage.relationshipToParent === "subagent" &&
-                          thread.lineage.parentThreadId !== null)),
-                  ),
+                Effect.map(
+                  (snapshot): ReadonlyArray<ProjectionStore.ProjectionSettlementCandidate> =>
+                    snapshot.threads.filter(
+                      (thread) =>
+                        (threadId === undefined || thread.id === threadId) &&
+                        (!readOptions?.subagentOnly ||
+                          (thread.lineage.relationshipToParent === "subagent" &&
+                            thread.lineage.parentThreadId !== null)),
+                    ),
                 ),
               ),
           ),
@@ -2269,58 +2270,60 @@ describe("ThreadSettlementServiceV2 single-thread sweeps", () => {
     ),
   );
 
-  it.effect.each(["failed", "native-failed", "open-link", "open-branch"] as const)("keeps a %s child unsettled with auto-settle disabled", (kind) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* TestClock.setTime(Date.parse(NOW));
-        const finished = finishedChild(kind, kind === "native-failed");
-        const child = {
-          ...finished,
-          ...(kind === "failed" ? { status: "failed" as const } : {}),
-          ...(kind === "native-failed"
-            ? {
-                latestRunlessRootNode: { ...rootNode(finished.id), status: "failed" as const },
-              }
-            : {}),
-          ...(kind === "open-branch" ? { branch: "feature" } : {}),
-          ...(kind === "open-link"
-            ? {
-                pullRequests: [
-                  {
-                    host: "example.test",
-                    repository: "owner/repository",
-                    number: 42,
-                    url: "https://example.test/owner/repository/pull/42",
-                    source: "manual" as const,
-                    linkedAt: NOW,
-                    stack: null,
-                    snapshot: {
-                      state: "open" as const,
-                      title: "Pull request",
-                      headBranch: "feature",
-                      baseBranch: "main",
-                      isDraft: false,
-                      updatedAt: NOW,
-                      syncedAt: NOW,
+  it.effect.each(["failed", "native-failed", "open-link", "open-branch"] as const)(
+    "keeps a %s child unsettled with auto-settle disabled",
+    (kind) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(Date.parse(NOW));
+          const finished = finishedChild(kind, kind === "native-failed");
+          const child = {
+            ...finished,
+            ...(kind === "failed" ? { status: "failed" as const } : {}),
+            ...(kind === "native-failed"
+              ? {
+                  latestRunlessRootNode: { ...rootNode(finished.id), status: "failed" as const },
+                }
+              : {}),
+            ...(kind === "open-branch" ? { branch: "feature" } : {}),
+            ...(kind === "open-link"
+              ? {
+                  pullRequests: [
+                    {
+                      host: "example.test",
+                      repository: "owner/repository",
+                      number: 42,
+                      url: "https://example.test/owner/repository/pull/42",
+                      source: "manual" as const,
+                      linkedAt: NOW,
+                      stack: null,
+                      snapshot: {
+                        state: "open" as const,
+                        title: "Pull request",
+                        headBranch: "feature",
+                        baseBranch: "main",
+                        isDraft: false,
+                        updatedAt: NOW,
+                        syncedAt: NOW,
+                      },
                     },
-                  },
-                ],
-              }
-            : {}),
-        };
-        const fixture = yield* makeHarness({
-          snapshot: makeSnapshot([child], [makeProject()]),
-          settings: disabledSettings,
-          botHomeThreadIds: [parentId],
-          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
-        });
-        yield* Effect.gen(function* () {
-          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
-          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
-          assert.deepEqual(yield* Ref.get(fixture.commands), []);
-        }).pipe(Effect.provide(fixture.layer));
-      }),
-    ),
+                  ],
+                }
+              : {}),
+          };
+          const fixture = yield* makeHarness({
+            snapshot: makeSnapshot([child], [makeProject()]),
+            settings: disabledSettings,
+            botHomeThreadIds: [parentId],
+            branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
+          });
+          yield* Effect.gen(function* () {
+            const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+            yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+            assert.deepEqual(yield* Ref.get(fixture.commands), []);
+          }).pipe(Effect.provide(fixture.layer));
+        }),
+      ),
   );
 
   it.effect("does not evaluate ordinary threads when auto-settle is disabled", () =>

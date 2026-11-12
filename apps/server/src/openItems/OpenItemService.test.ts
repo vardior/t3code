@@ -90,6 +90,7 @@ const layerOrchestration = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layer
         }),
       request: () => Effect.void,
       readRepositoryIdentity: () => Effect.succeed(null),
+      refreshRepositoryIdentity: () => Effect.void,
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,

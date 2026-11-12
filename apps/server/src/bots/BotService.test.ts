@@ -50,6 +50,7 @@ import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import { BotSchedulePauseTransition } from "./BotConfig.ts";
 import * as BotService from "./BotService.ts";
+import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 
 const decodeBot = Schema.decodeUnknownEffect(BotSummary);
@@ -2595,6 +2596,7 @@ it.effect(
               Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
               Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
               Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
+              Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
             ),
           ),
         ),
