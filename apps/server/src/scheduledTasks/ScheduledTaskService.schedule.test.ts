@@ -460,7 +460,12 @@ it.effect("a fixed-time slot missed while the server was off shows on the task",
     );
     const withServer = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       effect.pipe(
-        Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))),
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(NodeServices.layer),
+            Layer.provide(layerDependencies),
+          ),
+        ),
       );
 
     const taskId = yield* withServer(
@@ -542,7 +547,12 @@ it.effect(
       );
       const withServer = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         effect.pipe(
-          Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))),
+          Effect.provide(
+            ScheduledTaskService.layer.pipe(
+              Layer.provide(NodeServices.layer),
+              Layer.provide(layerDependencies),
+            ),
+          ),
         );
       const upsert = (
         title: string,

@@ -432,6 +432,7 @@ it.effect.each([
     const sent = yield* Ref.make("");
     const run = { id: "run:2", status: outcome.status, rootNodeId: "node:root" };
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),

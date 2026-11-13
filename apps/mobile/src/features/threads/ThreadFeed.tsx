@@ -148,7 +148,6 @@ import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { FONT_FAMILIES } from "../../lib/fontFamilies";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
-import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { parseThreadLink } from "@t3tools/client-runtime/state/bot-conversation";
 import { BOT_THREAD_LINK_ORIGIN } from "../bots/botChat.logic";
 import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
@@ -2699,6 +2698,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const duoColumns = useNativeWorkspaceColumnsSupported() && isDuoDevice(deviceType);
   const openPullRequest = useOpenPullRequest();
   const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
   const openLinkedThread = useOpenLinkedThread();
   const onOpenTurnDiff = useCallback(
     (checkpoint: ThreadCheckpointSummary) => {
@@ -2930,9 +2930,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const onMarkdownLinkPress = (href: string, imageEmbed = false) => {
     const botThreadLink = parseThreadLink(href, BOT_THREAD_LINK_ORIGIN);
     if (botThreadLink) {
-      navigation.navigate("Thread", {
-        environmentId: String(botThreadLink.environmentId),
-        threadId: String(botThreadLink.threadId),
+      selectDetail({
+        name: "Thread",
+        params: {
+          environmentId: String(botThreadLink.environmentId),
+          threadId: String(botThreadLink.threadId),
+        },
       });
       return;
     }

@@ -6,7 +6,7 @@ import {
   usePreventRemove,
   type StaticScreenProps,
 } from "@react-navigation/native";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -43,7 +43,7 @@ import {
 } from "../../state/use-model-option-memory";
 import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
 import { ThreadSettingsPickerScreen } from "../threads/ThreadSettingsSheet";
-import { useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
+import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -138,6 +138,8 @@ function useBotModelSession(environmentId: EnvironmentId, homeThreadId: ThreadId
   const thread = useAtomValue(
     environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, homeThreadId)),
   );
+  const project = useProject(shell ? scopeProjectRef(environmentId, shell.projectId) : null);
+  const cwd = shell?.worktreePath ?? project?.workspaceRoot ?? null;
   const config = useEnvironmentServerConfig(environmentId);
   const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
@@ -203,6 +205,7 @@ function useBotModelSession(environmentId: EnvironmentId, homeThreadId: ThreadId
       ? ({
           environmentId,
           projectId: shell.projectId,
+          cwd,
           providerInstanceId: selection.instanceId,
           providerGroups,
           selectedModel: selection,
@@ -236,6 +239,7 @@ function useBotModelSession(environmentId: EnvironmentId, homeThreadId: ThreadId
       : null;
   }, [
     shell,
+    cwd,
     selection,
     ownerId,
     environmentId,
