@@ -17,6 +17,9 @@ const serverAtoms = createServerEnvironmentAtoms(connectionAtomRuntime, {
   usageLimitSources: true,
   usageLimitsCommand: true,
   providerCatalogsOnDemand: true,
+  providerCatalogDigests: true,
+  providerStatusDeltas: true,
+  omitRefreshedProviders: true,
 });
 const botListAtom = Atom.family((environmentId: EnvironmentId) =>
   persistNotificationBots(environmentId, serverAtoms.bots.list({ environmentId, input: {} })),
