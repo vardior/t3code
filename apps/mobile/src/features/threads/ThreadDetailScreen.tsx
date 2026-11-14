@@ -272,6 +272,7 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputAnswers: Record<string, string | ReadonlyArray<string>> | null;
   readonly respondingUserInputId: RuntimeRequestId | null;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
+  readonly connectionAwaitingApproval?: boolean;
   readonly threadSyncStatus?: EnvironmentThreadStatus;
   readonly historyControls?: ThreadFeedHistoryControls;
   readonly workingLabel?: string | null;
@@ -770,6 +771,7 @@ function ThreadDetailBody(
     const connectionStatus = connectionFloatingStatus({
       connectionError: connectionRetrying ? retryConnectionError : props.connectionError,
       connectionState: props.connectionStateLabel,
+      connectionAwaitingApproval: props.connectionAwaitingApproval === true,
       environmentLabel: props.environmentLabel,
       onReconnect: props.onReconnectEnvironment,
     });
@@ -836,7 +838,11 @@ function ThreadDetailBody(
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
       return props.workingLabel
         ? { kind: "syncing", label: props.workingLabel }
-        : { kind: "working", startedAt: props.activeWorkStartedAt };
+        : {
+            kind: "working",
+            environmentId: props.environmentId,
+            startedAt: props.activeWorkStartedAt,
+          };
     }
     if (pendingBackgroundWork !== null && contentPresentationKind === "ready") {
       return {
