@@ -1,5 +1,5 @@
 import * as BotService from "../bots/BotService.ts";
-import * as OpenItemService from "../bots/OpenItemService.ts";
+import * as OpenItemService from "../openItems/OpenItemService.ts";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -184,6 +184,7 @@ const layerMemorySecretStore = Layer.sync(ServerSecretStore.ServerSecretStore, (
 const layerUnusedScheduledTaskStub = Layer.succeed(
   ScheduledTaskService.ScheduledTaskService,
   ScheduledTaskService.ScheduledTaskService.of({
+    withBotPauseLock: (effect) => effect,
     list: () => Effect.succeed({ tasks: [] }),
     subscribeList: () => Stream.succeed({ tasks: [] }),
     upsert: () => Effect.die("ScheduledTaskService.upsert is unused in this test"),

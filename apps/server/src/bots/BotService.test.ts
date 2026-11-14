@@ -1494,6 +1494,7 @@ it.effect("caches home thread lookups for 30 seconds and refreshes them after li
     let configReads = 0;
     const trackedFs = FileSystem.FileSystem.of({
       ...fs,
+      watch: () => Stream.empty,
       readDirectory: (...args) =>
         Effect.suspend(() => {
           directoryReads++;
