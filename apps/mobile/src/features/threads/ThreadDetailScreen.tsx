@@ -799,7 +799,21 @@ function ThreadDetailBody(
       },
     };
   })();
-  const statusLines = [backgroundLine, lifecycleLine].filter((line) => line !== null);
+  const workingLine: ThreadStatusLineModel | null =
+    props.workingLabel && contentPresentationKind === "ready"
+      ? {
+          key: "working",
+          icon: "terminal",
+          label: props.workingLabel,
+          action: {
+            label: statusPending ? "Stopping..." : "Stop",
+            accessibilityLabel: "Stop working",
+            disabled: !props.canOperateThread || statusPending,
+            onPress: () => void runStatusAction("stop"),
+          },
+        }
+      : null;
+  const statusLines = [workingLine, backgroundLine, lifecycleLine].filter((line) => line !== null);
   const floatingStatus = ((): FloatingWorkingStatus | null => {
     const connectionStatus = connectionFloatingStatus({
       connectionError: props.connectionError,
