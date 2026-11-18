@@ -1,4 +1,5 @@
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
+import { useGT, useMessages } from "gt-react";
 import { useState } from "react";
 
 import {
@@ -10,10 +11,12 @@ import {
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingsRow } from "./settingsLayout";
 import { ScopedSwitch } from "./ScopedSwitch";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 export function NotificationSettings() {
+  const gt = useGT();
+  const searchableSetting = useSearchableSetting();
   const notifyAgentThreads = useScopedSettings((settings) => settings.notifyAgentThreads);
   const updateSettings = useUpdateScopedSettings();
 
@@ -23,12 +26,14 @@ export function NotificationSettings() {
         {...searchableSetting("agent-thread-notifications")}
         serverScoped
         settingKeys={["notifyAgentThreads"]}
-        description="Bots always notify. Applies to this server, including phone notifications and live updates."
+        description={gt(
+          "Bots always notify. Applies to this server, including phone notifications and live updates.",
+        )}
         control={
           <ScopedSwitch
             settingKeys={["notifyAgentThreads"]}
             checked={notifyAgentThreads}
-            aria-label="Agent threads"
+            aria-label={gt("Agent threads")}
             onCheckedChange={(checked) => updateSettings({ notifyAgentThreads: checked })}
           />
         }
@@ -39,6 +44,9 @@ export function NotificationSettings() {
 }
 
 function DeviceNotificationSettings() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const m = useMessages();
   const mode = useScopedSettings((settings) => settings.notificationMode);
   const updateSettings = useUpdateScopedSettings();
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
@@ -49,7 +57,9 @@ function DeviceNotificationSettings() {
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
-        "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while T3 Code is open."
+        gt(
+          "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while T3 Code is open.",
+        )
       }
       control={
         <Select
@@ -68,7 +78,9 @@ function DeviceNotificationSettings() {
             if (hasDesktopNotifications(value)) {
               if (typeof Notification === "undefined" || !window.isSecureContext) {
                 setPermissionMessage(
-                  "Notifications need a supported browser over HTTPS, or the desktop app. Sound only is still available.",
+                  gt(
+                    "Notifications need a supported browser over HTTPS, or the desktop app. Sound only is still available.",
+                  ),
                 );
                 return;
               }
@@ -77,13 +89,17 @@ function DeviceNotificationSettings() {
               setRequesting(false);
               if (permission._tag === "Failure") {
                 setPermissionMessage(
-                  "Notifications are unavailable in this browser. Sound only is still available.",
+                  gt(
+                    "Notifications are unavailable in this browser. Sound only is still available.",
+                  ),
                 );
                 return;
               }
               if (permission.value !== "granted") {
                 setPermissionMessage(
-                  "Allow notifications in your browser or system settings, then choose this option again. Sound only is still available.",
+                  gt(
+                    "Allow notifications in your browser or system settings, then choose this option again. Sound only is still available.",
+                  ),
                 );
                 return;
               }
@@ -91,13 +107,17 @@ function DeviceNotificationSettings() {
             updateSettings({ notificationMode: value });
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Thread notifications">
-            <SelectValue>{NOTIFICATION_MODE_LABELS[mode]}</SelectValue>
+          <SelectTrigger
+            size="sm"
+            className="w-full sm:w-56"
+            aria-label={gt("Thread notifications")}
+          >
+            <SelectValue>{m(NOTIFICATION_MODE_LABELS[mode])}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {Object.entries(NOTIFICATION_MODE_LABELS).map(([value, label]) => (
               <SelectItem key={value} hideIndicator value={value}>
-                {label}
+                {m(label)}
               </SelectItem>
             ))}
           </SelectPopup>
