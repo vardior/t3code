@@ -1,3 +1,4 @@
+import { useLocale, useMessages } from "gt-react-native";
 import { useAtomValue } from "@effect/atom-react";
 import {
   StackActions,
@@ -316,6 +317,8 @@ function BotInfo(props: {
   readonly refresh: () => void;
 }) {
   const { bot, environmentId } = props;
+  const m = useMessages();
+  const locale = useLocale();
   const [pauseResult, setPauseResult] = useState<{ bot: BotSummary; paused: boolean } | null>(null);
   const paused = pauseResult?.bot === bot ? pauseResult.paused : bot.paused;
   const detail = useBotDetail(environmentId, bot.id);
@@ -428,7 +431,7 @@ function BotInfo(props: {
               >
                 <Text className="text-base font-t3-medium text-foreground">{task.title}</Text>
                 <Text className="text-sm text-foreground-muted">
-                  {describeSchedule(task)}
+                  {describeSchedule(task, schedules.data?.timeZone, m, locale)}
                   {task.threadId === null ? ` · ${task.modelSelection.model}` : ""}
                   {!task.enabled
                     ? " · Paused"

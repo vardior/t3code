@@ -1372,6 +1372,23 @@ export function summarizeT3ToolCalls(
       }
       break;
     }
+    case "owner-notify": {
+      const count = countEntities(entityIds("runId"));
+      label = done
+        ? resolve(
+            msg(
+              "{count, plural, one {Requested {count} owner notification} other {Requested {count} owner notifications}}",
+              { count },
+            ),
+          )
+        : resolve(
+            msg(
+              "{count, plural, one {Tried to request {count} owner notification} other {Tried to request {count} owner notifications}}",
+              { count },
+            ),
+          );
+      break;
+    }
     case "open-item": {
       const count = selected.length;
       label = done

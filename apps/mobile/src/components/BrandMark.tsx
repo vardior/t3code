@@ -12,7 +12,7 @@ const DEFAULT_STAGE_LABEL =
     ? msg("Dev", { $context: "app release stage badge" })
     : appVariant === "preview"
       ? msg("Preview", { $context: "app release stage badge" })
-      : msg("Beta", { $context: "app release stage badge" });
+      : msg("Alpha", { $context: "app release stage badge" });
 
 export function BrandMark(props: { readonly compact?: boolean; readonly stageLabel?: string }) {
   const m = useMessages();

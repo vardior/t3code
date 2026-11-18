@@ -761,6 +761,7 @@ export function IssuesPage() {
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
+            onAddOpenItems={() => undefined}
             onAddDevice={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
@@ -768,6 +769,7 @@ export function IssuesPage() {
             filesAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
+            openItemsAvailable={false}
             deviceAvailable={false}
           >
             {renderedSurface.kind === "issue" ? (
