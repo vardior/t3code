@@ -46,7 +46,7 @@ const botsNeedsYouCountAtom = Atom.make((get) => {
     const shells = get(environmentThreadShells.environmentThreadIndexAtom(environmentId));
     for (const bot of data.bots) {
       const source = shells.get(bot.homeThreadId);
-      if (botNeedsYou(bot, source ? presentThreadShell(environmentId, source) : null)) count += 1;
+      if (botNeedsYou(source ? presentThreadShell(environmentId, source) : null)) count += 1;
     }
   }
   return count;

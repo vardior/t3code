@@ -99,17 +99,22 @@ function isActiveRunStatus(status: string | null | undefined): boolean {
 }
 
 export function botNeedsYou(
-  bot: Pick<BotSummary, "lastReply">,
   shell:
-    | Pick<
-        EnvironmentThreadShell,
-        "hasPendingApprovals" | "hasPendingUserInput" | "lastVisitedAt" | "openItems"
-      >
+    | Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "openItems">
     | null
     | undefined,
 ): boolean {
-  if (shell?.hasPendingApprovals || shell?.hasPendingUserInput) return true;
-  if (countOpenItems(shell?.openItems) > 0) return true;
+  return Boolean(
+    shell?.hasPendingApprovals ||
+    shell?.hasPendingUserInput ||
+    countOpenItems(shell?.openItems) > 0,
+  );
+}
+
+export function botHasUnreadReply(
+  bot: Pick<BotSummary, "lastReply">,
+  shell: Pick<EnvironmentThreadShell, "lastVisitedAt"> | null | undefined,
+): boolean {
   if (!bot.lastReply) return false;
   const replyAt = Date.parse(bot.lastReply.at);
   if (!Number.isFinite(replyAt)) return false;

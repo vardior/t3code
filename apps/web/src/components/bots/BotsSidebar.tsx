@@ -33,8 +33,11 @@ import {
   botThreadShellStatus,
   botThreadShellStatusLabel,
   botNeedsYou,
+  botHasUnreadReply,
   type PendingBotOrder,
 } from "@t3tools/client-runtime/state/bot-conversation";
+
+import { useGT } from "gt-react";
 
 import { isElectron } from "../../env";
 import { openCommandPalette } from "../../commandPaletteBus";
@@ -93,7 +96,7 @@ export function BotsSidebar() {
     if (isMobile) setOpenMobile(false);
   };
   const needsYouCount = bots.filter(({ environmentId, bot }) =>
-    botNeedsYou(bot, shells.get(`${environmentId}:${bot.homeThreadId}`)),
+    botNeedsYou(shells.get(`${environmentId}:${bot.homeThreadId}`)),
   ).length;
 
   return (
@@ -284,8 +287,10 @@ function BotListItem(props: {
     transition,
     isDragging,
   } = useSortable({ id: props.bot.id, disabled: props.disabled });
+  const gt = useGT();
   const shell = props.shell;
-  const needsYou = botNeedsYou(props.bot, shell);
+  const needsYou = botNeedsYou(shell);
+  const unread = botHasUnreadReply(props.bot, shell);
   const openItemCount = countOpenItems(shell?.openItems);
   const status = botThreadShellStatus(shell, props.bot);
   const working = status === "working";
@@ -324,14 +329,19 @@ function BotListItem(props: {
         <BotAvatar name={props.bot.name} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-2">
-            <span className={cn("truncate text-sm", needsYou ? "font-semibold" : "font-medium")}>
+            <span
+              className={cn(
+                "truncate text-sm",
+                needsYou || unread ? "font-semibold" : "font-medium",
+              )}
+            >
               {props.bot.name}
             </span>
-            {needsYou ? (
+            {needsYou || unread ? (
               <span
                 className="size-2 shrink-0 rounded-full bg-primary"
                 role="img"
-                aria-label="Needs you"
+                aria-label={needsYou ? gt("Needs you") : gt("Unread reply")}
               />
             ) : null}
             {openItemCount > 0 ? (
@@ -349,7 +359,7 @@ function BotListItem(props: {
           <span
             className={cn(
               "truncate text-xs",
-              needsYou ? "text-foreground" : "text-muted-foreground",
+              needsYou || unread ? "text-foreground" : "text-muted-foreground",
             )}
           >
             {(shell?.hasPendingApprovals

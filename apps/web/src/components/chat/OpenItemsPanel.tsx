@@ -5,6 +5,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { OpenItem, ScopedThreadRef } from "@t3tools/contracts";
+import { T } from "gt-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 
 import { useThreadShell } from "~/state/entities";
@@ -74,7 +75,9 @@ export function OpenItemsPanel({ threadRef }: { readonly threadRef: ScopedThread
     <ScrollArea scrollFade className="h-full min-h-0">
       <div className="flex flex-col gap-3 p-3">
         {groups.open.length === 0 ? (
-          <p className="px-1 py-2 text-muted-foreground text-sm">Nothing is waiting on you.</p>
+          <p className="px-1 py-2 text-muted-foreground text-sm">
+            <T>No open items.</T>
+          </p>
         ) : (
           groups.open.map((item) => (
             <OpenItemCard

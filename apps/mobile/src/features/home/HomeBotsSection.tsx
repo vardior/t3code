@@ -3,10 +3,12 @@ import {
   pinnedBotMenuThreads,
   botThreadShellStatusLabel,
   botNeedsYou,
+  botHasUnreadReply,
 } from "@t3tools/client-runtime/state/bot-conversation";
 import { countOpenItems } from "@t3tools/client-runtime/state/open-items";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { useGT } from "gt-react-native";
 import { useMemo } from "react";
 import { Pressable, View } from "react-native";
 
@@ -140,8 +142,10 @@ function HomeBotRow(props: {
   readonly now: number;
   readonly onSelectBot: (environmentId: EnvironmentId, botId: string) => void;
 }) {
+  const gt = useGT();
   const { bot, environmentId, refresh } = props.entry;
-  const needsYou = botNeedsYou(bot, props.shell);
+  const needsYou = botNeedsYou(props.shell);
+  const unread = botHasUnreadReply(bot, props.shell);
   const status = botThreadShellStatus(props.shell, bot);
   const working = status === "working";
   const openItemCount = countOpenItems(props.shell?.openItems);
@@ -160,7 +164,7 @@ function HomeBotRow(props: {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${bot.name}${props.environmentLabel ? `, ${props.environmentLabel}` : ""}${bot.paused ? ", paused" : ""}${needsYou ? ", needs you" : ""}, ${statusText ?? time}`}
+      accessibilityLabel={`${bot.name}${props.environmentLabel ? `, ${props.environmentLabel}` : ""}${bot.paused ? ", paused" : ""}${needsYou ? ", needs you" : unread ? `, ${gt("Unread reply")}` : ""}, ${statusText ?? time}`}
       className="flex-row items-center gap-3 border-b border-border-subtle px-1 py-3 active:opacity-70"
       onPress={() => props.onSelectBot(environmentId, bot.id)}
     >
@@ -174,14 +178,14 @@ function HomeBotRow(props: {
           <Text
             numberOfLines={1}
             className={
-              needsYou
+              needsYou || unread
                 ? "min-w-0 flex-1 text-base font-t3-bold text-foreground"
                 : "min-w-0 flex-1 text-base font-t3-medium text-foreground"
             }
           >
             {bot.name}
           </Text>
-          {needsYou ? <View className="size-2 rounded-full bg-primary" /> : null}
+          {needsYou || unread ? <View className="size-2 rounded-full bg-primary" /> : null}
           {openItemCount > 0 ? (
             <View className="min-w-5 items-center rounded-full bg-primary px-1.5">
               <Text className="text-xs font-t3-medium tabular-nums text-primary-foreground">
@@ -194,7 +198,9 @@ function HomeBotRow(props: {
         </View>
         <Text
           numberOfLines={1}
-          className={needsYou ? "text-sm text-foreground" : "text-sm text-foreground-muted"}
+          className={
+            needsYou || unread ? "text-sm text-foreground" : "text-sm text-foreground-muted"
+          }
         >
           {props.environmentLabel ? `${props.environmentLabel} · ` : ""}
           {statusText ?? bot.lastReply?.text ?? "Open conversation"}

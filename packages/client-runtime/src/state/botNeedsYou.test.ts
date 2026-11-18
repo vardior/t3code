@@ -1,7 +1,7 @@
 import { OpenItemId, ThreadId, type OpenItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { botNeedsYou, botVisitWatermark } from "./botConversation.ts";
+import { botHasUnreadReply, botNeedsYou, botVisitWatermark } from "./botConversation.ts";
 
 const reply = { lastReply: { text: "Can you review this?", at: "2026-10-07T10:00:00.000Z" } };
 const shell = {
@@ -22,56 +22,61 @@ const openItem = (status: OpenItem["status"]): OpenItem => ({
 
 describe("botNeedsYou", () => {
   it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
-    "needs the owner for %s even without an unread reply",
+    "needs the owner for %s even after reading the reply",
     (request) => {
-      expect(botNeedsYou(reply, { ...shell, [request]: true })).toBe(true);
-      expect(botNeedsYou({ lastReply: null }, { ...shell, [request]: true })).toBe(true);
+      const pending = { ...shell, [request]: true };
+      expect(botHasUnreadReply(reply, pending)).toBe(false);
+      expect(botNeedsYou(pending)).toBe(true);
     },
   );
 
   it("needs the owner while an open item waits, even after a visit", () => {
-    expect(botNeedsYou({}, { ...shell, openItems: [openItem("open")] })).toBe(true);
-    expect(
-      botNeedsYou({}, { ...shell, openItems: [openItem("answered"), openItem("dropped")] }),
-    ).toBe(false);
+    expect(botNeedsYou({ ...shell, openItems: [openItem("open")] })).toBe(true);
+    expect(botNeedsYou({ ...shell, openItems: [openItem("answered"), openItem("dropped")] })).toBe(
+      false,
+    );
   });
 
-  it("needs the owner when the latest reply is newer than the visit", () => {
-    expect(botNeedsYou(reply, { ...shell, lastVisitedAt: "2026-10-07T09:59:00.000Z" })).toBe(true);
+  it("does not need the owner for an unread reply without a pending request", () => {
+    const unread = { ...shell, lastVisitedAt: "2026-10-07T09:59:00.000Z" };
+    expect(botHasUnreadReply(reply, unread)).toBe(true);
+    expect(botNeedsYou(unread)).toBe(false);
+    expect(botNeedsYou(undefined)).toBe(false);
+    expect(botNeedsYou(null)).toBe(false);
   });
+});
 
+describe("botHasUnreadReply", () => {
   it.each([reply.lastReply.at, shell.lastVisitedAt])(
-    "does not need the owner after a visit at %s",
+    "marks the reply read after a visit at %s",
     (lastVisitedAt) => {
-      expect(botNeedsYou(reply, { ...shell, lastVisitedAt })).toBe(false);
+      expect(botHasUnreadReply(reply, { ...shell, lastVisitedAt })).toBe(false);
     },
   );
 
   it.each([{}, { lastReply: null }])("does not flag a bot without a reply", (bot) => {
-    expect(botNeedsYou(bot, shell)).toBe(false);
+    expect(botHasUnreadReply(bot, shell)).toBe(false);
   });
 
   it.each([null, "invalid"])(
     "treats a reply as unread without a valid visit (%s)",
     (lastVisitedAt) => {
-      expect(botNeedsYou(reply, { ...shell, lastVisitedAt })).toBe(true);
+      expect(botHasUnreadReply(reply, { ...shell, lastVisitedAt })).toBe(true);
     },
   );
 
   it("treats a reply as unread when the visit watermark is omitted", () => {
-    expect(
-      botNeedsYou(reply, { hasPendingApprovals: false, hasPendingUserInput: false, openItems: [] }),
-    ).toBe(true);
+    expect(botHasUnreadReply(reply, {})).toBe(true);
   });
 
   it("treats a reply as unread before its home thread shell arrives", () => {
-    expect(botNeedsYou(reply, undefined)).toBe(true);
-    expect(botNeedsYou(reply, null)).toBe(true);
-    expect(botNeedsYou({}, null)).toBe(false);
+    expect(botHasUnreadReply(reply, undefined)).toBe(true);
+    expect(botHasUnreadReply(reply, null)).toBe(true);
+    expect(botHasUnreadReply({}, null)).toBe(false);
   });
 
   it("ignores a reply with an invalid timestamp", () => {
-    expect(botNeedsYou({ lastReply: { text: "Hello", at: "invalid" } }, shell)).toBe(false);
+    expect(botHasUnreadReply({ lastReply: { text: "Hello", at: "invalid" } }, shell)).toBe(false);
   });
 });
 
@@ -81,7 +86,7 @@ describe("botVisitWatermark", () => {
       "2026-10-07T10:00:00.000Z",
     );
     expect(
-      botNeedsYou(reply, {
+      botHasUnreadReply(reply, {
         ...shell,
         lastVisitedAt: botVisitWatermark("2026-10-07T09:00:00.000Z", reply.lastReply.at),
       }),

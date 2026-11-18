@@ -4,6 +4,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { groupOpenItems } from "@t3tools/client-runtime/state/open-items";
 import type { EnvironmentId, OpenItem, ThreadId } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
+import { T } from "gt-react-native";
 import { useMemo, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
@@ -82,7 +83,9 @@ export function ThreadOpenItemsSheet({ route }: StaticScreenProps<OpenItemsTarge
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
     >
       {groups.open.length === 0 ? (
-        <Text className="py-2 text-base text-foreground-muted">Nothing is waiting on you.</Text>
+        <Text className="py-2 text-base text-foreground-muted">
+          <T>No open items.</T>
+        </Text>
       ) : (
         groups.open.map((item) => (
           <OpenItemCard
