@@ -593,6 +593,7 @@ it.effect("a paused one-time task run by hand before its time is kept", () =>
     const sent = yield* Ref.make("");
     const run = { id: "run:1", status: "completed", rootNodeId: "node:root" };
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
