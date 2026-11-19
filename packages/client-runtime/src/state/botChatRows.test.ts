@@ -135,6 +135,61 @@ describe("bot chat row projection", () => {
     ]);
   });
 
+  it("shows a paged background reply that follows an owner request", () => {
+    const backgroundRunId = RunId.make("background");
+    const owner: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("owner-input"),
+      type: "user_message",
+      messageId: message.id,
+      inputIntent: "turn_start",
+      createdBy: "user",
+      creationSource: "web",
+      text: message.text,
+      attachments: [],
+    };
+    const reply: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("owner-reply"),
+      type: "assistant_message",
+      messageId: MessageId.make("owner-reply"),
+      text: "Reading it.",
+      streaming: false,
+    };
+    const backgroundInput: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("background-input"),
+      runId: backgroundRunId,
+      type: "notification",
+      source: { kind: "background_task" },
+      outcome: "updated",
+      summary: "Background activity updated",
+    };
+    const backgroundReply: OrchestrationV2TurnItem = {
+      ...reply,
+      id: TurnItemId.make("background-reply"),
+      runId: backgroundRunId,
+      messageId: MessageId.make("background-reply"),
+      text: "Writing the briefs.",
+    };
+    const project = createBotChatProjector();
+    expect(
+      project({
+        bot,
+        messages: [],
+        runs: [],
+        turnItems: [],
+        visibleTurnItems: [owner, reply, backgroundInput, backgroundReply].map((item) => ({
+          item,
+        })),
+      }),
+    ).toMatchObject([
+      { kind: "you", text: "Hello" },
+      { kind: "bot", text: "Reading it." },
+      { kind: "bot", text: "Writing the briefs." },
+    ]);
+  });
+
   it.each(["mcp__t3-code__notify_owner", "t3-code.notify_owner"])(
     "updates background visibility only when %s completes",
     (toolName) => {

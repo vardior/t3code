@@ -1,4 +1,4 @@
-import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import { MessageId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
 import { buildBotChat, type BotChatItem } from "./botConversation.ts";
 
@@ -48,8 +48,36 @@ export function createBotChatProjector() {
       inputs.push(message);
       missingInputsByRun.set(message.runId, inputs);
     }
+    const notifiedRunIds = new Set(
+      input.messages.flatMap((message) =>
+        message.role === "user" && message.notification !== undefined && message.runId !== null
+          ? [message.runId]
+          : [],
+      ),
+    );
     const historyMessages: ChatMessage[] = [];
     for (const { item } of input.visibleTurnItems ?? []) {
+      if (item.type === "notification") {
+        if (item.runId === null || notifiedRunIds.has(item.runId)) continue;
+        let message = projectedMessages.get(item);
+        if (message === undefined) {
+          message = {
+            id: MessageId.make(item.id),
+            role: "user",
+            createdBy: "agent",
+            creationSource: "provider",
+            runId: item.runId,
+            streaming: false,
+            text: item.summary,
+            attachments: [],
+            createdAt: item.startedAt ?? item.updatedAt,
+            notification: { source: item.source, outcome: item.outcome, summary: item.summary },
+          };
+          projectedMessages.set(item, message);
+        }
+        historyMessages.push(message);
+        continue;
+      }
       if (item.type !== "user_message" && item.type !== "assistant_message") continue;
       if (item.runId !== null) {
         for (const message of missingInputsByRun.get(item.runId) ?? []) {
