@@ -120,6 +120,13 @@ describe("createBotFeedFilter", () => {
         runId: RunId.make("run"),
         render: { attachmentId: "attachment", title: "Your work, put in order", height: 480 },
       };
+      const draft: ThreadFeedEntry = {
+        type: "sent-message",
+        id: "draft",
+        createdAt: at,
+        runId: RunId.make("run"),
+        text: "Draft reply to Michal",
+      };
       const reply = messageEntry("reply", "assistant");
       const filter = createBotFeedFilter({
         items: [item("you", "message:owner"), item("bot", "message:reply")],
@@ -143,7 +150,7 @@ describe("createBotFeedFilter", () => {
           }),
         ),
       ]);
-      const entries = [owner, page, ...requests, reply];
+      const entries = [owner, page, draft, ...requests, reply];
       expect(filter(entries)).toEqual(entries);
     },
   );

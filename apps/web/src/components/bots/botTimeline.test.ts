@@ -155,8 +155,15 @@ describe("botTimelineEntries", () => {
           },
         },
       }));
+      const draft: TimelineEntry = {
+        id: "draft",
+        kind: "sent-message",
+        createdAt: at,
+        runId: RunId.make("run"),
+        text: "Draft reply to Michal",
+      };
       const reply = messageEntry("reply", "assistant");
-      const entries = [owner, page, secret, ...links, reply];
+      const entries = [owner, page, draft, secret, ...links, reply];
       expect(botTimelineEntries([you("message:owner"), bot("message:reply")], entries)).toEqual(
         entries,
       );
