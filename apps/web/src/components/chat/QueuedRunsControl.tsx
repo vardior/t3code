@@ -90,6 +90,7 @@ export function QueuedRunsControl({
     Pick<ChatMessage, "id" | "inputIntent" | "text" | "attachments">
   >;
   readonly editingRunId: RunId | null;
+  readonly visibleRunIds?: ReadonlySet<RunId>;
   /** Set while something else holds the composer, such as an open question. */
   readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
@@ -118,7 +119,9 @@ export function QueuedRunsControl({
     queuedImageAttachmentResources,
   );
   const workflow = projection ? deriveThreadQueueWorkflowState(projection, messages) : null;
-  const queued = workflow?.queuedRuns ?? [];
+  const queued = (workflow?.queuedRuns ?? []).filter(
+    ({ run }) => props.visibleRunIds === undefined || props.visibleRunIds.has(run.id),
+  );
   const activeRun = workflow?.activeRun ?? null;
   // A fresh message starts its own turn: it may skip compaction, but not steer into a turn.
   const canSendRun = (freshContext: boolean) =>

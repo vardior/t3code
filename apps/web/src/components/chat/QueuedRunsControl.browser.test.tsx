@@ -4,6 +4,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  RunId,
   OrchestrationV2DispatchCommandError,
   ThreadId,
 } from "@t3tools/contracts";
@@ -16,7 +17,7 @@ import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { AsyncResult, type Atom, AtomRegistry } from "effect/reactivity";
-import { Profiler, useState, type ComponentProps } from "react";
+import { createRef, Profiler, useState, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 
@@ -89,7 +90,7 @@ import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/th
 import { act, render as renderUi } from "../../../test/render";
 import { makeStreamingTimelineFixture, makeThreadProjectionFixture } from "../../test-fixtures";
 import { ToastProvider } from "../ui/toast";
-import { QueuedRunsControl } from "./QueuedRunsControl";
+import { QueuedRunsControl, type QueuedRunsControlHandle } from "./QueuedRunsControl";
 import { ExpandedImageDialog } from "./ExpandedImageDialog";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
@@ -319,6 +320,53 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
 
   await expect.element(page.getByText("Sent by T3 Code")).toBeVisible();
   await expect.element(page.getByText("Continue where you left off.")).toBeVisible();
+});
+
+it("keeps only owner queue controls in a bot conversation", async () => {
+  setup();
+  state.workflow = {
+    activeRun: null,
+    canSendNow: true,
+    queuedRuns: ["automation-first", "owner", "automation-last"].map((id) => ({
+      run: { id, userMessageId: `${id}:message` },
+      text: id,
+      attachments: [],
+    })),
+  };
+  const ref = createRef<QueuedRunsControlHandle>();
+  const onEditQueuedRun = vi.fn();
+  await using _screen = await renderQueue({
+    ref,
+    visibleRunIds: new Set([RunId.make("owner")]),
+    onEditQueuedRun,
+    optimisticMessages: [
+      {
+        id: MessageId.make("pending-owner"),
+        inputIntent: "queued_turn",
+        text: "Pending owner request",
+        attachments: [],
+      },
+    ],
+  });
+
+  await expect.element(page.getByText("automation-first", { exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByText("automation-last", { exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByText("owner", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("Pending owner request", { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Edit queued message" }).nth(0))
+    .toBeEnabled();
+  await expect
+    .element(page.getByRole("button", { name: "Remove queued message" }).nth(0))
+    .toBeEnabled();
+  await expect.element(page.getByRole("button", { name: "Send now" }).nth(0)).toBeEnabled();
+  expect(ref.current?.editLatest(false)).toBe(true);
+  expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith({
+    runId: "owner",
+    messageId: "owner:message",
+    text: "owner",
+    attachments: [],
+  });
 });
 
 it("stays inside the timeline scroller instead of growing the chat column", async () => {

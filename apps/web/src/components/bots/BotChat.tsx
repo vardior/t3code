@@ -131,8 +131,15 @@ export function BotChat(props: {
   );
   const timelineEntries = useMemo(() => createBotTimelineFilter(items), [items]);
   const presentation = useMemo(
-    () => ({ header, workingLabel, timelineEntries }),
-    [header, timelineEntries, workingLabel],
+    () => ({
+      header,
+      workingLabel,
+      timelineEntries,
+      queuedRunIds: new Set(
+        items.flatMap((item) => (item.kind === "you" && item.runId !== null ? [item.runId] : [])),
+      ),
+    }),
+    [header, timelineEntries, workingLabel, items],
   );
 
   if (shell === null) {
