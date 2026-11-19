@@ -1222,6 +1222,16 @@ it.effect("previews the reply of a background completion that continues an owner
       "Nothing needs you.",
     );
     expect(yield* readReply).toEqual({ text: "Two PRs are open", at: "2026-10-01T00:07:30.000Z" });
+    yield* turn(9, completion, "Nothing needs Or.");
+    yield* insertMessage(sql, {
+      id: "run-9-progress",
+      threadId: "home",
+      runId: "run-9",
+      role: "assistant",
+      text: "Re-arming the watcher",
+      createdAt: "2026-10-01T00:09:10.000Z",
+    });
+    expect(yield* readReply).toEqual({ text: "Two PRs are open", at: "2026-10-01T00:07:30.000Z" });
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

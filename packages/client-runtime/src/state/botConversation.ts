@@ -17,6 +17,7 @@ import {
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
+import { isQuietBotReply } from "@t3tools/shared/botQuietReply";
 import { sortPinnedThreadsByOrderKey } from "./threadSort.ts";
 import { countOpenItems } from "./openItems.ts";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
@@ -345,9 +346,20 @@ export function buildBotChat(input: {
     if (message.role !== "assistant" || message.streaming || message.runId === null) continue;
     if (!activeRunIds.has(message.runId)) finalReplyByRun.set(message.runId, message);
   }
+  const notifiedRunIdSet = new Set(notifiedRunIds);
+  const quietFollowUpRunIds = new Set(
+    ownerRequests.flatMap((runIds) =>
+      runIds.slice(1).filter((runId) => {
+        const reply = finalReplyByRun.get(runId);
+        return !notifiedRunIdSet.has(runId) && reply !== undefined && isQuietBotReply(reply.text);
+      }),
+    ),
+  );
   const ownerReplyRunIds = ownerRequests.flat();
   const replies = [...new Set([...ownerReplyRunIds, ...notifiedRunIds])].flatMap((runId) =>
-    compactRunIds.has(runId) ? [] : (finalReplyByRun.get(runId) ?? []),
+    compactRunIds.has(runId) || quietFollowUpRunIds.has(runId)
+      ? []
+      : (finalReplyByRun.get(runId) ?? []),
   );
 
   const dmSends = input.turnItems.flatMap((item) => {

@@ -15,6 +15,7 @@ import {
   type BotSummary,
 } from "@t3tools/contracts";
 import { RelayOwnerNotification } from "@t3tools/contracts/relay";
+import { QUIET_BOT_REPLIES } from "@t3tools/shared/botQuietReply";
 import { NOTIFY_OWNER_TOOL_NAMES } from "@t3tools/shared/notifyOwnerTool";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -357,6 +358,18 @@ export const layer = Layer.effect(
         WHERE request.thread_id = m.thread_id AND request.run_id = m.run_id
           AND ${isOwnerRequest}
       ) OR EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_turn_items notification
+        WHERE notification.thread_id = m.thread_id AND notification.run_id = m.run_id
+          AND notification.type = 'dynamic_tool' AND notification.status = 'completed'
+          AND json_extract(notification.payload_json, '$.toolName') IN ${sql.in(NOTIFY_OWNER_TOOL_NAMES)}
+      ) OR (COALESCE((
+        SELECT TRIM(json_extract(last.payload_json, '$.text'))
+        FROM orchestration_v2_projection_messages last
+        WHERE last.thread_id = m.thread_id AND last.run_id = m.run_id
+          AND last.role = 'assistant' AND last.streaming = 0
+        ORDER BY last.created_at DESC, last.message_id DESC
+        LIMIT 1
+      ), '') NOT IN ${sql.in(QUIET_BOT_REPLIES)} AND (EXISTS (
         SELECT 1 FROM orchestration_v2_projection_messages incoming
         WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
           AND incoming.role = 'user'
@@ -382,12 +395,7 @@ export const layer = Layer.effect(
           AND request.run_id = json_extract(incoming.payload_json, '$.delegatedCompletion.parentRunId')
         WHERE incoming.thread_id = m.thread_id AND incoming.run_id = m.run_id
           AND incoming.role = 'user' AND ${isOwnerRequest}
-      ) OR EXISTS (
-        SELECT 1 FROM orchestration_v2_projection_turn_items notification
-        WHERE notification.thread_id = m.thread_id AND notification.run_id = m.run_id
-          AND notification.type = 'dynamic_tool' AND notification.status = 'completed'
-          AND json_extract(notification.payload_json, '$.toolName') IN ${sql.in(NOTIFY_OWNER_TOOL_NAMES)}
-      ))
+      ))))
     `;
 
     const isSlackSend = (homeThreadId: ThreadId) => sql`

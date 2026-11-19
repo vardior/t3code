@@ -99,7 +99,7 @@ describe("bot chat row projection", () => {
       runId: backgroundRunId,
       type: "assistant_message",
       messageId: MessageId.make("background-reply"),
-      text: "Nothing needs you.",
+      text: "Deployment verified.",
       streaming: false,
     };
     const owner: OrchestrationV2TurnItem = {
@@ -131,7 +131,7 @@ describe("bot chat row projection", () => {
       }),
     ).toMatchObject([
       { kind: "you", text: "Hello" },
-      { kind: "bot", text: "Nothing needs you." },
+      { kind: "bot", text: "Deployment verified." },
     ]);
   });
 
