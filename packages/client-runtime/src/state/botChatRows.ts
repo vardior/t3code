@@ -35,9 +35,29 @@ export function createBotChatProjector() {
   let result: VisibleBotChatItem[] = [];
   return (input: Input) => {
     const byId = new Map(input.messages.map((message) => [message.id, message]));
+    const visibleMessageIds = new Set(
+      (input.visibleTurnItems ?? []).flatMap(({ item }) =>
+        item.type === "user_message" || item.type === "assistant_message" ? [item.messageId] : [],
+      ),
+    );
+    const missingInputsByRun = new Map<string, ChatMessage[]>();
+    for (const message of input.messages) {
+      if (message.role !== "user" || message.runId === null || visibleMessageIds.has(message.id))
+        continue;
+      const inputs = missingInputsByRun.get(message.runId) ?? [];
+      inputs.push(message);
+      missingInputsByRun.set(message.runId, inputs);
+    }
     const historyMessages: ChatMessage[] = [];
     for (const { item } of input.visibleTurnItems ?? []) {
       if (item.type !== "user_message" && item.type !== "assistant_message") continue;
+      if (item.runId !== null) {
+        for (const message of missingInputsByRun.get(item.runId) ?? []) {
+          historyMessages.push(message);
+          byId.delete(message.id);
+        }
+        missingInputsByRun.delete(item.runId);
+      }
       let message = byId.get(item.messageId) ?? projectedMessages.get(item);
       if (message === undefined) {
         message = {

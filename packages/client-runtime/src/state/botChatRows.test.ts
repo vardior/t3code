@@ -79,6 +79,62 @@ describe("visibleBotChatItem", () => {
 });
 
 describe("bot chat row projection", () => {
+  it("keeps retained background inputs with their historical runs when a new owner writes", () => {
+    const backgroundRunId = RunId.make("background");
+    const backgroundInput = {
+      ...message,
+      id: MessageId.make("background-input"),
+      runId: backgroundRunId,
+      createdBy: "agent" as const,
+      creationSource: "provider" as const,
+      notification: {
+        source: { kind: "background_task" as const },
+        outcome: "completed" as const,
+        summary: "Task finished",
+      },
+    };
+    const reply: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("background-reply"),
+      runId: backgroundRunId,
+      type: "assistant_message",
+      messageId: MessageId.make("background-reply"),
+      text: "Nothing needs you.",
+      streaming: false,
+    };
+    const owner: OrchestrationV2TurnItem = {
+      ...notification,
+      id: TurnItemId.make("owner-input"),
+      type: "user_message",
+      messageId: message.id,
+      inputIntent: "turn_start",
+      createdBy: "user",
+      creationSource: "web",
+      text: message.text,
+      attachments: [],
+    };
+    const project = createBotChatProjector();
+    const input = { bot, messages: [backgroundInput], runs: [], turnItems: [] };
+    expect(project({ ...input, visibleTurnItems: [{ item: reply }] })).toEqual([]);
+    expect(
+      project({
+        ...input,
+        messages: [backgroundInput, message],
+        visibleTurnItems: [{ item: reply }, { item: owner }],
+      }),
+    ).toMatchObject([{ kind: "you", text: "Hello" }]);
+    expect(
+      project({
+        ...input,
+        messages: [message, backgroundInput],
+        visibleTurnItems: [{ item: owner }, { item: reply }],
+      }),
+    ).toMatchObject([
+      { kind: "you", text: "Hello" },
+      { kind: "bot", text: "Nothing needs you." },
+    ]);
+  });
+
   it.each(["mcp__t3-code__notify_owner", "t3-code.notify_owner"])(
     "updates background visibility only when %s completes",
     (toolName) => {
