@@ -59,6 +59,7 @@ export function ThreadTimeline({
   return (
     <MessagesTimeline
       {...timelineProps}
+      syncing={syncing}
       timelineEntries={mapEntries ? mapEntries(displayedEntries) : displayedEntries}
     />
   );

@@ -1,8 +1,8 @@
-import { isMacPlatform } from "@t3tools/shared/keybindings";
 import type { AnyRouter } from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { openCommandPalette } from "../commandPaletteBus";
+import { isMacPlatform } from "../lib/utils";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { installChatRouteCommands } from "./chatRouteCommands";
 
@@ -28,6 +28,19 @@ const CHAT: Match[] = [
 function pressEscape(): KeyboardEvent {
   const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
   window.dispatchEvent(event);
+  return event;
+}
+
+function pressMod(key: string): KeyboardEvent {
+  const mac = isMacPlatform(navigator.platform);
+  const event = new KeyboardEvent("keydown", {
+    key,
+    metaKey: mac,
+    ctrlKey: !mac,
+    cancelable: true,
+    bubbles: true,
+  });
+  document.activeElement?.dispatchEvent(event);
   return event;
 }
 
@@ -131,5 +144,25 @@ describe("chat route commands", () => {
 
     navigate(CHAT);
     expect(pressEscape().defaultPrevented).toBe(true);
+  });
+
+  it("leaves zoom keys to the app unless the focused right panel shows a browser", () => {
+    const { router } = routerAt(CHAT);
+    using stack = new DisposableStack();
+    stack.defer(installChatRouteCommands(router));
+    const panel = document.createElement("div");
+    panel.setAttribute("data-preview-panel-mode", "inline");
+    const pullRequestTab = document.createElement("button");
+    panel.append(pullRequestTab);
+    document.body.append(panel);
+    stack.defer(() => panel.remove());
+    pullRequestTab.focus();
+
+    for (const key of ["=", "+", "-", "0"]) expect(pressMod(key).defaultPrevented).toBe(false);
+
+    const browser = document.createElement("div");
+    browser.setAttribute("data-preview-view", "");
+    panel.append(browser);
+    for (const key of ["=", "+", "-", "0"]) expect(pressMod(key).defaultPrevented).toBe(true);
   });
 });
