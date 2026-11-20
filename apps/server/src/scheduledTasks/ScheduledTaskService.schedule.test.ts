@@ -338,7 +338,7 @@ it.effect("keeps one queued occurrence of a recurring task while its bound threa
         ),
       }));
       yield* TestClock.adjust("61 seconds");
-      yield* Effect.flatten(Ref.get(runDueWork));
+      yield* runDueWorkSettled;
       const [blocked] = (yield* service.list()).tasks;
       expect(blocked?.lastRunStatus).toBe("failed");
       expect(blocked?.lastRunError).toBe(
@@ -351,7 +351,7 @@ it.effect("keeps one queued occurrence of a recurring task while its bound threa
         WHERE task_id = ${task.id}`;
       yield* Ref.set(outcomeDuringLookup, true);
       yield* TestClock.adjust("61 seconds");
-      yield* Effect.flatten(Ref.get(runDueWork));
+      yield* runDueWorkSettled;
       const [raced] = (yield* service.list()).tasks;
       expect(raced?.lastRunStatus).toBe("failed");
       expect(raced?.lastRunError).toBe("Provider failed");

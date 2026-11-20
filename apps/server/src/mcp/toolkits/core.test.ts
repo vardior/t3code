@@ -1325,6 +1325,8 @@ it.effect(
             }),
           ),
           Layer.provide(ServerSettings.layerTest()),
+          Layer.provide(Layer.mock(BotService.BotService)({})),
+          Layer.provide(Layer.mock(OpenItemService.OpenItemService)({})),
           Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
           Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
           Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),

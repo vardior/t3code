@@ -28,6 +28,7 @@ import * as ProviderTurnStartServiceTestkit from "../orchestration-v2/ProviderTu
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -116,6 +117,7 @@ const layerOrchestration = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layer
   ),
   Layer.provide(layerServerConfig),
   Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(ModelManifest.layerTest),
   Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
       getInstance: (instanceId) =>

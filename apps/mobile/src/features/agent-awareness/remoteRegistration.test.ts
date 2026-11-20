@@ -255,6 +255,10 @@ const layerPersistenceTest = Layer.merge(
       clearAgentAwarenessRegistrationRecord: unexpectedStorage(),
       loadRecentThreadShortcuts: unexpectedStorage(),
       saveRecentThreadShortcuts: unexpectedStorage,
+      loadBotHomeThreads: unexpectedStorage(),
+      saveBotHomeThreads: unexpectedStorage,
+      loadOpenItemNotificationMarks: unexpectedStorage(),
+      saveOpenItemNotificationMarks: unexpectedStorage,
     }),
   ),
   Layer.succeed(
