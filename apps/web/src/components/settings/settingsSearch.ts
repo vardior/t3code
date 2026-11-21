@@ -728,9 +728,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "agent-thread-notifications",
-    title: "Agent threads",
+    title: msg("Agent threads"),
     to: "/settings/general",
-    searchTerms: ["notification bot home phone live updates"],
+    searchTerms: [msg("notification bot home phone live updates")],
     scope: "environment-defaults",
   },
   {
