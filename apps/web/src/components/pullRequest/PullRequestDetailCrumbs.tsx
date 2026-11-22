@@ -1,16 +1,12 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { T, useGT } from "gt-react";
-import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { ArrowLeftIcon } from "lucide-react";
 
 import { useOpenLink } from "~/browser/useOpenLink";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
-
-import { changeRequestTermKind } from "./changeRequestTerm";
+import { PullRequestNumberLink } from "./PullRequestNumberLink";
 
 interface CrumbsPullRequest {
   readonly url: string;
@@ -19,16 +15,6 @@ interface CrumbsPullRequest {
   readonly repository: string;
   readonly title: string;
 }
-
-const openNumberContextMenu = (event: ReactMouseEvent, detail: CrumbsPullRequest): void => {
-  event.preventDefault();
-  event.stopPropagation();
-  void showPullRequestLinkContextMenu({
-    url: detail.url,
-    openLabel: openOnHostLabel(sourceControlClients.get(detail.provider)),
-    position: { x: event.clientX, y: event.clientY },
-  });
-};
 
 const ROW_CLASS_NAME =
   "col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground transition-[opacity,transform] ease-out motion-reduce:transform-none motion-reduce:transition-none sm:text-xs";
@@ -54,57 +40,6 @@ function BackButton({ onBack, focusable }: { onBack: () => void; focusable: bool
       <TooltipPopup side="top">
         <T>Back to pull requests</T>
       </TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function NumberLink({
-  detail,
-  threadRef,
-  toneClassName,
-  openOnHostText,
-  focusable,
-}: {
-  detail: CrumbsPullRequest;
-  threadRef: ScopedThreadRef | null;
-  toneClassName: string;
-  openOnHostText: string;
-  focusable: boolean;
-}) {
-  const gt = useGT();
-  const openLink = useOpenLink(threadRef);
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            {...(focusable ? {} : { tabIndex: -1 })}
-            onClick={(event) => void openLink(detail.url, { event }).catch(console.error)}
-            onAuxClick={(event) => {
-              if (event.button === 1) void openLink(detail.url, { event }).catch(console.error);
-            }}
-            onContextMenu={(event) => openNumberContextMenu(event, detail)}
-            className={cn(
-              "inline-flex shrink-0 cursor-pointer items-center gap-0.5 font-medium underline-offset-2 hover:underline",
-              toneClassName,
-            )}
-            aria-label={gt(
-              "Open {term, select, mr {merge request} cr {change request} other {pull request}} #{number} on host",
-              {
-                term: changeRequestTermKind(
-                  sourceControlClients.get(detail.provider).changeRequest,
-                ),
-                number: detail.number,
-              },
-            )}
-          >
-            #{detail.number}
-            <ExternalLinkIcon aria-hidden className="size-2.5" />
-          </button>
-        }
-      />
-      <TooltipPopup side="top">{openOnHostText}</TooltipPopup>
     </Tooltip>
   );
 }
@@ -179,12 +114,12 @@ export function PullRequestDetailCrumbs({
                   : detail.repository}
               </TooltipPopup>
             </Tooltip>
-            <NumberLink
+            <PullRequestNumberLink
               detail={detail}
               threadRef={threadRef}
-              toneClassName={toneClassName}
+              className={cn("inline-flex items-center gap-0.5 font-medium", toneClassName)}
+              showIcon
               openOnHostText={openOnHostText}
-              focusable
             />
           </>
         ) : null}
@@ -203,12 +138,12 @@ export function PullRequestDetailCrumbs({
         {ready ? (
           <>
             {onBack ? <BackButton onBack={onBack} focusable={condensed} /> : null}
-            <NumberLink
+            <PullRequestNumberLink
               detail={detail}
               threadRef={threadRef}
-              toneClassName={toneClassName}
+              className={cn("inline-flex items-center gap-0.5 font-medium", toneClassName)}
+              showIcon
               openOnHostText={openOnHostText}
-              focusable={condensed}
             />
             <Tooltip>
               <TooltipTrigger

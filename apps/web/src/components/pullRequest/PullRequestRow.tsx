@@ -1,5 +1,4 @@
 import type { PullRequestAction } from "@t3tools/contracts";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { T } from "gt-react";
 import { SearchIcon } from "lucide-react";
 import { PullRequestChangeBreakdownStat } from "./PullRequestChangeBreakdownStat";
@@ -17,7 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
 import { pullRequestPanelReference } from "./usePullRequestDetail";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
-import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
+import { PullRequestNumberLink } from "./PullRequestNumberLink";
 import {
   PULL_REQUEST_ROW_CLASS,
   PULL_REQUEST_ROW_NUMBER_CLASS,
@@ -116,22 +115,25 @@ function PullRequestRowImpl({
         selected ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
-      <button
-        type="button"
-        aria-current={selected ? "true" : undefined}
+      <div
+        role="presentation"
         onClick={() => onSelect(entry)}
         onPointerEnter={() => onIntent?.(entry)}
         onPointerLeave={(event) => {
-          if (event.currentTarget !== document.activeElement) onIntent?.(null);
+          if (!event.currentTarget.contains(document.activeElement)) onIntent?.(null);
         }}
         onFocus={() => onIntent?.(entry)}
         onBlur={(event) => {
-          if (!event.currentTarget.matches(":hover")) onIntent?.(null);
+          if (
+            !event.currentTarget.contains(event.relatedTarget) &&
+            !event.currentTarget.matches(":hover")
+          )
+            onIntent?.(null);
         }}
         className={cn(
           PULL_REQUEST_ROW_CLASS,
           PAGE_ROW_CLASS,
-          "min-w-0 flex-1 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+          "min-w-0 flex-1 cursor-pointer transition-colors has-[[data-pr-row-select]:focus-visible]:ring-1 has-[[data-pr-row-select]:focus-visible]:ring-inset has-[[data-pr-row-select]:focus-visible]:ring-ring",
         )}
       >
         <PullRequestRowGlyph
@@ -143,22 +145,18 @@ function PullRequestRowImpl({
         />
         <PullRequestRowLines
           number={
-            <span
-              className={PULL_REQUEST_ROW_NUMBER_CLASS}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void showPullRequestLinkContextMenu({
-                  url: entry.url,
-                  openLabel: openOnHostLabel(sourceControlClients.get(entry.provider)),
-                  position: { x: event.clientX, y: event.clientY },
-                });
-              }}
-            >
-              #{entry.number}
-            </span>
+            <PullRequestNumberLink detail={entry} className={PULL_REQUEST_ROW_NUMBER_CLASS} />
           }
-          title={entry.title}
+          title={
+            <button
+              type="button"
+              aria-current={selected ? "true" : undefined}
+              data-pr-row-select
+              className="max-w-full cursor-pointer truncate text-left align-top outline-none"
+            >
+              {entry.title}
+            </button>
+          }
           signals={
             <>
               {entry.checksState === undefined ? null : (
@@ -252,7 +250,7 @@ function PullRequestRowImpl({
           }
           updatedAt={entry.updatedAt}
         />
-      </button>
+      </div>
       {hostActions.size > 0 ? (
         <PullRequestSpeedActions
           entry={entry}

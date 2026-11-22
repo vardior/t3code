@@ -8,6 +8,7 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 import type { MenuProps } from "../../components/ui/Menu.types";
 import { cn } from "../../lib/cn";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { RelativeTime } from "../../components/RelativeTime";
 import {
   selectedThreadRowColors,
@@ -176,7 +177,21 @@ export const PullRequestListRow = memo(
               <View className="flex-row items-center gap-1.5">
                 <PullRequestAvatar actor={item.author} size={16} />
                 <Text className={cn("min-w-0 flex-1 text-xs", mutedForeground)} numberOfLines={1}>
-                  {item.repository} <Text className={tertiaryForeground}>#{item.number}</Text>
+                  {item.repository}{" "}
+                  <Text
+                    className={tertiaryForeground}
+                    accessibilityRole="link"
+                    onPress={
+                      props.busy
+                        ? undefined
+                        : (event) => {
+                            event.stopPropagation();
+                            void tryOpenExternalUrl(item.url, "pull-request");
+                          }
+                    }
+                  >
+                    #{item.number}
+                  </Text>
                 </Text>
                 {item.stack ? (
                   <View className="flex-row items-center gap-1">
