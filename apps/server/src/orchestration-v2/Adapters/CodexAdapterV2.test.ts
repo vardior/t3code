@@ -1711,7 +1711,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     { runtimeMode: "full-access", turnIdKind: "present" },
     { runtimeMode: "auto-accept-edits", turnIdKind: "null" },
   ] as const)(
-    "handles MCP access approvals in $runtimeMode with a $turnIdKind turn id",
+    "handles MCP access approvals in $runtimeMode with a $turnIdKind turn id and cancels unexpected full-access command approvals",
     ({ runtimeMode, turnIdKind }) =>
       Effect.gen(function* () {
         const nativeThreadId = "mcp-approval-thread";
@@ -1758,6 +1758,30 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 type: "expect_outbound",
                 frame: { id: 0, result: { action: "accept", content: { approval: "once" } } },
               },
+              ...(runtimeMode === "full-access"
+                ? ([
+                    {
+                      type: "emit_inbound",
+                      frame: {
+                        id: 1,
+                        method: "item/commandExecution/requestApproval",
+                        params: {
+                          threadId: nativeThreadId,
+                          turnId: nativeTurnId,
+                          itemId: "command",
+                          kind: "command",
+                          command: "echo test",
+                          startedAtMs: 1782622441000,
+                          availableDecisions: ["accept", "cancel"],
+                        },
+                      },
+                    },
+                    {
+                      type: "expect_outbound",
+                      frame: { id: 1, result: { decision: "cancel" } },
+                    },
+                  ] as const)
+                : []),
               {
                 type: "emit_inbound",
                 frame: {
@@ -1791,7 +1815,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             harness.firstTerminal.pipe(Effect.as(undefined)),
             Queue.take(pending),
           );
-          assert.isUndefined(request, "Full access must not wait for an MCP approval");
+          assert.isUndefined(request, "Full access must not surface an approval request");
           assert.deepEqual(
             harness.terminalEvents().map((event) => event.status),
             ["completed"],
