@@ -118,9 +118,9 @@
   "c4eb2b21c8c58a54": "Normal",
   "f42c2a36b3507308": "{label} activado",
   "77cc5f738cb7d459": "{label} desactivado",
-  "2159a4897d4a4d73": "{runtime, select, codex {Actualiza la CLI de Codex a {version} o posterior para usar {names}.} other {Actualiza {providerName} a {version} o posterior para usar {names}.}}",
-  "a0854b0f9604fc7b": "{runtime, select, codex {Para usar {names} se necesita la CLI de Codex {version} o posterior, pero esta instalación solo puede actualizarse hasta {latestVersion}. Instala la CLI de Codex de otra forma o espera a una versión más reciente.} other {Para usar {names} se necesita {providerName} {version} o posterior, pero esta instalación solo puede actualizarse hasta {latestVersion}. Instala {providerName} de otra forma o espera a una versión más reciente.}}",
   "aba3bb73ce212f0c": "Usar {names} requiere {providerName} {version} o posterior, pero el cask de Homebrew claude-code solo tiene {latestVersion}. Cambia al cask claude-code@latest: {command}",
+  "a0854b0f9604fc7b": "{runtime, select, codex {Para usar {names} se necesita la CLI de Codex {version} o posterior, pero esta instalación solo puede actualizarse hasta {latestVersion}. Instala la CLI de Codex de otra forma o espera a una versión más reciente.} other {Para usar {names} se necesita {providerName} {version} o posterior, pero esta instalación solo puede actualizarse hasta {latestVersion}. Instala {providerName} de otra forma o espera a una versión más reciente.}}",
+  "2159a4897d4a4d73": "{runtime, select, codex {Actualiza la CLI de Codex a {version} o posterior para usar {names}.} other {Actualiza {providerName} a {version} o posterior para usar {names}.}}",
   "d887bea446534de5": "Ningún proyecto de este entorno puede leer {host}/{repository}.",
   "4e466d60e2f7736b": "Pega la URL completa de la pull request; este hilo no tiene ningún repositorio con el que resolver el número.",
   "302625058bacbe38": "Pega una URL completa; el host de este proyecto no tiene una URL de {changeRequest} conocida.",
@@ -2570,10 +2570,9 @@
       "v": "v"
     }
   ],
+  "b4b98a0287c282e2": "Está en otra máquina, así que el agente de esta máquina no puede leerlo. Quítalo o vuelve a cambiar para enviar.",
   "5bbac0e5afeec779": "Hilo actual",
   "33c7e68fca089036": "Hilo, {title}",
-  "b4b98a0287c282e2": "Está en otra máquina, así que el agente de esta máquina no puede leerlo. Quítalo o vuelve a cambiar para enviar.",
-  "c6196d99000642b4": "Abrir hilo",
   "34cc63390ad793cc": "Elige un hilo",
   "8f12309ead62e38a": "Buscar hilos o proyectos...",
   "2f664754d005d9a7": "No se encontraron hilos activos.",
@@ -2584,6 +2583,7 @@
   "89b5e8f3887812da": "Solicitud de invitado",
   "62e626804919b294": "Se necesita una respuesta",
   "3f9c311182f2f4a0": "Open bot",
+  "c6196d99000642b4": "Abrir hilo",
   "826cb862b4a11fb3": "{label}:",
   "3e597ec938e7551b": "Tú:",
   "a1fbf2422c588292": "Agente:",
@@ -3045,8 +3045,8 @@
   "6f85f14f35b3f547": "{provider} a través de {environment}",
   "7c59a888a062a8bd": "La entrada de voz no tiene ningún borrador en el que grabar.",
   "62450481c00d2ef3": "El entorno del borrador no está disponible para limpiar la transcripción.",
-  "c64cb58d9cecbcd2": "Falló la limpieza de la transcripción",
   "0674544195fcdc39": "Se añadió la transcripción original.",
+  "c64cb58d9cecbcd2": "Falló la limpieza de la transcripción",
   "296496693cdac0db": "El comando t3 no está disponible.",
   "efbcef7bc9bbda01": "No se pudo cargar el estado del comando t3.",
   "1bf6910332426e62": "El acceso a la red del escritorio no está disponible.",
@@ -3166,7 +3166,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "en el ordenador que abrió esta página"]
+      "c": [
+        " ",
+        "en el ordenador que abrió esta página"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3178,7 +3181,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quien lo ejecute obtiene este acceso"]
+      "c": [
+        " ",
+        "· quien lo ejecute obtiene este acceso"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -3233,13 +3239,13 @@
   "ff5f1c260e87ecde": "Comprueba que se puede acceder al backend desde este navegador, que admite CORS para clientes alojados y que se sirve por HTTPS cuando abres esta página desde HTTPS.",
   "08570ee0982df89d": "Emparejando...",
   "3bbae7c96b6cbfc3": "Abrir app",
-  "049cb7b4f7d8b511": "Respuesta sin leer",
-  "4d3cbcb4df7adfd4": "Buscar bots e hilos",
-  "9e8a30593cf1dc7d": "Se necesita tu respuesta",
-  "e6712e967cb0bdd1": "{count, plural, one {# elemento abierto} other {# elementos abiertos}}",
-  "355d3f9101506b98": "Error · {error}",
-  "094c8aee60f707b7": "{name} · en pausa",
-  "7f16829787fada44": "trabajando…",
+  "4d3cbcb4df7adfd4": "Search bots and threads",
+  "9e8a30593cf1dc7d": "Needs input",
+  "e6712e967cb0bdd1": "{count, plural, one {# open item} other {# open items}}",
+  "355d3f9101506b98": "Failed · {error}",
+  "049cb7b4f7d8b511": "Unread reply",
+  "094c8aee60f707b7": "{name} · paused",
+  "7f16829787fada44": "working…",
   "49cc06e79f21f85a": "{seconds} s",
   "8603d41c52392f1d": "{minutes} min {seconds} s",
   "f2a955905704b91d": "{hours} h {minutes} min",
@@ -3296,6 +3302,7 @@
   "4d493d0bda4d403d": "Vuelve a adjuntar el archivo interrumpido o quítalo",
   "c9cad1d84d5f1a32": "Vuelve a adjuntar los archivos interrumpidos o quítalos",
   "536a820f2ff726da": "Selecciona al menos un modelo.",
+  "48d6389202ad6754": "Se enviará cuando esté listo",
   "fbafbe78b5e37966": "Reanudar hilo",
   "bcd7eb979dd38dae": "Abrir el cuadro de mensaje para compactar y enviar",
   "95ee62a0d6968b89": "Enviar mensaje",
@@ -3472,6 +3479,9 @@
   "e778e4f446fdf873": "Tu próximo mensaje inicia una sesión nueva",
   "0e2f2da4f2d94785": "El agente no verá los mensajes anteriores de este hilo.",
   "e1189d2e582b008d": "Mantener la sesión actual",
+  "2bb448d605877a22": "Edita o pulsa Esc para cancelar",
+  "1a1f128d70c62304": "{count, plural, one {Se enviará cuando la imagen esté lista} other {Se enviará cuando {count} imágenes estén listas}}",
+  "5af3ab719a9725fb": "Enviando mensaje",
   "461c9f865f2e9b92": "{option} activado",
   "f2aa17b5c620f2a4": "{option} desactivado",
   "f59314a884aae1ff": "Predeterminado",
@@ -3711,7 +3721,6 @@
   "7c1923203049d602": "Copiar código",
   "637817e4ff79c90e": "Acciones del bloque de código",
   "ebf3a2b1e314aa5f": "Ejecutar en la terminal",
-  "fe219642547fa0bf": "Ejecutar en la terminal",
   "122a8512abc51180": "Detalles",
   "58c38c65c2783c5d": "Ruta completa",
   "f37e7d36b51c5b28": "Copiar ruta relativa",
@@ -3723,10 +3732,6 @@
   "4967584e8d0fb1c2": "Vista previa del contenido",
   "67589dd912eacb7c": "Abrir en el navegador integrado",
   "a3c98d4c4b24cecb": "Opciones de archivo de {label}",
-  "b4fe8a076e9fd2f8": "Ecuación en bloque",
-  "085d1407e8c92cce": "Ecuación en línea",
-  "a2ef393fa7b48ae8": "Desplazar la ecuación en bloque",
-  "e94685ea5642e088": "Desplazar la ecuación en línea",
   "3a04583c8500e23d": "Mostrar diagrama",
   "16d64f650840fe06": "Mostrar código",
   "6d329f7d3a50c7e7": "Copiar tabla",
@@ -3913,7 +3918,7 @@
   ],
   "d951cb8c12ccd52e": "Abrir en…",
   "88c91fd12cf0f7d7": "Elegir editor",
-  "f5fbf4303cbadcd9": "No hay asuntos pendientes.",
+  "f5fbf4303cbadcd9": "No open items.",
   "8413f3e7f703f14e": "Mostrar u ocultar el panel de detalles del hilo",
   "a728e041b203714a": "Mostrar u ocultar los detalles del hilo ({shortcut})",
   "5417d84fba7b6b84": "Mostrar u ocultar los detalles del hilo",
@@ -4003,9 +4008,11 @@
   "973e99fa86d7f531": "Mensaje en cola {position} de {total}, sin enviar",
   "0f6087c4f53c7f17": "Iniciar un turno con este mensaje ({shortcut})",
   "adab89933af02669": "Omitir la compactación y enviar este mensaje ({shortcut})",
+  "d8aaf932f90429c4": "Mover este comando al principio de la cola ({shortcut})",
   "3de4016452e8d2bd": "Enviar al turno actual ({shortcut})",
   "259cc9568148e8ad": "Iniciar un turno con este mensaje",
   "bb7fddb812d5d29e": "Omitir la compactación y enviar este mensaje",
+  "425ab15036aec8a4": "Mover este comando al principio de la cola",
   "a5fe1ee609b29a9f": "Enviar al turno actual",
   "2b7fd345e4f4fd6e": "Cancelar la edición del mensaje en cola",
   "47f1726bf106d2c8": "Editar mensaje en cola",
@@ -12477,7 +12484,5 @@
   "27d76249d09eb69f": "Guía de revisión lista",
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
-  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
-  "d8aaf932f90429c4": "Mover este comando al principio de la cola ({shortcut})",
-  "425ab15036aec8a4": "Mover este comando al principio de la cola"
+  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión"
 }
