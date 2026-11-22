@@ -50,9 +50,7 @@ export function BotsSidebar() {
     if (isMobile) setOpenMobile(false);
   };
   const allEntries = mainViewEntries({ threads, bots });
-  const needsYouCount = allEntries.filter(
-    (entry) => entry.kind === "bot" && entry.attention === "needs-you",
-  ).length;
+  const needsYouCount = allEntries.filter((entry) => entry.attention === "needs-you").length;
   const searchQuery = query.trim().toLocaleLowerCase();
   const entries =
     searchQuery.length === 0

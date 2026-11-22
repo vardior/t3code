@@ -79,17 +79,24 @@ type MainViewEntry =
   | {
       readonly kind: "thread";
       readonly thread: EnvironmentThreadShell;
+      readonly attention: "needs-you" | null;
       readonly activityAt: string | null;
     };
+
+export function threadHasMainViewRequest(thread: EnvironmentThreadShell): boolean {
+  const kind = thread.source.pendingRuntimeRequest?.kind;
+  return kind !== undefined && kind !== "auth_refresh" && kind !== "dynamic_tool_call";
+}
 
 export function isMainViewThreadCandidate(thread: EnvironmentThreadShell): boolean {
   const creationSource = thread.source.creationSource;
   return (
     thread.archivedAt == null &&
-    isListedThreadLineage(thread.lineage) &&
-    (thread.pinnedAt != null ||
-      (thread.lineage.parentThreadId == null &&
-        (creationSource === "web" || creationSource === "mobile")))
+    (threadHasMainViewRequest(thread) ||
+      (isListedThreadLineage(thread.lineage) &&
+        (thread.pinnedAt != null ||
+          (thread.lineage.parentThreadId == null &&
+            (creationSource === "web" || creationSource === "mobile")))))
   );
 }
 
@@ -156,7 +163,9 @@ export function mainViewEntries(input: {
   for (const thread of threadsWithoutBotHomes(input.threads, input.bots)) {
     if (
       isMainViewThreadCandidate(thread) &&
-      (thread.pinnedAt != null || thread.settledOverride !== "settled")
+      (threadHasMainViewRequest(thread) ||
+        thread.pinnedAt != null ||
+        thread.settledOverride !== "settled")
     ) {
       const needsYou = botNeedsYou(thread);
       const unreadAt =
@@ -168,7 +177,7 @@ export function mainViewEntries(input: {
         : (unreadAt ?? resolveThreadActivityTimestamp(thread));
       ranked.push({
         tier: needsYou ? 0 : unreadAt !== null ? 1 : threadRuntimeIsActive(thread.runtime) ? 2 : 3,
-        entry: { kind: "thread", thread, activityAt },
+        entry: { kind: "thread", thread, attention: needsYou ? "needs-you" : null, activityAt },
       });
     }
   }

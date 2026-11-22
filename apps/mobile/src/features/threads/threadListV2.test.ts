@@ -406,6 +406,27 @@ describe("buildThreadListV2Items", () => {
         ...settled,
         source: { ...owner.source, creationSource: "mcp" as const },
       },
+      presentThreadShell(
+        environmentId,
+        decodeThreadShell(
+          makeRawThreadShell({
+            id: ThreadId.make("approval"),
+            creationSource: "mcp",
+            lineage: {
+              parentThreadId: owner.id,
+              rootThreadId: owner.id,
+              relationshipToParent: "subagent",
+            },
+            snoozedAt: DateTime.makeUnsafe(parkedAt),
+            snoozedUntil: DateTime.makeUnsafe("2026-06-03T09:00:00.000Z"),
+            pendingRuntimeRequest: {
+              id: RuntimeRequestId.make("approval"),
+              kind: "command",
+              createdAt: DateTime.makeUnsafe(NOW),
+            },
+          }),
+        ),
+      ),
     ];
     const layout = buildThreadListV2Items({
       mainView: true,
@@ -421,13 +442,14 @@ describe("buildThreadListV2Items", () => {
     expect(layout.items.map(({ thread }) => thread.id)).toEqual([
       "pinned",
       "owner",
+      "approval",
       "snoozed",
       "settled",
     ]);
     expect(layout.items[0]).toMatchObject({ pinned: true, variant: "slim" });
     expect(layout.workingCount).toBe(0);
-    expect(layout.snoozedShelfHeaderIndex).toBe(2);
-    expect(layout.settledShelfHeaderIndex).toBe(3);
+    expect(layout.snoozedShelfHeaderIndex).toBe(3);
+    expect(layout.settledShelfHeaderIndex).toBe(4);
     expect(layout.settledCount).toBe(1);
   });
 

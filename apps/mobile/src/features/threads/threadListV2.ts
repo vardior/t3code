@@ -1,5 +1,8 @@
 import { msg } from "gt-react-native";
-import { isMainViewThreadCandidate } from "@t3tools/client-runtime/state/bot-conversation";
+import {
+  isMainViewThreadCandidate,
+  threadHasMainViewRequest,
+} from "@t3tools/client-runtime/state/bot-conversation";
 import {
   canSnooze,
   effectiveSnoozed,
@@ -769,9 +772,9 @@ export function buildThreadListV2Items(input: {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const listedThreads = input.threads.filter(
     (thread) =>
-      thread.archivedAt === null &&
-      isListedThreadLineage(thread.lineage) &&
-      (!input.mainView || isMainViewThreadCandidate(thread)) &&
+      (input.mainView
+        ? isMainViewThreadCandidate(thread)
+        : thread.archivedAt === null && isListedThreadLineage(thread.lineage)) &&
       (input.environmentId === null || thread.environmentId === input.environmentId) &&
       (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
@@ -801,7 +804,8 @@ export function buildThreadListV2Items(input: {
     }
     const supportsSettlement = input.settlementEnvironmentIds?.has(thread.environmentId) ?? true;
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true;
-    const isSnoozed = supportsSnooze && effectiveSnoozed(thread, { now });
+    const needsYou = input.mainView && threadHasMainViewRequest(thread);
+    const isSnoozed = !needsYou && supportsSnooze && effectiveSnoozed(thread, { now });
     if (isSnoozed) {
       if (
         thread.snoozedUntil != null &&
@@ -814,6 +818,7 @@ export function buildThreadListV2Items(input: {
     const hasQueuedMessages =
       queuedThreadKeys?.has(`${thread.environmentId}:${thread.id}`) === true;
     const isSettled =
+      !needsYou &&
       (input.mainView || supportsSettlement) &&
       thread.settledOverride === "settled" &&
       (input.mainView || !hasQueuedMessages);

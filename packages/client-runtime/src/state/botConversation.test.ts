@@ -1382,6 +1382,49 @@ describe("home bot threads", () => {
     title: bot.name,
   };
 
+  it("shows workers at the top only while they need a response", () => {
+    const owner = presentThreadShell(environmentId, {
+      ...v2ThreadShell,
+      id: ThreadId.make("owner"),
+    });
+    const workers = (pending: boolean) =>
+      (["command", "user_input"] as const).map((kind, index) =>
+        presentThreadShell(environmentId, {
+          ...v2ThreadShell,
+          id: ThreadId.make(kind),
+          creationSource: "mcp",
+          ...(kind === "user_input"
+            ? {
+                lineage: {
+                  parentThreadId: owner.id,
+                  rootThreadId: owner.id,
+                  relationshipToParent: "subagent",
+                },
+              }
+            : {}),
+          pendingRuntimeRequest: pending
+            ? {
+                id: RuntimeRequestId.make(kind),
+                kind,
+                createdAt: at(`2026-11-02T0${index + 1}:00:00Z`),
+              }
+            : null,
+        }),
+      );
+    const entries = (pending: boolean) =>
+      mainViewEntries({ threads: [owner, ...workers(pending)], bots: [] }).map((entry) => [
+        entry.kind === "thread" ? entry.thread.id : entry.bot.id,
+        entry.attention,
+      ]);
+
+    expect(entries(true)).toEqual([
+      ["user_input", "needs-you"],
+      ["command", "needs-you"],
+      ["owner", null],
+    ]);
+    expect(entries(false)).toEqual([["owner", null]]);
+  });
+
   it("ranks bots and listed owner threads by attention and keeps quiet bots in input order", () => {
     const pinnedAt = DateTime.makeUnsafe("2026-11-01T00:00:00Z");
     const child = { parentThreadId: homeThreadId, rootThreadId: homeThreadId };
