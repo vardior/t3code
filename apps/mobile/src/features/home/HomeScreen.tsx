@@ -6,7 +6,11 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
-import { threadsWithoutBotHomes } from "@t3tools/client-runtime/state/bot-conversation";
+import {
+  mainViewEntries,
+  threadsWithoutBotHomes,
+  type MainViewBotEntry,
+} from "@t3tools/client-runtime/state/bot-conversation";
 import type { ThreadMoveDestination } from "../threads/threadOrder";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -105,10 +109,70 @@ import { useFabScroll } from "./FabScrollContext";
 import { holdLaunchSplashForHomeRows, settleLaunchSplashHomeRows } from "./home-launch-splash";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
-import { HomeBotsSection } from "./HomeBotsSection";
+import { HomeBotControls } from "./HomeBotsSection";
+import { MainViewBotRow } from "./MainViewBotRow";
 import { HomeMorningCards } from "./HomeMorningCard";
 import { useHomeBots } from "./useHomeBots";
 import { deriveHomeEmptyState } from "./home-empty-state";
+
+type HomeListItem =
+  | ThreadListV2ListItem
+  | {
+      readonly type: "bot";
+      readonly key: string;
+      readonly entry: MainViewBotEntry;
+      readonly now: number;
+    };
+
+function homeListItems(
+  items: ReadonlyArray<ThreadListV2ListItem>,
+  entries: ReturnType<typeof mainViewEntries>,
+  now: number,
+): ReadonlyArray<HomeListItem> {
+  const pinnedAndActive = new Map<
+    EnvironmentThreadShell,
+    Extract<ThreadListV2ListItem, { type: "v2-thread" }>
+  >();
+  const pending: ThreadListV2ListItem[] = [];
+  let shelfStart = 0;
+  for (const item of items) {
+    if (item.type === "v2-thread") pinnedAndActive.set(item.item.thread, item);
+    else if (item.type === "v2-pending") pending.push(item);
+    else break;
+    shelfStart++;
+  }
+  const activityRows = entries.flatMap((entry): HomeListItem[] => {
+    if (entry.kind === "bot") {
+      return [{ type: "bot", key: `bot:${entry.environmentId}:${entry.bot.id}`, entry, now }];
+    }
+    const row = pinnedAndActive.get(entry.thread);
+    return row === undefined ? [] : [row];
+  });
+  return [
+    ...pending,
+    ...activityRows.map((row, index) => {
+      if (row.type !== "v2-thread") return row;
+      const showTrailingDivider = activityRows[index + 1]?.type === "v2-thread";
+      return showTrailingDivider === row.showTrailingDivider
+        ? row
+        : { ...row, showTrailingDivider };
+    }),
+    ...items.slice(shelfStart),
+  ];
+}
+
+function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean {
+  if (item.type === "bot") {
+    return (
+      previous.type === "bot" &&
+      previous.key === item.key &&
+      previous.entry.bot === item.entry.bot &&
+      previous.entry.shell === item.entry.shell &&
+      previous.now === item.now
+    );
+  }
+  return previous.type !== "bot" && threadListV2ListItemsAreEqual(previous, item);
+}
 
 interface HomeScreenProps {
   /** Whether this list is the one on screen; see `useHomeRouteVisible`. */
@@ -299,7 +363,7 @@ export function HomeScreen(props: HomeScreenProps) {
     });
   });
   const swipeRowActivation = createSwipeRowActivation();
-  const activateVisibleRows = (rows: ReadonlyArray<ThreadListV2ListItem>) => {
+  const activateVisibleRows = (rows: ReadonlyArray<HomeListItem>) => {
     const state = listRef.current?.getState();
     if (state === undefined || !(state.end >= 0)) return;
     swipeRowActivation.activate(
@@ -363,6 +427,7 @@ export function HomeScreen(props: HomeScreenProps) {
     pickableProjectGroups(projectScopes),
     v2ProjectScopeKey,
   );
+  const mainView = !hasSearchQuery && v2ProjectScopeKey === null;
   const threadSearch = useThreadSearch(
     searchEnvironmentIds,
     props.searchQuery,
@@ -433,6 +498,7 @@ export function HomeScreen(props: HomeScreenProps) {
     contentOnlyThreadKeys,
     olderSettledShelf,
   } = useThreadListV2({
+    mainView,
     threads,
     pendingTasks: props.pendingTasks,
     environmentId: props.selectedEnvironmentId,
@@ -454,6 +520,14 @@ export function HomeScreen(props: HomeScreenProps) {
     settledShelfExpanded,
     selectedThreadKey,
   });
+  const entries = mainView ? mainViewEntries({ threads: props.threads, bots }) : null;
+  const listItems =
+    entries === null
+      ? threadListV2Items
+      : homeListItems(threadListV2Items, entries, Date.parse(now));
+  const refreshBotByEnvironment = new Map(
+    bots.map((entry) => [entry.environmentId, entry.refresh]),
+  );
   // Called as `props.onSelectThread(...)`, the compiler would cache this handler on the whole
   // props object, which is new on every render of Home's parent.
   const { onSelectThread } = props;
@@ -469,13 +543,29 @@ export function HomeScreen(props: HomeScreenProps) {
     }
     onSelectThread(thread);
   };
-  useThreadJumpShortcuts(threadListV2Items, selectThread, props.onSelectPendingTask);
+  const jumpItems = mainView ? listItems.filter((item) => item.type !== "bot") : threadListV2Items;
+  useThreadJumpShortcuts(jumpItems, selectThread, props.onSelectPendingTask);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the list's visible range after commit to enable swipe gestures on those rows
   useEffect(() => {
-    if (swipeEnabled) activateVisibleRows(threadListV2Items);
-  }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
+    if (swipeEnabled) activateVisibleRows(listItems);
+  }, [activateVisibleRows, swipeEnabled, listItems]);
 
-  const renderV2Item = ({ item }: { readonly item: ThreadListV2ListItem }) => {
+  const renderV2Item = ({ item }: { readonly item: HomeListItem }) => {
+    if (item.type === "bot") {
+      const { environmentId } = item.entry;
+      const refresh = refreshBotByEnvironment.get(environmentId);
+      return refresh === undefined ? null : (
+        <MainViewBotRow
+          entry={item.entry}
+          environmentLabel={
+            botEnvironmentLabels.size > 1 ? botEnvironmentLabels.get(environmentId) : undefined
+          }
+          now={item.now}
+          refresh={refresh}
+          onSelectBot={handleSelectBot}
+        />
+      );
+    }
     if (item.type === "v2-pending") {
       const pendingScopeKey = scopedProjectKey(
         item.pendingTask.environmentId,
@@ -592,9 +682,10 @@ export function HomeScreen(props: HomeScreenProps) {
         pinningSupported={pinningEnvironmentIds.has(thread.environmentId)}
         autoSettleOptOutSupported={autoSettleOptOutEnvironmentIds.has(thread.environmentId)}
         reorderSupported={
-          item.item.pinned
+          !mainView &&
+          (item.item.pinned
             ? pinReorderEnvironmentIds.has(thread.environmentId)
-            : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId)
+            : !workingShelfEnabled && activeReorderEnvironmentIds.has(thread.environmentId))
         }
         canMoveUp={item.canMoveUp}
         canMoveDown={item.canMoveDown}
@@ -612,7 +703,7 @@ export function HomeScreen(props: HomeScreenProps) {
       />
     );
   };
-  const v2KeyExtractor = (item: ThreadListV2ListItem) => item.key;
+  const v2KeyExtractor = (item: HomeListItem) => item.key;
 
   // extraData changes invalidate every visible row; put the minute clock on items to limit updates.
   const v2ExtraData = {
@@ -625,6 +716,7 @@ export function HomeScreen(props: HomeScreenProps) {
     selectedThreadKey,
     threadSearchMatchByKey,
     workingShelfEnabled,
+    mainView,
   };
 
   const hasAnyThreads =
@@ -632,7 +724,7 @@ export function HomeScreen(props: HomeScreenProps) {
     props.pendingTasks.length > 0 ||
     threadListV2Layout.settledCount > 0;
   // A hidden list gets no layout, so it never reports its rows as laid out.
-  const hasRowsToLayOut = props.visible && hasAnyThreads && threadListV2Items.length > 0;
+  const hasRowsToLayOut = props.visible && listItems.length > 0;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds the native launch splash, which is outside React, until the rows are gone or this list unmounts; a layout effect runs before the splash hides in this commit
   useLayoutEffect(() => {
     return hasRowsToLayOut ? holdLaunchSplashForHomeRows() : undefined;
@@ -723,17 +815,15 @@ export function HomeScreen(props: HomeScreenProps) {
         environmentLabels={botEnvironmentLabels}
         onSelectBot={handleSelectBot}
       />
-      <HomeBotsSection
-        searchQuery={props.searchQuery}
-        onSelectThread={selectThread}
-        bots={homeBots}
-        threads={props.threads.filter((thread) =>
-          searchEnvironmentIds.includes(thread.environmentId),
-        )}
-        environmentLabels={botEnvironmentLabels}
-        now={Date.parse(now)}
-        onSelectBot={handleSelectBot}
-      />
+      {bots.length > 0 || homeBots.errors.length > 0 ? (
+        <View className="mb-4 px-4">
+          <HomeBotControls
+            bots={homeBots}
+            environmentLabels={botEnvironmentLabels}
+            onSelectBot={handleSelectBot}
+          />
+        </View>
+      ) : null}
     </>
   );
 
@@ -780,7 +870,7 @@ export function HomeScreen(props: HomeScreenProps) {
 
   if (
     Platform.OS === "android" &&
-    threadListV2Items.length === 0 &&
+    listItems.length === 0 &&
     bots.length === 0 &&
     homeBots.errors.length === 0
   ) {
@@ -807,17 +897,17 @@ export function HomeScreen(props: HomeScreenProps) {
                 ref={listRef}
                 onLoad={() => {
                   settleLaunchSplashHomeRows();
-                  activateVisibleRows(threadListV2Items);
+                  activateVisibleRows(listItems);
                 }}
                 onTouchStart={(event) => trackListTouches(event, true)}
                 onTouchEnd={(event) => trackListTouches(event, false)}
                 onTouchCancel={(event) => trackListTouches(event, false)}
                 renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
-                data={threadListV2Items}
+                data={listItems}
                 renderItem={renderV2Item}
                 keyExtractor={v2KeyExtractor}
                 getItemType={(item) => item.type}
-                itemsAreEqual={threadListV2ListItemsAreEqual}
+                itemsAreEqual={homeListItemsAreEqual}
                 estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
                 drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
                 recycleItems

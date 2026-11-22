@@ -45,6 +45,7 @@ function observeInbox(
  * its own memo boundary to preserve the list's identity during unrelated navigation renders.
  */
 export function useThreadListV2(input: {
+  readonly mainView?: boolean;
   readonly threads: LayoutInput["threads"];
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly environmentId: EnvironmentId | null;
@@ -67,7 +68,8 @@ export function useThreadListV2(input: {
   readonly settledShelfExpanded: boolean;
   readonly selectedThreadKey: string | null;
 }) {
-  const { threads, workingShelfEnabled } = input;
+  const { threads, mainView } = input;
+  const workingShelfEnabled = !mainView && input.workingShelfEnabled;
   const layoutTime = useMemo(
     () => threadListV2LayoutTime({ threads, now: input.now, searchQuery: input.searchQuery }),
     [threads, input.now, input.searchQuery],
@@ -83,6 +85,7 @@ export function useThreadListV2(input: {
   );
   // Compute move availability per section; per-row planning is quadratic.
   const moveAvailability = useMemo(() => {
+    if (mainView) return undefined;
     const sectionAvailability = (section: "pinned" | "active") =>
       computeThreadMoveAvailability({
         allThreads: threads,
@@ -114,6 +117,7 @@ export function useThreadListV2(input: {
     input.snoozeEnvironmentIds,
     input.queuedThreadKeys,
     workingShelfEnabled,
+    mainView,
   ]);
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const scopes = useMemo(
@@ -135,6 +139,7 @@ export function useThreadListV2(input: {
   const layout = useMemo(
     () =>
       buildThreadListV2Items({
+        mainView: mainView === true,
         pendingOrder: input.pendingOrder,
         threads: threads.filter((thread) => thread.archivedAt === null),
         environmentId: input.environmentId,
@@ -167,6 +172,7 @@ export function useThreadListV2(input: {
         ),
       }),
     [
+      mainView,
       input.pendingOrder,
       threads,
       input.environmentId,
@@ -227,7 +233,7 @@ export function useThreadListV2(input: {
         snoozeLabelNow: `${input.now.slice(0, 16)}:00.000Z`,
         snoozeEnvironmentIds: input.snoozeEnvironmentIds,
         queuedThreadKeys: input.queuedThreadKeys,
-        moveAvailability,
+        ...(moveAvailability === undefined ? {} : { moveAvailability }),
         shelfPreferencesLoading: !input.shelfPreferencesLoaded,
         resolve: keepMarked,
       }),

@@ -1,4 +1,5 @@
 import { msg } from "gt-react-native";
+import { isMainViewThreadCandidate } from "@t3tools/client-runtime/state/bot-conversation";
 import {
   canSnooze,
   effectiveSnoozed,
@@ -712,6 +713,7 @@ function sortSettledThreadsReusingLast(
 }
 
 export function buildThreadListV2Items(input: {
+  readonly mainView?: boolean;
   readonly pendingOrder?: PendingThreadOrder | null;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly environmentId: EnvironmentId | null;
@@ -740,7 +742,7 @@ export function buildThreadListV2Items(input: {
 }): ThreadListV2Layout {
   const now = input.now;
   const pending =
-    input.pendingOrder == null
+    input.mainView || input.pendingOrder == null
       ? null
       : reconcilePendingThreadOrder(
           input.pendingOrder,
@@ -756,7 +758,8 @@ export function buildThreadListV2Items(input: {
     ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
     : null;
 
-  const workingShelfEnabled = input.workingShelfEnabled === true;
+  const workingShelfEnabled = !input.mainView && input.workingShelfEnabled === true;
+  const mainViewPins: ThreadListV2Item[] = [];
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
@@ -768,6 +771,7 @@ export function buildThreadListV2Items(input: {
     (thread) =>
       thread.archivedAt === null &&
       isListedThreadLineage(thread.lineage) &&
+      (!input.mainView || isMainViewThreadCandidate(thread)) &&
       (input.environmentId === null || thread.environmentId === input.environmentId) &&
       (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
@@ -797,8 +801,8 @@ export function buildThreadListV2Items(input: {
     }
     const supportsSettlement = input.settlementEnvironmentIds?.has(thread.environmentId) ?? true;
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true;
-    if (supportsSnooze && effectiveSnoozed(thread, { now })) {
-      snoozed.push(thread);
+    const isSnoozed = supportsSnooze && effectiveSnoozed(thread, { now });
+    if (isSnoozed) {
       if (
         thread.snoozedUntil != null &&
         (nextSnoozeWakeAt === null ||
@@ -806,11 +810,25 @@ export function buildThreadListV2Items(input: {
       ) {
         nextSnoozeWakeAt = thread.snoozedUntil;
       }
-      continue;
     }
     const hasQueuedMessages =
       queuedThreadKeys?.has(`${thread.environmentId}:${thread.id}`) === true;
-    if (supportsSettlement && thread.settledOverride === "settled" && !hasQueuedMessages) {
+    const isSettled =
+      (input.mainView || supportsSettlement) &&
+      thread.settledOverride === "settled" &&
+      (input.mainView || !hasQueuedMessages);
+    if (input.mainView && thread.pinnedAt != null) {
+      mainViewPins.push({
+        thread,
+        variant: isSnoozed || isSettled ? "slim" : "card",
+        snoozed: isSnoozed,
+        pinned: true,
+        wokeAt: isSnoozed || isSettled ? null : resolveThreadListV2WokeAt(thread, { now }),
+        isLast: false,
+      });
+    } else if (isSnoozed) {
+      snoozed.push(thread);
+    } else if (isSettled) {
       settled.push(thread);
     } else if (thread.pinnedAt != null) {
       pinned.push(thread);
@@ -861,9 +879,11 @@ export function buildThreadListV2Items(input: {
     };
   }
 
-  const orderedActive = workingShelfEnabled
-    ? sortInboxThreadsByReturn(active, input.inboxReturnAt)
-    : applyPendingThreadOrder(sortThreadsForListV2(active), "active", pending);
+  const orderedActive = input.mainView
+    ? active
+    : workingShelfEnabled
+      ? sortInboxThreadsByReturn(active, input.inboxReturnAt)
+      : applyPendingThreadOrder(sortThreadsForListV2(active), "active", pending);
   const orderedWorking = sortWorkingThreadsBySend(working);
   const orderedSnoozed = [...snoozed].sort(
     (left, right) =>
@@ -907,7 +927,7 @@ export function buildThreadListV2Items(input: {
           (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
         );
 
-  const items: ThreadListV2Item[] = [];
+  const items: ThreadListV2Item[] = mainViewPins;
   for (const thread of applyPendingThreadOrder(
     sortPinnedThreadsByOrderKey(pinned),
     "pinned",

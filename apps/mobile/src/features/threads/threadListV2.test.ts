@@ -386,6 +386,51 @@ describe("getThreadListV2OrderedSection", () => {
 });
 
 describe("buildThreadListV2Items", () => {
+  it("keeps owner shelves below the flat Home run while promoting listed pins", () => {
+    const owner = makeThread({ id: ThreadId.make("owner"), title: "Owner" });
+    const parkedAt = "2026-06-01T12:00:00.000Z";
+    const settled = { settledOverride: "settled", settledAt: parkedAt } as const;
+    const threads = [
+      owner,
+      { ...owner, id: ThreadId.make("settled"), ...settled },
+      { ...owner, id: ThreadId.make("pinned"), ...settled, pinnedAt: parkedAt },
+      {
+        ...owner,
+        id: ThreadId.make("snoozed"),
+        snoozedAt: parkedAt,
+        snoozedUntil: "2026-06-03T09:00:00.000Z",
+      },
+      {
+        ...owner,
+        id: ThreadId.make("mcp"),
+        ...settled,
+        source: { ...owner.source, creationSource: "mcp" as const },
+      },
+    ];
+    const layout = buildThreadListV2Items({
+      mainView: true,
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+      workingShelfEnabled: true,
+      isWorking: () => true,
+      snoozedShelfExpanded: true,
+    });
+
+    expect(layout.items.map(({ thread }) => thread.id)).toEqual([
+      "pinned",
+      "owner",
+      "snoozed",
+      "settled",
+    ]);
+    expect(layout.items[0]).toMatchObject({ pinned: true, variant: "slim" });
+    expect(layout.workingCount).toBe(0);
+    expect(layout.snoozedShelfHeaderIndex).toBe(2);
+    expect(layout.settledShelfHeaderIndex).toBe(3);
+    expect(layout.settledCount).toBe(1);
+  });
+
   it("hides snoozed threads and counts them — visibility parity with web", () => {
     const layout = buildThreadListV2Items({
       threads: [

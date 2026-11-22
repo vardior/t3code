@@ -64,26 +64,11 @@ export function HomeBotsSection(props: {
       >
         Bots
       </Text>
-      {props.bots.bots.length > 0 ? (
-        <HomeBotComposer
-          bots={props.bots.bots}
-          environmentLabels={props.environmentLabels}
-          onSent={props.onSelectBot}
-        />
-      ) : null}
-      {props.bots.errors.map((entry) => (
-        <View key={entry.environmentId} className="flex-row items-center gap-3 py-3">
-          <Text accessibilityRole="alert" className="min-w-0 flex-1 text-sm text-danger-foreground">
-            {props.environmentLabels.size > 1
-              ? `${props.environmentLabels.get(entry.environmentId)} · `
-              : ""}
-            Could not load bots: {entry.error}
-          </Text>
-          <Pressable accessibilityRole="button" onPress={entry.refresh} className="p-2">
-            <Text className="text-sm text-primary-text">Try again</Text>
-          </Pressable>
-        </View>
-      ))}
+      <HomeBotControls
+        bots={props.bots}
+        environmentLabels={props.environmentLabels}
+        onSelectBot={props.onSelectBot}
+      />
       {groups.map(({ environmentId, entries, bots }) => (
         <SortableBotList
           key={environmentId}
@@ -207,5 +192,34 @@ function HomeBotRow(props: {
         </Text>
       </View>
     </Pressable>
+  );
+}
+
+export function HomeBotControls({
+  bots,
+  environmentLabels,
+  onSelectBot,
+}: Pick<Parameters<typeof HomeBotsSection>[0], "bots" | "environmentLabels" | "onSelectBot">) {
+  return (
+    <>
+      {bots.bots.length > 0 ? (
+        <HomeBotComposer
+          bots={bots.bots}
+          environmentLabels={environmentLabels}
+          onSent={onSelectBot}
+        />
+      ) : null}
+      {bots.errors.map((entry) => (
+        <View key={entry.environmentId} className="flex-row items-center gap-3 py-3">
+          <Text accessibilityRole="alert" className="min-w-0 flex-1 text-sm text-danger-foreground">
+            {environmentLabels.size > 1 ? `${environmentLabels.get(entry.environmentId)} · ` : ""}
+            Could not load bots: {entry.error}
+          </Text>
+          <Pressable accessibilityRole="button" onPress={entry.refresh} className="p-2">
+            <Text className="text-sm text-primary-text">Try again</Text>
+          </Pressable>
+        </View>
+      ))}
+    </>
   );
 }
