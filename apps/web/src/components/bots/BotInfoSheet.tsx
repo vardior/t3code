@@ -17,7 +17,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useRef, useState, type ReactNode } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
-import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { useClientSettings, useEnvironmentSettings } from "../../hooks/useSettings";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionForInstance,
@@ -345,6 +345,7 @@ function ScheduleRow(props: {
   readonly botPaused: boolean;
 }) {
   const navigate = useNavigate();
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const setEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "bot schedule toggle",
   });
@@ -384,7 +385,7 @@ function ScheduleRow(props: {
       >
         <span className="truncate font-medium">{props.task.title}</span>
         <span className="truncate text-muted-foreground text-xs">
-          {scheduleLabel(props.task.schedule)}
+          {scheduleLabel(props.task.schedule, timestampFormat)}
           {props.task.threadId === null ? ` · ${props.task.modelSelection.model}` : ""} ·{" "}
           {scheduleStatus(props.task)}
         </span>
