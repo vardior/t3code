@@ -232,7 +232,7 @@ function BotListItem({
     ? gt("working…")
     : activityAt === null
       ? ""
-      : formatRelativeTimeLabel(activityAt, Date.parse(now), m);
+      : formatRelativeTimeLabel(activityAt, Date.parse(`${now}:00.000Z`), m);
   const wasWorking = useRef(working);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refresh server bot data when its thread run settles
   useEffect(() => {
