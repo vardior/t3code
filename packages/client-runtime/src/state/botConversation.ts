@@ -27,7 +27,7 @@ import * as DateTime from "effect/DateTime";
 import * as Hash from "effect/Hash";
 import * as Schema from "effect/Schema";
 
-import type { EnvironmentThreadShell } from "./models.ts";
+import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 
 import { derivePendingThreadRequests } from "./threadRequests.ts";
 import type { ThreadHistoryMeta } from "./threadHistoryMerge.ts";
@@ -70,6 +70,7 @@ type MainViewBot = { readonly environmentId: EnvironmentId; readonly bot: BotSum
 export type MainViewBotEntry = MainViewBot & {
   readonly kind: "bot";
   readonly shell: EnvironmentThreadShell | undefined;
+  readonly attention: "needs-you" | "failed" | "unread" | null;
   readonly activityAt: string | null;
 };
 
@@ -92,6 +93,41 @@ export function isMainViewThreadCandidate(thread: EnvironmentThreadShell): boole
   );
 }
 
+function threadHasUnseenCompletion(
+  thread: Pick<EnvironmentThreadShell, "latestRun" | "lastVisitedAt">,
+): boolean {
+  const completedAt = thread.latestRun?.completedAt;
+  if (!completedAt) return false;
+  const status = thread.latestRun?.status;
+  if (status === "interrupted" || status === "cancelled") return false;
+  const completedAtMs = Date.parse(completedAt);
+  if (Number.isNaN(completedAtMs)) return false;
+  if (!thread.lastVisitedAt) return false;
+  const lastVisitedAtMs = Date.parse(thread.lastVisitedAt);
+  if (Number.isNaN(lastVisitedAtMs)) return true;
+  return completedAtMs > lastVisitedAtMs;
+}
+
+function latestOwnerRequestAt(shell: EnvironmentThreadShell | undefined, failed = false) {
+  const request = shell?.source.pendingRuntimeRequest;
+  let latest: string | null = null;
+  let latestMs = -Infinity;
+  for (const candidate of [
+    request == null ? null : DateTime.formatIso(request.createdAt),
+    shell?.pendingUserInputAt,
+    failed ? shell?.latestRun?.completedAt : null,
+    ...(shell?.openItems ?? []).flatMap((item) => (item.status === "open" ? [item.createdAt] : [])),
+  ]) {
+    if (candidate == null) continue;
+    const time = Date.parse(candidate);
+    if (time > latestMs) {
+      latest = candidate;
+      latestMs = time;
+    }
+  }
+  return latest;
+}
+
 export function mainViewEntries(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly bots: ReadonlyArray<MainViewBot>;
@@ -99,13 +135,22 @@ export function mainViewEntries(input: {
   const shells = new Map(
     input.threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]),
   );
-  const entries: MainViewEntry[] = input.bots.map((entry) => {
-    const shell = shells.get(`${entry.environmentId}:${entry.bot.homeThreadId}`);
+  const ranked: Array<{ entry: MainViewEntry; tier: number }> = input.bots.map((botEntry) => {
+    const { environmentId, bot } = botEntry;
+    const shell = shells.get(`${environmentId}:${bot.homeThreadId}`);
+    const failed = botThreadShellStatus(shell, bot) === "failed";
+    const needsYou = botNeedsYou(shell);
+    const unreadAt =
+      !needsYou && !failed && botHasUnreadReply(bot, shell) ? (bot.lastReply?.at ?? null) : null;
     return {
-      ...entry,
-      kind: "bot",
-      shell,
-      activityAt: shell === undefined ? null : resolveThreadActivityTimestamp(shell),
+      tier: needsYou || failed ? 0 : unreadAt !== null ? 1 : 4,
+      entry: {
+        ...botEntry,
+        kind: "bot",
+        shell,
+        attention: needsYou ? "needs-you" : failed ? "failed" : unreadAt !== null ? "unread" : null,
+        activityAt: needsYou || failed ? latestOwnerRequestAt(shell, failed) : unreadAt,
+      },
     };
   });
   for (const thread of threadsWithoutBotHomes(input.threads, input.bots)) {
@@ -113,19 +158,35 @@ export function mainViewEntries(input: {
       isMainViewThreadCandidate(thread) &&
       (thread.pinnedAt != null || thread.settledOverride !== "settled")
     ) {
-      entries.push({ kind: "thread", thread, activityAt: resolveThreadActivityTimestamp(thread) });
+      const needsYou = botNeedsYou(thread);
+      const unreadAt =
+        !needsYou && threadHasUnseenCompletion(thread)
+          ? (thread.latestRun?.completedAt ?? null)
+          : null;
+      const activityAt = needsYou
+        ? (latestOwnerRequestAt(thread) ?? resolveThreadActivityTimestamp(thread))
+        : (unreadAt ?? resolveThreadActivityTimestamp(thread));
+      ranked.push({
+        tier: needsYou ? 0 : unreadAt !== null ? 1 : threadRuntimeIsActive(thread.runtime) ? 2 : 3,
+        entry: { kind: "thread", thread, activityAt },
+      });
     }
   }
-  return entries
-    .map((entry) => ({
+  return ranked
+    .map(({ entry, tier }) => ({
       entry,
+      tier,
       time: entry.activityAt === null ? -Infinity : Date.parse(entry.activityAt),
       key:
         entry.kind === "bot"
           ? `bot:${entry.environmentId}:${entry.bot.id}`
           : `thread:${entry.thread.environmentId}:${entry.thread.id}`,
     }))
-    .sort((left, right) => right.time - left.time || left.key.localeCompare(right.key))
+    .sort(
+      (left, right) =>
+        left.tier - right.tier ||
+        (left.tier === 4 ? 0 : right.time - left.time || left.key.localeCompare(right.key)),
+    )
     .map(({ entry }) => entry);
 }
 

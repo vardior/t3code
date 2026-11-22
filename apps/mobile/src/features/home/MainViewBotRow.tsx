@@ -1,6 +1,4 @@
 import {
-  botHasUnreadReply,
-  botNeedsYou,
   botThreadShellStatus,
   type MainViewBotEntry,
 } from "@t3tools/client-runtime/state/bot-conversation";
@@ -15,7 +13,7 @@ import { relativeTime } from "../../lib/time";
 import { useBotRunSettlement } from "../bots/useBots";
 
 export function MainViewBotRow({
-  entry: { bot, environmentId, shell, activityAt },
+  entry: { bot, environmentId, shell, attention, activityAt },
   now,
   environmentLabel,
   refresh,
@@ -29,25 +27,26 @@ export function MainViewBotRow({
 }) {
   const gt = useGT();
   const m = useMessages();
-  const status = botThreadShellStatus(shell, bot);
-  const working = status === "working";
+  const working = botThreadShellStatus(shell, bot) === "working";
+  const quiet = attention === null;
   useBotRunSettlement(working, refresh);
   const error = shell?.source.lastError?.trim();
-  const detail = botNeedsYou(shell)
-    ? shell?.hasPendingApprovals
-      ? gt("Needs approval")
-      : shell?.hasPendingUserInput
-        ? gt("Needs input")
-        : gt("{count, plural, one {# open item} other {# open items}}", {
-            count: countOpenItems(shell?.openItems),
-          })
-    : status === "failed"
-      ? error
-        ? gt("Failed · {error}", { error })
-        : gt("Failed")
-      : botHasUnreadReply(bot, shell)
-        ? (bot.lastReply?.text ?? gt("Unread reply"))
-        : null;
+  const detail =
+    attention === "needs-you"
+      ? shell?.hasPendingApprovals
+        ? gt("Needs approval")
+        : shell?.hasPendingUserInput
+          ? gt("Needs input")
+          : gt("{count, plural, one {# open item} other {# open items}}", {
+              count: countOpenItems(shell?.openItems),
+            })
+      : attention === "failed"
+        ? error
+          ? gt("Failed · {error}", { error })
+          : gt("Failed")
+        : attention === "unread"
+          ? (bot.lastReply?.text ?? gt("Unread reply"))
+          : null;
   const name = bot.paused ? gt("{name} · paused", { name: bot.name }) : bot.name;
   const time = working
     ? gt("working…")
@@ -59,14 +58,17 @@ export function MainViewBotRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={[name, environmentLabel, detail, time].filter(Boolean).join(", ")}
-      className="flex-row items-start gap-3 px-4 py-2 active:opacity-70"
+      className={cn(
+        "flex-row gap-3 px-4 active:opacity-70",
+        quiet ? "items-center py-1" : "items-start py-2",
+      )}
       onPress={() => onSelectBot(environmentId, bot.id)}
     >
       <View
-        className="size-5 items-center justify-center rounded-full"
+        className={cn("items-center justify-center rounded-full", quiet ? "size-4" : "size-5")}
         style={{ backgroundColor: `hsl(${hue}, 45%, 45%)` }}
       >
-        <Text className="font-t3-medium text-3xs text-white">
+        <Text className={cn("font-t3-medium text-white", quiet ? "text-[9px]" : "text-3xs")}>
           {bot.name.trim().charAt(0).toUpperCase() || "?"}
         </Text>
       </View>
@@ -76,12 +78,12 @@ export function MainViewBotRow({
             numberOfLines={1}
             className={cn(
               "min-w-0 flex-1 text-sm",
-              detail === null ? "text-foreground-muted" : "text-foreground",
+              quiet ? "text-foreground-muted" : "text-foreground",
             )}
           >
             {name}
           </Text>
-          {detail !== null ? <View className="size-1.5 rounded-full bg-primary" /> : null}
+          {!quiet ? <View className="size-1.5 rounded-full bg-primary" /> : null}
           {time ? <Text className="text-xs text-foreground-muted">{time}</Text> : null}
         </View>
         {detail !== null ? (

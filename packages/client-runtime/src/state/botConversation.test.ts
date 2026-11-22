@@ -2,6 +2,7 @@ import {
   ChatAttachmentId,
   EnvironmentId,
   MessageId,
+  OpenItemId,
   RuntimeRequestId,
   NodeId,
   RunId,
@@ -1381,9 +1382,29 @@ describe("home bot threads", () => {
     title: bot.name,
   };
 
-  it("interleaves bot homes with listed owner threads and pins by last activity", () => {
+  it("ranks bots and listed owner threads by attention and keeps quiet bots in input order", () => {
     const pinnedAt = DateTime.makeUnsafe("2026-11-01T00:00:00Z");
     const child = { parentThreadId: homeThreadId, rootThreadId: homeThreadId };
+    const time = (hour: number) => `2026-11-02T${String(hour).padStart(2, "0")}:00:00.000Z`;
+    const pendingRequest = {
+      id: RuntimeRequestId.make("request"),
+      kind: "command",
+      createdAt: at(time(5)),
+    } as const;
+    const openItem = {
+      id: OpenItemId.make("open"),
+      threadId: ThreadId.make("needs-you-bot"),
+      title: "Choose a plan",
+      status: "open",
+      createdAt: time(6),
+      updatedAt: time(6),
+      resolvedAt: null,
+    } as const;
+    const poll = {
+      latestRunId: RunId.make("poll"),
+      status: "completed",
+      latestRunCompletedAt: at(time(20)),
+    } as const;
     const cases = [
       { id: "web", creationSource: "web", hour: 12 },
       { id: "mobile", creationSource: "mobile", hour: 10 },
@@ -1404,7 +1425,48 @@ describe("home bot threads", () => {
         pinnedAt,
         hour: 16,
       },
-      { id: "bot-home", pinnedAt, hour: 11 },
+      { id: "bot-home", pinnedAt, hour: 11, ...poll },
+      {
+        id: "a-quiet-bot",
+        hour: 19,
+        latestRunId: RunId.make("active-poll"),
+        status: "running",
+        latestRunStartedAt: at(time(21)),
+      },
+      {
+        id: "needs-you-bot",
+        hour: 18,
+        ...poll,
+        pendingRuntimeRequest: pendingRequest,
+        openItems: [
+          openItem,
+          {
+            ...openItem,
+            id: OpenItemId.make("resolved"),
+            status: "answered",
+            createdAt: time(7),
+            updatedAt: time(8),
+            resolvedAt: time(8),
+          },
+        ],
+      },
+      { id: "needs-you-thread", hour: 16, pendingRuntimeRequest: pendingRequest },
+      {
+        id: "failed-bot",
+        hour: 18,
+        ...poll,
+        status: "failed",
+        latestRunCompletedAt: at(time(4)),
+      },
+      { id: "unread-bot", hour: 18, ...poll },
+      {
+        id: "unread-thread",
+        hour: 17,
+        ...poll,
+        latestRunCompletedAt: at(time(7)),
+        lastVisitedAt: at(time(6)),
+      },
+      { id: "working-thread", hour: 6, latestRunId: RunId.make("active"), status: "running" },
       { id: "archived", archivedAt: pinnedAt, pinnedAt, hour: 17 },
     ] satisfies ReadonlyArray<
       Partial<Omit<typeof v2ThreadShell, "id">> & { id: string; hour: number }
@@ -1413,16 +1475,43 @@ describe("home bot threads", () => {
       presentThreadShell(environmentId, {
         ...v2ThreadShell,
         id: ThreadId.make(id),
-        latestUserMessageAt: DateTime.makeUnsafe(
-          `2026-11-02T${String(hour).padStart(2, "0")}:00:00Z`,
-        ),
+        latestUserMessageAt: at(time(hour)),
         ...overrides,
       }),
     );
-    const entries = mainViewEntries({ threads, bots: [{ environmentId, bot }] });
-    expect(entries.map((entry) => (entry.kind === "bot" ? entry.bot.id : entry.thread.id))).toEqual(
-      ["web", bot.id, "mobile", "pinned-settled", "pinned-mcp", "pinned-child"],
-    );
+    const bots = [
+      bot,
+      ...["a-quiet-bot", "needs-you-bot", "failed-bot", "unread-bot"].map((id) => ({
+        ...bot,
+        id,
+        homeThreadId: ThreadId.make(id),
+      })),
+    ].map((bot) => ({
+      environmentId,
+      bot:
+        bot.id === "unread-bot" ? { ...bot, lastReply: { text: "New reply", at: time(8) } } : bot,
+    }));
+    const entries = mainViewEntries({ threads, bots });
+    expect(
+      entries.map((entry) => [
+        entry.kind === "bot" ? entry.bot.id : entry.thread.id,
+        entry.activityAt,
+      ]),
+    ).toEqual([
+      ["needs-you-bot", time(6)],
+      ["needs-you-thread", time(5)],
+      ["failed-bot", time(4)],
+      ["unread-bot", time(8)],
+      ["unread-thread", time(7)],
+      ["working-thread", time(6)],
+      ["web", time(12)],
+      ["mobile", time(10)],
+      ["pinned-settled", time(9)],
+      ["pinned-mcp", time(8)],
+      ["pinned-child", time(7)],
+      [bot.id, null],
+      ["a-quiet-bot", null],
+    ]);
   });
 
   it("moves only the bot home out of the ordinary list, preserving workers and order", () => {

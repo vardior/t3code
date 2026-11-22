@@ -1,6 +1,4 @@
 import {
-  botHasUnreadReply,
-  botNeedsYou,
   botThreadShellStatus,
   mainViewEntries,
   type MainViewBotEntry,
@@ -53,7 +51,7 @@ export function BotsSidebar() {
   };
   const allEntries = mainViewEntries({ threads, bots });
   const needsYouCount = allEntries.filter(
-    (entry) => entry.kind === "bot" && botNeedsYou(entry.shell),
+    (entry) => entry.kind === "bot" && entry.attention === "needs-you",
   ).length;
   const searchQuery = query.trim().toLocaleLowerCase();
   const entries =
@@ -195,7 +193,7 @@ export function BotsSidebar() {
 }
 
 function BotListItem({
-  entry: { bot, shell, activityAt },
+  entry: { bot, shell, attention, activityAt },
   selected,
   environmentLabel,
   refresh,
@@ -210,24 +208,25 @@ function BotListItem({
   const gt = useGT();
   const m = useMessages();
   const now = useNowMinute();
-  const status = botThreadShellStatus(shell, bot);
-  const working = status === "working";
+  const working = botThreadShellStatus(shell, bot) === "working";
+  const quiet = attention === null;
   const error = shell?.source.lastError?.trim();
-  const detail = botNeedsYou(shell)
-    ? shell?.hasPendingApprovals
-      ? gt("Needs approval")
-      : shell?.hasPendingUserInput
-        ? gt("Needs input")
-        : gt("{count, plural, one {# open item} other {# open items}}", {
-            count: countOpenItems(shell?.openItems),
-          })
-    : status === "failed"
-      ? error
-        ? gt("Failed · {error}", { error })
-        : gt("Failed")
-      : botHasUnreadReply(bot, shell)
-        ? (bot.lastReply?.text ?? gt("Unread reply"))
-        : null;
+  const detail =
+    attention === "needs-you"
+      ? shell?.hasPendingApprovals
+        ? gt("Needs approval")
+        : shell?.hasPendingUserInput
+          ? gt("Needs input")
+          : gt("{count, plural, one {# open item} other {# open items}}", {
+              count: countOpenItems(shell?.openItems),
+            })
+      : attention === "failed"
+        ? error
+          ? gt("Failed · {error}", { error })
+          : gt("Failed")
+        : attention === "unread"
+          ? (bot.lastReply?.text ?? gt("Unread reply"))
+          : null;
   const name = bot.paused ? gt("{name} · paused", { name: bot.name }) : bot.name;
   const time = working
     ? gt("working…")
@@ -247,25 +246,24 @@ function BotListItem({
         aria-current={selected ? "page" : undefined}
         aria-label={[name, environmentLabel, detail, time].filter(Boolean).join(", ")}
         className={cn(
-          "flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left hover:bg-accent/60",
+          "flex w-full min-w-0 gap-3 rounded-md px-3 text-left hover:bg-accent/60",
+          quiet ? "items-center py-1" : "items-start py-2",
           selected && "bg-accent",
         )}
         onClick={onSelect}
       >
-        <BotAvatar name={bot.name} size="sm" />
+        <BotAvatar name={bot.name} size={quiet ? "xs" : "sm"} />
         <span className="min-w-0 flex-1">
           <span className="flex min-h-5 items-center gap-2">
             <span
               className={cn(
                 "min-w-0 flex-1 truncate text-sm",
-                detail === null ? "text-muted-foreground" : "text-foreground",
+                quiet ? "text-muted-foreground" : "text-foreground",
               )}
             >
               {name}
             </span>
-            {detail !== null ? (
-              <span className="size-1.5 shrink-0 rounded-full bg-primary" />
-            ) : null}
+            {!quiet ? <span className="size-1.5 shrink-0 rounded-full bg-primary" /> : null}
             {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
           </span>
           {detail !== null ? (
