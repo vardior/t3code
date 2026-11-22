@@ -24,6 +24,7 @@ import {
   PullRequestRowGlyph,
   PullRequestRowLines,
 } from "./PullRequestListRow";
+import { PullRequestPrivateMark } from "./PullRequestDetailLayout";
 import { PullRequestLabelChip, PullRequestReviewDecisionGlyph } from "./pullRequestPresentation";
 
 const LABEL_SLOTS = [
@@ -159,6 +160,9 @@ function PullRequestRowImpl({
           }
           signals={
             <>
+              {entry.visibility === "private" ? (
+                <PullRequestPrivateMark className="size-3 text-muted-foreground" />
+              ) : null}
               {entry.checksState === undefined ? null : (
                 <PullRequestChecksPopover
                   checksState={entry.checksState}

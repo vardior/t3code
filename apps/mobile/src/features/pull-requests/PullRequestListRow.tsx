@@ -123,6 +123,7 @@ export const PullRequestListRow = memo(
               ),
               item.title,
               status.label,
+              item.visibility === "private" ? gt("Private") : null,
               conflict ? conflict.label.toLowerCase() : null,
               gt("by {author}", { author: item.author?.login ?? gt("unknown author") }),
               review ? review.accessibleLabel : null,
@@ -193,6 +194,17 @@ export const PullRequestListRow = memo(
                     #{item.number}
                   </Text>
                 </Text>
+                {item.visibility === "private" ? (
+                  <View>
+                    <SymbolView
+                      name={PullRequestGlyph.private}
+                      size={11}
+                      tintColorClassName={
+                        props.sidebar ? "accent-drawer-foreground-muted" : "accent-foreground-muted"
+                      }
+                    />
+                  </View>
+                ) : null}
                 {item.stack ? (
                   <View className="flex-row items-center gap-1">
                     <SymbolView
