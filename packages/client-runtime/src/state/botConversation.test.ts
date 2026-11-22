@@ -1387,12 +1387,14 @@ describe("home bot threads", () => {
       ...v2ThreadShell,
       id: ThreadId.make("owner"),
     });
-    const workers = (pending: boolean) =>
+    const workers = (pending: boolean, status: "waiting" | "failed" = "waiting") =>
       (["command", "user_input"] as const).map((kind, index) =>
         presentThreadShell(environmentId, {
           ...v2ThreadShell,
           id: ThreadId.make(kind),
           creationSource: "mcp",
+          latestRunId: RunId.make(kind),
+          status,
           ...(kind === "user_input"
             ? {
                 lineage: {
@@ -1411,8 +1413,8 @@ describe("home bot threads", () => {
             : null,
         }),
       );
-    const entries = (pending: boolean) =>
-      mainViewEntries({ threads: [owner, ...workers(pending)], bots: [] }).map((entry) => [
+    const entries = (pending: boolean, status?: "waiting" | "failed") =>
+      mainViewEntries({ threads: [owner, ...workers(pending, status)], bots: [] }).map((entry) => [
         entry.kind === "thread" ? entry.thread.id : entry.bot.id,
         entry.attention,
       ]);
@@ -1423,6 +1425,7 @@ describe("home bot threads", () => {
       ["owner", null],
     ]);
     expect(entries(false)).toEqual([["owner", null]]);
+    expect(entries(true, "failed")).toEqual([["owner", null]]);
   });
 
   it("ranks bots and listed owner threads by attention and keeps quiet bots in input order", () => {

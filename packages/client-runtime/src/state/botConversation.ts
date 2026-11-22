@@ -85,7 +85,12 @@ type MainViewEntry =
 
 export function threadHasMainViewRequest(thread: EnvironmentThreadShell): boolean {
   const kind = thread.source.pendingRuntimeRequest?.kind;
-  return kind !== undefined && kind !== "auth_refresh" && kind !== "dynamic_tool_call";
+  return (
+    kind !== undefined &&
+    kind !== "auth_refresh" &&
+    kind !== "dynamic_tool_call" &&
+    threadRuntimeIsActive(thread.runtime)
+  );
 }
 
 export function isMainViewThreadCandidate(thread: EnvironmentThreadShell): boolean {
