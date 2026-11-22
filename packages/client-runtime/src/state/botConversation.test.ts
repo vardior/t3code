@@ -25,6 +25,7 @@ import {
   EMPTY_BOT_MORNING_MEMORY,
   threadsWithoutBotHomes,
   pinnedBotMenuThreads,
+  mainViewEntries,
   parseThreadLink,
   rewriteThreadLinks,
   botChatHistoryStart,
@@ -1379,6 +1380,50 @@ describe("home bot threads", () => {
     id: homeThreadId,
     title: bot.name,
   };
+
+  it("interleaves bot homes with listed owner threads and pins by last activity", () => {
+    const pinnedAt = DateTime.makeUnsafe("2026-11-01T00:00:00Z");
+    const child = { parentThreadId: homeThreadId, rootThreadId: homeThreadId };
+    const cases = [
+      { id: "web", creationSource: "web", hour: 12 },
+      { id: "mobile", creationSource: "mobile", hour: 10 },
+      { id: "settled", settledOverride: "settled", hour: 13 },
+      { id: "pinned-settled", settledOverride: "settled", pinnedAt, hour: 9 },
+      { id: "mcp", creationSource: "mcp", hour: 14 },
+      { id: "pinned-mcp", creationSource: "mcp", pinnedAt, hour: 8 },
+      { id: "child", lineage: { ...child, relationshipToParent: "fork" }, hour: 15 },
+      {
+        id: "pinned-child",
+        lineage: { ...child, relationshipToParent: "fork" },
+        pinnedAt,
+        hour: 7,
+      },
+      {
+        id: "subagent",
+        lineage: { ...child, relationshipToParent: "subagent" },
+        pinnedAt,
+        hour: 16,
+      },
+      { id: "bot-home", pinnedAt, hour: 11 },
+      { id: "archived", archivedAt: pinnedAt, pinnedAt, hour: 17 },
+    ] satisfies ReadonlyArray<
+      Partial<Omit<typeof v2ThreadShell, "id">> & { id: string; hour: number }
+    >;
+    const threads = cases.map(({ id, hour, ...overrides }) =>
+      presentThreadShell(environmentId, {
+        ...v2ThreadShell,
+        id: ThreadId.make(id),
+        latestUserMessageAt: DateTime.makeUnsafe(
+          `2026-11-02T${String(hour).padStart(2, "0")}:00:00Z`,
+        ),
+        ...overrides,
+      }),
+    );
+    const entries = mainViewEntries({ threads, bots: [{ environmentId, bot }] });
+    expect(entries.map((entry) => (entry.kind === "bot" ? entry.bot.id : entry.thread.id))).toEqual(
+      ["web", bot.id, "mobile", "pinned-settled", "pinned-mcp", "pinned-child"],
+    );
+  });
 
   it("moves only the bot home out of the ordinary list, preserving workers and order", () => {
     const worker = {

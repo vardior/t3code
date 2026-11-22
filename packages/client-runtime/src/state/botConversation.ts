@@ -4,6 +4,7 @@ import {
   type RunId,
   type BotDetail,
   BotFindingDecision,
+  isListedThreadLineage,
   type BotMorning,
   type BotSummary,
   type ChatAttachmentId,
@@ -18,7 +19,7 @@ import {
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { isNotifyOwnerToolName } from "@t3tools/shared/notifyOwnerTool";
 import { isQuietBotReply } from "@t3tools/shared/botQuietReply";
-import { sortPinnedThreadsByOrderKey } from "./threadSort.ts";
+import { resolveThreadActivityTimestamp, sortPinnedThreadsByOrderKey } from "./threadSort.ts";
 import { countOpenItems } from "./openItems.ts";
 import { slackTextFromCommand } from "@t3tools/shared/slackTextFromCommand";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -62,6 +63,70 @@ export function threadsWithoutBotHomes<
     bots.map(({ environmentId, bot }) => `${environmentId}:${bot.homeThreadId}`),
   );
   return threads.filter((thread) => !homes.has(`${thread.environmentId}:${thread.id}`));
+}
+
+type MainViewBot = { readonly environmentId: EnvironmentId; readonly bot: BotSummary };
+
+export type MainViewBotEntry = MainViewBot & {
+  readonly kind: "bot";
+  readonly shell: EnvironmentThreadShell | undefined;
+  readonly activityAt: string | null;
+};
+
+type MainViewEntry =
+  | MainViewBotEntry
+  | {
+      readonly kind: "thread";
+      readonly thread: EnvironmentThreadShell;
+      readonly activityAt: string | null;
+    };
+
+export function isMainViewThreadCandidate(thread: EnvironmentThreadShell): boolean {
+  const creationSource = thread.source.creationSource;
+  return (
+    thread.archivedAt == null &&
+    isListedThreadLineage(thread.lineage) &&
+    (thread.pinnedAt != null ||
+      (thread.lineage.parentThreadId == null &&
+        (creationSource === "web" || creationSource === "mobile")))
+  );
+}
+
+export function mainViewEntries(input: {
+  readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly bots: ReadonlyArray<MainViewBot>;
+}): ReadonlyArray<MainViewEntry> {
+  const shells = new Map(
+    input.threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]),
+  );
+  const entries: MainViewEntry[] = input.bots.map((entry) => {
+    const shell = shells.get(`${entry.environmentId}:${entry.bot.homeThreadId}`);
+    return {
+      ...entry,
+      kind: "bot",
+      shell,
+      activityAt: shell === undefined ? null : resolveThreadActivityTimestamp(shell),
+    };
+  });
+  for (const thread of threadsWithoutBotHomes(input.threads, input.bots)) {
+    if (
+      isMainViewThreadCandidate(thread) &&
+      (thread.pinnedAt != null || thread.settledOverride !== "settled")
+    ) {
+      entries.push({ kind: "thread", thread, activityAt: resolveThreadActivityTimestamp(thread) });
+    }
+  }
+  return entries
+    .map((entry) => ({
+      entry,
+      time: entry.activityAt === null ? -Infinity : Date.parse(entry.activityAt),
+      key:
+        entry.kind === "bot"
+          ? `bot:${entry.environmentId}:${entry.bot.id}`
+          : `thread:${entry.thread.environmentId}:${entry.thread.id}`,
+    }))
+    .sort((left, right) => right.time - left.time || left.key.localeCompare(right.key))
+    .map(({ entry }) => entry);
 }
 
 import { formatContextWindowTokens } from "../contextWindowTokens.ts";
