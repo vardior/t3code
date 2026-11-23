@@ -2743,6 +2743,9 @@ const makeWorkflowClient = Effect.fn("test.makeWorkflowClient")(function* (
     Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
     Layer.mock(ServerEnvironment.ServerEnvironment)({}),
     Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    Layer.mock(Bots.BotService)({}),
+    Layer.mock(BotRouter.BotRouter)({}),
+    Layer.mock(OpenItemService.OpenItemService)({}),
     Layer.mock(Workflows.Workflows)({
       get: (runId) =>
         runId === workflowRun.runId

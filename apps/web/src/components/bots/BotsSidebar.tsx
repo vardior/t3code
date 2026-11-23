@@ -122,10 +122,6 @@ export function BotsSidebar() {
             <SidebarThreadHeader
               hasProjects={projects.length > 0}
               projectScope={null}
-              onNewProject={() => {
-                closeMobileSidebar();
-                openCommandPalette({ open: "add-project" });
-              }}
               onNewThread={(event) => {
                 closeMobileSidebar();
                 if (event.shiftKey || projects.length <= 1) {

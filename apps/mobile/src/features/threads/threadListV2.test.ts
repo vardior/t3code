@@ -412,6 +412,8 @@ describe("buildThreadListV2Items", () => {
           makeRawThreadShell({
             id: ThreadId.make("approval"),
             creationSource: "mcp",
+            latestRunId: RunId.make("approval"),
+            status: "waiting",
             lineage: {
               parentThreadId: owner.id,
               rootThreadId: owner.id,
