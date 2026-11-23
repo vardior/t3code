@@ -32,6 +32,7 @@ import {
   type CodexRateLimitSnapshot,
 } from "../../provider/codexUsageLimits.ts";
 import {
+  type AgentFeedbackMode,
   CodexSettings,
   defaultInstanceIdForDriver,
   isOrchestrationV2WorkActive,
@@ -177,6 +178,35 @@ export const CODEX_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CODEX_DRIVER
 type CodexFileChangeKinds = Readonly<
   Record<string, CodexSchema.V2ItemStartedNotification__PatchChangeKind>
 >;
+
+// Diff parsers split at Git headers once one exists, so each file of a multi-file patch needs its own.
+function codexMultiFilePatch(
+  changes: ReadonlyArray<CodexSchema.V2ItemCompletedNotification__FileUpdateChange>,
+): string {
+  return changes
+    .map(({ path, kind, diff }) => {
+      const oldPath = path;
+      const newPath = (kind.type === "update" && kind.move_path) || path;
+      const git = `diff --git ${JSON.stringify(`a/${oldPath}`)} ${JSON.stringify(`b/${newPath}`)}\n`;
+      if (kind.type === "update" && diff.startsWith("diff --git ")) return diff;
+      if (kind.type === "update" && diff.startsWith("--- ")) return `${git}${diff}`;
+      let hunks = diff;
+      // Codex records added and deleted files as their raw contents.
+      if (kind.type !== "update") {
+        const lines = diff.split("\n");
+        const hasFinalNewline = diff.endsWith("\n");
+        if (hasFinalNewline) lines.pop();
+        const added = kind.type === "add";
+        const range = `1,${lines.length}`;
+        hunks = `@@ -${added ? "0,0" : range} +${added ? range : "0,0"} @@\n${lines.map((line) => `${added ? "+" : "-"}${line}`).join("\n")}\n${hasFinalNewline ? "" : "\\ No newline at end of file\n"}`;
+      }
+      const before = kind.type === "add" ? "/dev/null" : JSON.stringify(`a/${oldPath}`);
+      const after = kind.type === "delete" ? "/dev/null" : JSON.stringify(`b/${newPath}`);
+      return `${git}--- ${before}\n+++ ${after}\n${hunks}`;
+    })
+    .map((section) => (section.endsWith("\n") ? section : `${section}\n`))
+    .join("");
+}
 
 function codexFileChangeApprovalPrompt(input: {
   readonly reason?: string | null;
@@ -768,12 +798,6 @@ const isProviderAdapterRuntimeRequestResponseError = Schema.is(
   ProviderAdapter.ProviderAdapterRuntimeRequestResponseError,
 );
 
-function shouldCancelCodexCommandApproval(
-  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-): boolean {
-  return policy.runtimeMode === "full-access" && policy.approvalPolicy === undefined;
-}
-
 function codexRuntimeModeTurnDefaults(runtimeMode: RuntimeMode): {
   readonly approvalPolicy: CodexSchema.V2TurnStartParams__AskForApproval;
   readonly approvalsReviewer: CodexSchema.V2TurnStartParams__ApprovalsReviewer;
@@ -843,6 +867,7 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
     readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
     readonly modelSelection: ModelSelection;
     readonly hasT3Mcp?: boolean;
+    readonly agentFeedback?: AgentFeedbackMode;
     readonly browserToolsAvailable?: boolean;
     readonly deviceToolsAvailable?: boolean;
     /** ChatGPT token sharing does not accept service tiers. */
@@ -899,7 +924,11 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
     const t3Context =
       input.hasT3Mcp === true
         ? buildCodexAdditionalContext(
-            { model: input.modelSelection.model, reasoningEffort: effort ?? undefined },
+            {
+              model: input.modelSelection.model,
+              reasoningEffort: effort ?? undefined,
+              agentFeedback: input.agentFeedback ?? "off",
+            },
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
@@ -4292,7 +4321,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               updatedAt,
               type: "file_change",
               fileName: firstChange.path,
-              diffStr: firstChange.diff,
+              diffStr:
+                item.changes.length > 1 ? codexMultiFilePatch(item.changes) : firstChange.diff,
               changes: item.changes.map((change) => {
                 const movePath = change.kind.type === "update" ? change.kind.move_path : undefined;
                 return movePath
@@ -6033,9 +6063,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload,
               );
             }
-            if (shouldCancelCodexCommandApproval(context.input.runtimePolicy)) {
+            // T3's Full access policy is granular, under which Codex still asks before commands it
+            // deems dangerous. Managed-network asks enforce the user's allowlist, so they still ask.
+            if (
+              context.input.runtimePolicy.runtimeMode === "full-access" &&
+              context.input.runtimePolicy.approvalPolicy === undefined &&
+              context.input.runtimePolicy.sandboxPolicy === undefined &&
+              payload.networkApprovalContext == null &&
+              (payload.proposedNetworkPolicyAmendments ?? []).length === 0
+            ) {
               return {
-                decision: "cancel",
+                decision: "accept",
               } satisfies CodexSchema.CommandExecutionRequestApprovalResponse;
             }
             const allowance = sessionAllowance(payload.threadId, context);
@@ -6325,9 +6363,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 `No active Codex turn context for exec approval thread ${payload.conversationId}.`,
                 payload,
               );
-            }
-            if (shouldCancelCodexCommandApproval(context.input.runtimePolicy)) {
-              return { decision: "abort" } satisfies CodexSchema.ExecCommandApprovalResponse;
             }
             const allowance = sessionAllowance(payload.conversationId, context);
             if (allowance.has("command")) {
@@ -7740,6 +7775,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runtimePolicy: turnInput.runtimePolicy,
               modelSelection: turnInput.modelSelection,
               hasT3Mcp: mcpSession !== undefined,
+              agentFeedback: turnInput.agentFeedback ?? "off",
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
