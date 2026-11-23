@@ -1504,6 +1504,14 @@ describe("home bot threads", () => {
         status: "failed",
         latestRunCompletedAt: at(time(4)),
       },
+      {
+        id: "seen-failed-bot",
+        hour: 18,
+        ...poll,
+        status: "failed",
+        latestRunCompletedAt: at(time(4)),
+        lastVisitedAt: at(time(5)),
+      },
       { id: "unread-bot", hour: 18, ...poll },
       {
         id: "unread-thread",
@@ -1527,11 +1535,13 @@ describe("home bot threads", () => {
     );
     const bots = [
       bot,
-      ...["a-quiet-bot", "needs-you-bot", "failed-bot", "unread-bot"].map((id) => ({
-        ...bot,
-        id,
-        homeThreadId: ThreadId.make(id),
-      })),
+      ...["a-quiet-bot", "needs-you-bot", "failed-bot", "unread-bot", "seen-failed-bot"].map(
+        (id) => ({
+          ...bot,
+          id,
+          homeThreadId: ThreadId.make(id),
+        }),
+      ),
     ].map((bot) => ({
       environmentId,
       bot:
@@ -1557,6 +1567,7 @@ describe("home bot threads", () => {
       ["pinned-child", time(7)],
       [bot.id, null],
       ["a-quiet-bot", null],
+      ["seen-failed-bot", null],
     ]);
   });
 

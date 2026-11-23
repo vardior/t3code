@@ -140,6 +140,12 @@ function latestOwnerRequestAt(shell: EnvironmentThreadShell | undefined, failed 
   return latest;
 }
 
+function failureSeen(shell: EnvironmentThreadShell | undefined): boolean {
+  const failedAt = Date.parse(shell?.latestRun?.completedAt ?? "");
+  const visitedAt = Date.parse(shell?.lastVisitedAt ?? "");
+  return failedAt <= visitedAt;
+}
+
 export function mainViewEntries(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly bots: ReadonlyArray<MainViewBot>;
@@ -150,7 +156,7 @@ export function mainViewEntries(input: {
   const ranked: Array<{ entry: MainViewEntry; tier: number }> = input.bots.map((botEntry) => {
     const { environmentId, bot } = botEntry;
     const shell = shells.get(`${environmentId}:${bot.homeThreadId}`);
-    const failed = botThreadShellStatus(shell, bot) === "failed";
+    const failed = botThreadShellStatus(shell, bot) === "failed" && !failureSeen(shell);
     const needsYou = botNeedsYou(shell);
     const unreadAt =
       !needsYou && !failed && botHasUnreadReply(bot, shell) ? (bot.lastReply?.at ?? null) : null;
