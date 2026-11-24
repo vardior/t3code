@@ -2865,6 +2865,9 @@ const makeAcpRegistryClient = Effect.fn("test.makeAcpRegistryClient")(function* 
     Layer.mock(ServerEnvironment.ServerEnvironment)({}),
     Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     ServerSettings.layerTest({}, options.managedPolicy),
+    Layer.mock(Bots.BotService)({}),
+    Layer.mock(BotRouter.BotRouter)({}),
+    Layer.mock(OpenItemService.OpenItemService)({}),
     Layer.mock(AcpRegistrySupport.AcpRegistryCatalog)({
       prepare: ({ agentId }) =>
         Effect.sync(() => calls.push(`prepare:${agentId}`)).pipe(
