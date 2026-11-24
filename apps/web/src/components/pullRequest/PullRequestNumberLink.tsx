@@ -5,6 +5,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import type { MouseEvent } from "react";
 
 import { useOpenLink } from "~/browser/useOpenLink";
+import { contextMenuSourceOf } from "../../contextMenuSource";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { changeRequestTermKind } from "./changeRequestTerm";
@@ -49,6 +50,7 @@ export function PullRequestNumberLink({
                 url: detail.url,
                 openLabel,
                 position: { x: event.clientX, y: event.clientY },
+                source: contextMenuSourceOf(event),
               });
             }}
             className={cn("shrink-0 cursor-pointer underline-offset-2 hover:underline", className)}
