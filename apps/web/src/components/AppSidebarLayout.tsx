@@ -510,6 +510,7 @@ function AppSidebarLayoutContent({
               role="navigation"
               aria-label={isOnBots ? gt("Bots") : gt("Threads")}
               resizable={{
+                collapseOnResize: true,
                 maxWidth: sidebarMaximumWidth,
                 minWidth: sidebarMinimumWidth,
                 shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
