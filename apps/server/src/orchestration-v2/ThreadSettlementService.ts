@@ -8,6 +8,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
+  isDelegatedAppThread,
   isOrchestrationV2WorkActive,
   type ThreadId,
   type OrchestrationV2DomainEvent,
@@ -413,11 +414,10 @@ export const make = Effect.gen(function* () {
     const isBotChild = (thread: ProjectionStore.ProjectionSettlementCandidate) =>
       isSubagentChild(thread) && botHomeThreadIds.has(thread.lineage.parentThreadId!);
     const settlesWithParent = (thread: ProjectionStore.ProjectionSettlementCandidate) =>
-      thread.lineage.relationshipToParent === "subagent" && !isBotChild(thread);
+      isDelegatedAppThread(thread) && !isBotChild(thread);
     const candidates = threads.filter(
       (thread) =>
-        (configured || thread.lineage.relationshipToParent === "subagent") &&
-        isAutoSettlementCandidate(thread, nowMs),
+        (configured || isDelegatedAppThread(thread)) && isAutoSettlementCandidate(thread, nowMs),
     );
     if (!configured && candidates.length === 0) return;
 
@@ -439,8 +439,9 @@ export const make = Effect.gen(function* () {
         }
         if (settlesWithParent(thread)) {
           if (yield* terminals.hasActiveSubprocess({ threadId: thread.id })) return null;
-          // The store returns a subagent only once its parent is done, so it
-          // settles with the parent and never runs its own lookup.
+          // The store returns a subagent only once its parent is done, so it settles with the
+          // parent. A task delegated from a linked environment has no parent here, so it settles
+          // once its own work is done. Neither runs its own lookup.
           const uuid = yield* random.uuidV4();
           yield* orchestrator.dispatch({
             type: "thread.auto-settle",
