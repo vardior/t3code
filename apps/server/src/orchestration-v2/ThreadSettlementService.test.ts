@@ -811,9 +811,10 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
                     snapshot.threads.filter(
                       (thread) =>
                         (threadId === undefined || thread.id === threadId) &&
-                        (!readOptions?.subagentOnly ||
+                        (!readOptions?.delegatedOnly ||
                           (thread.lineage.relationshipToParent === "subagent" &&
-                            thread.lineage.parentThreadId !== null)),
+                            thread.lineage.parentThreadId !== null) ||
+                          thread.delegatedFrom != null),
                     ),
                 ),
               ),

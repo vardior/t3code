@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  EnvironmentId,
   EventId,
   MessageId,
   NodeId,
@@ -530,4 +531,41 @@ it.effect("sql: a subagent thread becomes a candidate once its parent is done", 
     });
     assert.deepEqual(new Set(yield* ids()), new Set([child, orphan]));
   }).pipe(Effect.provide(layerSql)),
+);
+
+it.effect(
+  "sql: a delegated-only read keeps subagents and tasks delegated from a linked environment",
+  () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const parent = yield* createThread("delegated-only-parent");
+      yield* store.apply({
+        id: EventId.make("event:settlement:delegated-only-parent:settled"),
+        type: "thread.settled",
+        threadId: parent,
+        occurredAt: now,
+        payload: {
+          ...(yield* store.getThread(parent)),
+          settledOverride: "settled",
+          settledAt: now,
+          updatedAt: now,
+        },
+      });
+      const child = yield* createThread("delegated-only-child", {
+        lineage: { parentThreadId: parent, relationshipToParent: "subagent", rootThreadId: parent },
+      });
+      const remote = yield* createThread("delegated-only-remote", {
+        delegatedFrom: {
+          environmentId: EnvironmentId.make("env:box"),
+          threadId: ThreadId.make("thread:box-parent"),
+          title: "Box",
+        },
+      });
+      yield* createThread("delegated-only-plain");
+
+      const ids = yield* store
+        .getSettlementCandidates(undefined, { delegatedOnly: true })
+        .pipe(Effect.map((rows) => rows.map((row) => row.id)));
+      assert.deepEqual(new Set(ids), new Set([child, remote]));
+    }).pipe(Effect.provide(layerSql)),
 );

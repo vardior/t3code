@@ -400,7 +400,7 @@ export const make = Effect.gen(function* () {
     const configured = autoSettlementConfigured(settings);
     const botHomeThreadIds = yield* bots.homeThreadIds();
     const threads = yield* projections.getSettlementCandidates(threadId, {
-      subagentOnly: !configured,
+      delegatedOnly: !configured,
       openSubagentParentIds: [...botHomeThreadIds],
     });
     if (threads.length === 0) return;

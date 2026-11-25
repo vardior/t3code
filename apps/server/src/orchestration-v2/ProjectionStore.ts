@@ -687,7 +687,7 @@ export interface ProjectionStoreV2Shape {
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
     options?: {
-      readonly subagentOnly?: boolean;
+      readonly delegatedOnly?: boolean;
       readonly openSubagentParentIds?: ReadonlyArray<ThreadId>;
     },
   ) => Effect.Effect<ReadonlyArray<ProjectionSettlementCandidate>, ProjectionStoreV2Error>;
@@ -8931,9 +8931,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               LIMIT 1
             )
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}${
-              options?.subagentOnly
-                ? sql` AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
-              AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL`
+              options?.delegatedOnly
+                ? sql` AND ((json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+              AND json_extract(t.payload_json, '$.lineage.parentThreadId') IS NOT NULL)
+              OR json_extract(t.payload_json, '$.delegatedFrom') IS NOT NULL)`
                 : sql``
             }
               AND json_extract(t.payload_json, '$.archivedAt') IS NULL
