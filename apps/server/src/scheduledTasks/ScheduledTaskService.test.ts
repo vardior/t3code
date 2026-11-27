@@ -838,6 +838,7 @@ it.effect("an unbound task's launch carries its name as a chosen title", () =>
     >([]);
     const launched = ThreadId.make("thread:named-task");
     const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
